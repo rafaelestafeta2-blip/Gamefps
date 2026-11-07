@@ -1,12 +1,30 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { soundEngine } from '../audio/soundEngine';
 import {
+  getRankForXp,
   getRequiredXpForWeapon,
   isWeaponUnlockedAtXp,
 } from '../progression/ranks';
-import { createProceduralTextures } from '../three/textures';
-import { buildTacticalWeaponRig } from '../three/weaponBuilder';
+import {
+  AK47_RIFLE_GITHUB_RAW_URL,
+  AK47_RIFLE_LOCAL_URL,
+  CARBINE_AR_GITHUB_RAW_URL,
+  CARBINE_AR_LOCAL_URL,
+  L49_LMG_GITHUB_RAW_URL,
+  L49_LMG_LOCAL_URL,
+  M4_FPS_PACK_GITHUB_RAW_URL,
+  M4_FPS_PACK_LOCAL_URL,
+  MARK_23_GITHUB_RAW_URL,
+  MARK_23_LOCAL_URL,
+  SMG_45_GITHUB_RAW_URL,
+  SMG_45_LOCAL_URL,
+  SNIPER_BOLT_GITHUB_RAW_URL,
+  SNIPER_BOLT_LOCAL_URL,
+  SNIPER_TACTICAL_GITHUB_RAW_URL,
+  SNIPER_TACTICAL_LOCAL_URL,
+} from '../three/weaponBuilder';
 import { WeaponId } from '../types/game';
 
 interface WeaponInspectionModalProps {
@@ -17,117 +35,366 @@ interface WeaponInspectionModalProps {
   onStartTraining: () => void;
 }
 
-const WEAPON_SPECS: Record<
-  WeaponId,
-  {
-    name: string;
-    caliber: string;
-    category: string;
-    description: string;
-    firepower: number; // 0..100
-    accuracy: number; // 0..100
-    mobility: number; // 0..100
-    handling: number; // 0..100
-    magSize: number;
-    reserve: number;
-  }
-> = {
-  P50_PISTOL: {
-    name: 'Mark 23 Tática',
-    caliber: '.45 ACP',
-    category: 'Pistola Pesada',
-    description: 'Pistola tática de alta precisão com supressor integrado e excelente poder de paragem em curtas distâncias.',
-    firepower: 65,
-    accuracy: 88,
-    mobility: 95,
-    handling: 92,
-    magSize: 12,
-    reserve: 48,
-  },
-  SMG_45: {
-    name: 'SMG .45 Sub',
-    caliber: '.45 ACP',
-    category: 'Submetralhadora',
-    description: 'Submetralhadora compacta de tiro rápido (900 RPM). Ideal para incursões CQB e combate dinâmico.',
-    firepower: 75,
-    accuracy: 78,
-    mobility: 90,
-    handling: 85,
-    magSize: 32,
-    reserve: 128,
-  },
+type WeaponCategory = 'ALL' | 'ASSALTO' | 'SMG' | 'SNIPER' | 'LMG' | 'PISTOLA';
+
+interface WeaponSpec {
+  id: WeaponId;
+  name: string;
+  caliber: string;
+  categoryTag: string;
+  category: WeaponCategory;
+  description: string;
+  firepower: number; // 0..100
+  accuracy: number; // 0..100
+  mobility: number; // 0..100
+  range: string;
+  fireRate: string;
+  magSize: number;
+  reserve: number;
+  localUrl: string;
+  githubUrl: string;
+  readyClipName?: string;
+  readyPoseTime: number;
+  targetSpan: number;
+}
+
+const WEAPON_SPECS: Record<WeaponId, WeaponSpec> = {
   M4_CARBINE: {
+    id: 'M4_CARBINE',
     name: 'M4A1 SOPMOD',
     caliber: '5.56x45mm NATO',
-    category: 'Fuzil de Assalto',
-    description: 'O padrão ouro em fuzis de assalto táticos. Versátil, equilibrado e com excelente controle de recuo.',
+    categoryTag: 'Fuzil de Assalto',
+    category: 'ASSALTO',
+    description:
+      'O padrão ouro em fuzis de assalto táticos. Versátil, equilibrado e com excelente controle de recuo.',
     firepower: 85,
     accuracy: 84,
     mobility: 78,
-    handling: 80,
+    range: '75m',
+    fireRate: '800 RPM',
     magSize: 30,
     reserve: 120,
-  },
-  CARBINE_AR: {
-    name: 'Carabina Tática',
-    caliber: '5.56x45mm NATO',
-    category: 'Carabina de Precisão',
-    description: 'Variante de cano alongado focada em engajamentos de média distância com alta retenção de velocidade balística.',
-    firepower: 88,
-    accuracy: 89,
-    mobility: 75,
-    handling: 77,
-    magSize: 30,
-    reserve: 120,
+    localUrl: M4_FPS_PACK_LOCAL_URL,
+    githubUrl: M4_FPS_PACK_GITHUB_RAW_URL,
+    readyClipName: 'Fire',
+    readyPoseTime: 0,
+    targetSpan: 0.78,
   },
   AK47_RIFLE: {
-    name: 'AK-47 Comando',
-    caliber: '7.62x39mm',
-    category: 'Fuzil de Combate',
-    description: 'Poder de fogo bruto em calibre 7.62mm. Causa dano devastador por impacto com alta penetração em blindagem.',
+    id: 'AK47_RIFLE',
+    name: 'AK-47 COMANDO',
+    caliber: '7.62x39mm Soviet',
+    categoryTag: 'Fuzil de Assalto',
+    category: 'ASSALTO',
+    description:
+      'Poder de fogo bruto em calibre 7.62mm. Causa dano devastador por impacto com alta penetração.',
     firepower: 96,
     accuracy: 72,
     mobility: 70,
-    handling: 68,
+    range: '90m',
+    fireRate: '600 RPM',
     magSize: 30,
     reserve: 120,
+    localUrl: AK47_RIFLE_LOCAL_URL,
+    githubUrl: AK47_RIFLE_GITHUB_RAW_URL,
+    readyClipName: 'RIG_UE5_Comando_AK_Idle',
+    readyPoseTime: 0,
+    targetSpan: 0.8,
   },
-  L49_LMG: {
-    name: 'LMG Pesada 100R',
+  CARBINE_AR: {
+    id: 'CARBINE_AR',
+    name: 'CARABINA TÁTICA',
     caliber: '5.56x45mm NATO',
-    category: 'Metralhadora Leve',
-    description: 'Pente tambor de 100 munições para supressão contínua de fogo em ondas inimigas.',
-    firepower: 82,
-    accuracy: 70,
-    mobility: 55,
-    handling: 60,
-    magSize: 100,
-    reserve: 300,
+    categoryTag: 'Fuzil de Assalto',
+    category: 'ASSALTO',
+    description:
+      'Variante de cano longo focada em engajamentos de média distância com alta precisão balística.',
+    firepower: 88,
+    accuracy: 89,
+    mobility: 75,
+    range: '85m',
+    fireRate: '750 RPM',
+    magSize: 30,
+    reserve: 120,
+    localUrl: CARBINE_AR_LOCAL_URL,
+    githubUrl: CARBINE_AR_GITHUB_RAW_URL,
+    readyClipName: 'allanims',
+    readyPoseTime: 0,
+    targetSpan: 0.78,
+  },
+  SMG_45: {
+    id: 'SMG_45',
+    name: 'SMG .45 SUB',
+    caliber: '.45 ACP Sub',
+    categoryTag: 'Submetralhadora',
+    category: 'SMG',
+    description:
+      'Submetralhadora compacta de tiro rápido (900 RPM). Ideal para incursões CQB e combate dinâmico.',
+    firepower: 75,
+    accuracy: 78,
+    mobility: 92,
+    range: '35m',
+    fireRate: '900 RPM',
+    magSize: 32,
+    reserve: 128,
+    localUrl: SMG_45_LOCAL_URL,
+    githubUrl: SMG_45_GITHUB_RAW_URL,
+    readyClipName: 'allanims',
+    readyPoseTime: 0,
+    targetSpan: 0.68,
   },
   SNIPER_TACTICAL: {
-    name: 'Sniper Tática S&B',
+    id: 'SNIPER_TACTICAL',
+    name: 'SNIPER TÁTICA S&B',
     caliber: '.308 Winchester',
-    category: 'Fuzil Sniper Tático',
-    description: 'Fuzil semiautomático de longo alcance equipado com luneta LPVO 1-4x para neutralização rápida de alvos distantes.',
+    categoryTag: 'Fuzil Sniper',
+    category: 'SNIPER',
+    description:
+      'Fuzil semiautomático de longo alcance equipado com luneta LPVO para neutralização rápida.',
     firepower: 98,
     accuracy: 96,
     mobility: 58,
-    handling: 62,
+    range: '130m',
+    fireRate: 'Semi-Auto',
     magSize: 10,
     reserve: 40,
+    localUrl: SNIPER_TACTICAL_LOCAL_URL,
+    githubUrl: SNIPER_TACTICAL_GITHUB_RAW_URL,
+    readyClipName: 'Scene',
+    readyPoseTime: 8.15,
+    targetSpan: 0.84,
   },
   SNIPER_BOLT: {
-    name: 'Sniper Bolt-Action',
+    id: 'SNIPER_BOLT',
+    name: 'SNIPER BOLT-ACTION',
     caliber: '.338 Lapua Magnum',
-    category: 'Fuzil de Precisão',
-    description: 'Poder letal absoluto a 150m+. Cada disparo exige ciclagens manuais precisas do ferrolho tático.',
+    categoryTag: 'Fuzil de Precisão',
+    category: 'SNIPER',
+    description:
+      'Poder letal absoluto a 150m+. Cada disparo exige ciclagens manuais precisas do ferrolho tático.',
     firepower: 100,
     accuracy: 99,
     mobility: 50,
-    handling: 55,
+    range: '150m+',
+    fireRate: 'Ferrolho',
     magSize: 5,
     reserve: 25,
+    localUrl: SNIPER_BOLT_LOCAL_URL,
+    githubUrl: SNIPER_BOLT_GITHUB_RAW_URL,
+    readyClipName: 'allanims',
+    readyPoseTime: 0,
+    targetSpan: 0.86,
   },
+  L49_LMG: {
+    id: 'L49_LMG',
+    name: 'LMG PESADA 100R',
+    caliber: '5.56x45mm NATO',
+    categoryTag: 'Metralhadora Leve',
+    category: 'LMG',
+    description:
+      'Pente tambor de 100 munições para supressão contínua de fogo em ondas inimigas.',
+    firepower: 82,
+    accuracy: 70,
+    mobility: 55,
+    range: '95m',
+    fireRate: '850 RPM',
+    magSize: 100,
+    reserve: 300,
+    localUrl: L49_LMG_LOCAL_URL,
+    githubUrl: L49_LMG_GITHUB_RAW_URL,
+    readyClipName: 'allanims',
+    readyPoseTime: 0,
+    targetSpan: 0.8,
+  },
+  P50_PISTOL: {
+    id: 'P50_PISTOL',
+    name: 'MARK 23 TÁTICA',
+    caliber: '.45 ACP Heavy',
+    categoryTag: 'Pistola Pesada',
+    category: 'PISTOLA',
+    description:
+      'Pistola tática de alta precisão com excelente poder de parada em curtas distâncias.',
+    firepower: 65,
+    accuracy: 88,
+    mobility: 95,
+    range: '25m',
+    fireRate: 'Semi-Auto',
+    magSize: 12,
+    reserve: 48,
+    localUrl: MARK_23_LOCAL_URL,
+    githubUrl: MARK_23_GITHUB_RAW_URL,
+    readyClipName: 'Shoot',
+    readyPoseTime: 0,
+    targetSpan: 0.52,
+  },
+};
+
+// Exact material and mesh/node names corresponding to hands, arms, gloves, shirts, and spare reload mags across all 8 GLBs
+const HIDDEN_ARM_MATERIAL_NAMES = new Set([
+  'arms',
+  'arms_0',
+  'hand_d',
+  'glove_d',
+  'm_gloves_black',
+  'm_shirt_blackcamo2',
+  'textura',
+]);
+
+const HIDDEN_ARM_NODE_NAMES = new Set([
+  'object_25',
+  'object_26',
+  'object_51',
+  'object_80',
+  'object_84',
+  'object_102',
+  'mag2_j_051',
+  'mag2',
+  'mag2_m4_d_0',
+  'ch22_body',
+  'ch22_body_textura_0',
+  'armmesh_arms_0',
+  'arms_arms_0',
+  'hand_mesh_hand_d_0',
+  'hand_mesh_glove_d_0',
+  'skm_comando_m_gloves_black_0',
+  'skm_comando_m_shirt_blackcamo2_0',
+]);
+
+function isArmOrExtraMesh(obj: THREE.Object3D): boolean {
+  const nodeName = (obj.name || '').toLowerCase();
+  if (HIDDEN_ARM_NODE_NAMES.has(nodeName)) return true;
+
+  const mesh = obj as THREE.Mesh;
+  if (mesh.isMesh) {
+    const geomName = (mesh.geometry?.name || '').toLowerCase();
+    if (HIDDEN_ARM_NODE_NAMES.has(geomName)) return true;
+
+    const mats = Array.isArray(mesh.material)
+      ? mesh.material
+      : mesh.material
+        ? [mesh.material]
+        : [];
+    for (const mat of mats) {
+      if (!mat) continue;
+      const matName = (mat.name || '').toLowerCase();
+      if (
+        HIDDEN_ARM_MATERIAL_NAMES.has(matName) ||
+        matName.includes('glove') ||
+        matName.includes('shirt') ||
+        matName.includes('hand') ||
+        matName === 'arms'
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Computes the exact world-space bounding box of ONLY visible weapon meshes,
+ * accounting for SkinnedMesh bone transformations.
+ */
+function computeVisibleWeaponBounds(rootObj: THREE.Object3D): THREE.Box3 {
+  rootObj.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+
+  rootObj.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.visible) return;
+    if (isArmOrExtraMesh(mesh)) {
+      mesh.visible = false;
+      return;
+    }
+
+    const posAttr = mesh.geometry?.getAttribute('position');
+    if (!posAttr) return;
+
+    const count = posAttr.count;
+    // Sample vertices (step by max 1..3 for instant calculation on mobile CPUs)
+    const step = count > 3000 ? 3 : 1;
+    for (let i = 0; i < count; i += step) {
+      mesh.getVertexPosition(i, v);
+      v.applyMatrix4(mesh.matrixWorld);
+      if (
+        Number.isFinite(v.x) &&
+        Number.isFinite(v.y) &&
+        Number.isFinite(v.z)
+      ) {
+        box.expandByPoint(v);
+      }
+    }
+  });
+
+  return box;
+}
+
+const WeaponIconSilhouette: React.FC<{
+  weaponId: WeaponId;
+  className?: string;
+}> = ({ weaponId, className = 'w-16 h-8' }) => {
+  if (weaponId === 'P50_PISTOL') {
+    return (
+      <svg viewBox="0 0 64 28" fill="none" className={className}>
+        <path
+          d="M14 7H46L48 11H30L26 23H17L20 12H14V7Z"
+          fill="currentColor"
+        />
+        <rect
+          x="28"
+          y="11"
+          width="6"
+          height="4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+      </svg>
+    );
+  }
+  if (weaponId === 'SNIPER_BOLT' || weaponId === 'SNIPER_TACTICAL') {
+    return (
+      <svg viewBox="0 0 88 28" fill="none" className={className}>
+        <path
+          d="M4 13L18 11V17L4 19V13ZM18 11H58V14H84V12.5H87V15.5H58V17H38L35 23H29L31 17H22L19 22H15L18 11Z"
+          fill="currentColor"
+        />
+        <rect
+          x="28"
+          y="6"
+          width="22"
+          height="3.5"
+          rx="1"
+          fill="currentColor"
+        />
+        <line
+          x1="33"
+          y1="9.5"
+          x2="33"
+          y2="11"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <line
+          x1="45"
+          y1="9.5"
+          x2="45"
+          y2="11"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 84 28" fill="none" className={className}>
+      <path
+        d="M6 11L18 10V16L6 18V11ZM18 10H56V12H76V11H80V14.5H56V16H42L39 24H33L35 16H25L22 22H17L20 16H18V10Z"
+        fill="currentColor"
+      />
+      <rect x="30" y="6.5" width="12" height="3" rx="1" fill="currentColor" />
+    </svg>
+  );
 };
 
 export const WeaponInspectionModal: React.FC<WeaponInspectionModalProps> = ({
@@ -138,284 +405,629 @@ export const WeaponInspectionModal: React.FC<WeaponInspectionModalProps> = ({
   onStartTraining,
 }) => {
   const [selectedId, setSelectedId] = useState<WeaponId>(activeWeapon);
-  const canvasRef = useRef<HTMLDivElement | null>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
+  const [activeCategory, setActiveCategory] = useState<WeaponCategory>('ALL');
+  const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
+
+  const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const weaponRigRef = useRef<ReturnType<typeof buildTacticalWeaponRig> | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const turntablePivotRef = useRef<THREE.Group | null>(null);
+  const loaderRef = useRef<GLTFLoader | null>(null);
 
-  const weaponInfo = WEAPON_SPECS[selectedId];
+  const isDraggingRef = useRef(false);
+  const lastXRef = useRef(0);
+  const lastYRef = useRef(0);
+  // Start at a side profile angle (Math.PI * 0.5) so the entire weapon profile is framed horizontally
+  const targetRotYRef = useRef(Math.PI * 0.42);
+  const currentRotYRef = useRef(Math.PI * 0.42);
+  const targetRotXRef = useRef(0.06);
+  const currentRotXRef = useRef(0.06);
+  const zoomScaleRef = useRef(1.0);
+
+  const currentRank = getRankForXp(playerXp);
+  const spec = WEAPON_SPECS[selectedId];
   const isUnlocked = isWeaponUnlockedAtXp(selectedId, playerXp);
-  const req = getRequiredXpForWeapon(selectedId);
+  const reqRank = getRequiredXpForWeapon(selectedId);
+  const isEquipped = activeWeapon === selectedId;
 
-  // Initialize live 3D Three.js weapon viewer canvas
+  // Filter weapon list by category
+  const weaponList = (Object.keys(WEAPON_SPECS) as WeaponId[]).filter((id) => {
+    if (activeCategory === 'ALL') return true;
+    return WEAPON_SPECS[id].category === activeCategory;
+  });
+
+  // 1. Initialize persistent WebGL studio inside the dedicated right/center showcase stage
   useEffect(() => {
-    const container = canvasRef.current;
+    const container = stageContainerRef.current;
     if (!container) return;
 
-    const width = container.clientWidth || 500;
-    const height = container.clientHeight || 350;
+    const width = Math.max(1, container.clientWidth);
+    const height = Math.max(1, container.clientHeight);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
     renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.shadowMap.enabled = true;
+    renderer.toneMappingExposure = 1.25;
+
     container.replaceChildren(renderer.domElement);
     rendererRef.current = renderer;
 
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 50);
-    camera.position.set(0, 0.15, 2.2);
+    // High-contrast Gunsmith Studio Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.85);
+    scene.add(ambientLight);
 
-    // Studio Lighting
-    const ambient = new THREE.AmbientLight(0xffffff, 1.4);
-    scene.add(ambient);
+    const keyLight = new THREE.DirectionalLight(0xfffbeb, 3.2);
+    keyLight.position.set(3, 5, 4);
+    scene.add(keyLight);
 
-    const dirLight = new THREE.DirectionalLight(0xfffbeb, 2.5);
-    dirLight.position.set(3, 5, 4);
-    dirLight.castShadow = true;
-    scene.add(dirLight);
-
-    const rimLight = new THREE.DirectionalLight(0x38bdf8, 1.2);
-    rimLight.position.set(-3, 2, -3);
+    const rimLight = new THREE.DirectionalLight(0x38bdf8, 1.8);
+    rimLight.position.set(-4, 3, -3);
     scene.add(rimLight);
 
-    const textures = createProceduralTextures(renderer);
-    const rig = buildTacticalWeaponRig(textures, false);
-    rig.root.position.set(0, -0.08, 0);
-    rig.root.rotation.set(0.1, Math.PI * 0.15, 0);
-    scene.add(rig.root);
-    weaponRigRef.current = rig;
+    const fillLight = new THREE.DirectionalLight(0xf59e0b, 1.1);
+    fillLight.position.set(0, -3, 3);
+    scene.add(fillLight);
 
-    rig.setActiveWeapon(selectedId);
-    rig.ironSightsGroup.visible = true;
-    rig.holoSightGroup.visible = false;
-    rig.lpvoScopeGroup.visible = false;
+    const camera = new THREE.PerspectiveCamera(32, width / height, 0.05, 25);
+    camera.position.set(0, 0.02, 1.12);
+    camera.lookAt(0, 0, 0);
+    cameraRef.current = camera;
+
+    const turntablePivot = new THREE.Group();
+    turntablePivot.position.set(0, 0.02, 0);
+    scene.add(turntablePivot);
+    turntablePivotRef.current = turntablePivot;
+
+    // Configure GLTFLoader with KHR_materials_pbrSpecularGlossiness support
+    const gltfLoader = new GLTFLoader();
+    gltfLoader.register((parser) => ({
+      name: 'KHR_materials_pbrSpecularGlossiness',
+      extendMaterialParams: async (
+        materialIndex: number,
+        materialParams: Record<string, unknown>
+      ) => {
+        const matDef = parser.json.materials?.[materialIndex];
+        const sg = matDef?.extensions?.KHR_materials_pbrSpecularGlossiness;
+        if (!sg) return;
+        materialParams.color = new THREE.Color(1, 1, 1);
+        materialParams.roughness = matDef.name === 'M4_D' ? 0.34 : 0.55;
+        materialParams.metalness = matDef.name === 'M4_D' ? 0.75 : 0.08;
+        if (sg.diffuseTexture) {
+          await parser.assignTexture(
+            materialParams,
+            'map',
+            sg.diffuseTexture,
+            THREE.SRGBColorSpace
+          );
+        }
+      },
+    }));
+    loaderRef.current = gltfLoader;
 
     let animId = 0;
     const clock = new THREE.Clock();
 
     const animate = () => {
       animId = requestAnimationFrame(animate);
-      const dt = clock.getDelta();
-      if (rig.root) {
-        rig.root.rotation.y += dt * 0.45; // Smooth cinematic weapon spin
+      const dt = Math.min(clock.getDelta(), 0.05);
+
+      if (!isDraggingRef.current) {
+        targetRotYRef.current += dt * 0.38;
       }
+
+      currentRotYRef.current = THREE.MathUtils.damp(
+        currentRotYRef.current,
+        targetRotYRef.current,
+        14,
+        dt
+      );
+      currentRotXRef.current = THREE.MathUtils.damp(
+        currentRotXRef.current,
+        targetRotXRef.current,
+        14,
+        dt
+      );
+
+      if (turntablePivotRef.current) {
+        turntablePivotRef.current.rotation.set(
+          currentRotXRef.current,
+          currentRotYRef.current,
+          0
+        );
+        turntablePivotRef.current.scale.setScalar(zoomScaleRef.current);
+      }
+
       renderer.render(scene, camera);
     };
+
     animate();
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (!stageContainerRef.current || !rendererRef.current || !cameraRef.current)
+        return;
+      const w = Math.max(1, stageContainerRef.current.clientWidth);
+      const h = Math.max(1, stageContainerRef.current.clientHeight);
+      cameraRef.current.aspect = w / h;
+      cameraRef.current.updateProjectionMatrix();
+      rendererRef.current.setSize(w, h);
+    });
+    resizeObserver.observe(container);
 
     return () => {
       cancelAnimationFrame(animId);
+      resizeObserver.disconnect();
       renderer.dispose();
+    };
+  }, []);
+
+  // 2. Load, strip hands/arms, evaluate ready pose, and auto-center the selected weapon
+  useEffect(() => {
+    const loader = loaderRef.current;
+    const turntablePivot = turntablePivotRef.current;
+    if (!loader || !turntablePivot) return;
+
+    let cancelled = false;
+    setIsLoadingModel(true);
+
+    // Clear previous weapon from turntable
+    while (turntablePivot.children.length > 0) {
+      const prev = turntablePivot.children[0];
+      turntablePivot.remove(prev);
+    }
+
+    const wSpec = WEAPON_SPECS[selectedId];
+
+    const onModelLoaded = (gltf: {
+      scene: THREE.Group;
+      animations: THREE.AnimationClip[];
+    }) => {
+      if (cancelled) return;
+
+      const modelScene = gltf.scene;
+
+      // 1) Strip all hand, arm, glove, shirt, and spare reload magazine meshes
+      modelScene.traverse((child) => {
+        child.frustumCulled = false;
+        if (isArmOrExtraMesh(child)) {
+          child.visible = false;
+          return;
+        }
+        const m = child as THREE.Mesh;
+        if (m.isMesh) {
+          m.castShadow = false;
+          m.receiveShadow = true;
+          const fixMat = (mat: THREE.Material) => {
+            const std = mat as THREE.MeshStandardMaterial;
+            if (std.map) {
+              std.map.colorSpace = THREE.SRGBColorSpace;
+              std.map.needsUpdate = true;
+            }
+            if (std.color) {
+              std.color.setHex(0xffffff);
+            }
+            std.needsUpdate = true;
+          };
+          if (Array.isArray(m.material)) {
+            m.material.forEach(fixMat);
+          } else if (m.material) {
+            fixMat(m.material);
+          }
+        }
+      });
+
+      // 2) Evaluate the ready/assembled animation pose so magazine, bolt, and scope sit in place
+      if (gltf.animations && gltf.animations.length > 0) {
+        const mixer = new THREE.AnimationMixer(modelScene);
+        const targetClip =
+          (wSpec.readyClipName &&
+            gltf.animations.find((c) => c.name === wSpec.readyClipName)) ||
+          gltf.animations[0];
+
+        if (targetClip) {
+          // Shift tracks if clip has leading time offset
+          let minT = Infinity;
+          for (let i = 0; i < targetClip.tracks.length; i++) {
+            const tArr = targetClip.tracks[i].times;
+            if (tArr.length > 0 && tArr[0] < minT) {
+              minT = tArr[0];
+            }
+          }
+          const evalTime =
+            wSpec.readyPoseTime > 0
+              ? wSpec.readyPoseTime
+              : Number.isFinite(minT) && minT > 0.005
+                ? minT + 0.01
+                : 0.01;
+
+          const action = mixer.clipAction(targetClip);
+          action.weight = 1.0;
+          action.play();
+          mixer.setTime(evalTime);
+        }
+      }
+
+      // Ensure all hand/arm meshes remain hidden after animation evaluation
+      modelScene.traverse((child) => {
+        if (isArmOrExtraMesh(child)) {
+          child.visible = false;
+        }
+      });
+
+      // 3) Compute exact world-space bounding box of ONLY visible weapon parts
+      const centeringGroup = new THREE.Group();
+      centeringGroup.add(modelScene);
+      modelScene.updateMatrixWorld(true);
+
+      const box = computeVisibleWeaponBounds(modelScene);
+      if (!box.isEmpty()) {
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+        box.getCenter(center);
+        box.getSize(size);
+
+        const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+        const normScale = wSpec.targetSpan / maxDim;
+
+        // Translate modelScene so its geometric center sits at (0,0,0) of centeringGroup
+        modelScene.position.set(
+          -center.x * normScale,
+          -center.y * normScale,
+          -center.z * normScale
+        );
+        modelScene.scale.setScalar(normScale);
+      }
+
+      // Set side-profile angle so weapon points cleanly across the viewing stage
+      targetRotYRef.current = Math.PI * 0.45;
+      currentRotYRef.current = Math.PI * 0.45;
+      targetRotXRef.current = 0.05;
+      currentRotXRef.current = 0.05;
+      zoomScaleRef.current = 1.0;
+
+      turntablePivot.add(centeringGroup);
+      setIsLoadingModel(false);
+    };
+
+    loader.load(wSpec.localUrl, onModelLoaded, undefined, () => {
+      loader.load(wSpec.githubUrl, onModelLoaded, undefined, () => {
+        if (!cancelled) setIsLoadingModel(false);
+      });
+    });
+
+    return () => {
+      cancelled = true;
     };
   }, [selectedId]);
 
+  // Touch and Mouse 360° Drag Inspection Handlers
+  const handlePointerDown = (e: React.PointerEvent) => {
+    isDraggingRef.current = true;
+    lastXRef.current = e.clientX;
+    lastYRef.current = e.clientY;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDraggingRef.current) return;
+    const dx = e.clientX - lastXRef.current;
+    const dy = e.clientY - lastYRef.current;
+    lastXRef.current = e.clientX;
+    lastYRef.current = e.clientY;
+    targetRotYRef.current += dx * 0.01;
+    targetRotXRef.current = THREE.MathUtils.clamp(
+      targetRotXRef.current + dy * 0.006,
+      -0.45,
+      0.45
+    );
+  };
+
+  const handlePointerUp = () => {
+    isDraggingRef.current = false;
+  };
+
+  const handleZoomStep = (delta: number) => {
+    soundEngine.playMenuSelect();
+    zoomScaleRef.current = THREE.MathUtils.clamp(
+      zoomScaleRef.current + delta,
+      0.75,
+      1.65
+    );
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 sm:p-8 select-none font-sans text-white pointer-events-auto">
-      <div className="max-w-6xl w-full h-[85vh] bg-[#0c0e14] border-2 border-amber-500/50 rounded-2xl shadow-[0_0_50px_rgba(245,158,11,0.3)] flex flex-col overflow-hidden">
-        
-        {/* TOP HEADER BAR (COD MW STYLE) */}
-        <header className="px-6 py-4 bg-[#141820] border-b border-white/15 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-4">
-            <span className="text-xs font-mono font-bold tracking-[0.25em] text-amber-400 bg-amber-500/20 px-3 py-1 rounded border border-amber-500/40 uppercase">
-              CUSTOM LOADOUT 1 · INSPEÇÃO 3D
-            </span>
-            <h2 className="font-display font-black text-xl sm:text-2xl uppercase tracking-wider text-white">
-              PRIMARY WEAPON SHOWCASE
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center text-base font-bold cursor-pointer transition-colors"
-          >
-            ✕
-          </button>
-        </header>
+    <div className="fixed inset-0 z-50 bg-[#07090d] select-none text-white font-sans flex flex-col justify-between overflow-hidden pointer-events-auto">
+      {/* =================================================================== */}
+      {/* 1. TOP NAV HEADER BAR                                              */}
+      {/* =================================================================== */}
+      <header className="relative z-30 w-full px-3 sm:px-6 py-2 bg-[#0b0e14]/95 border-b border-white/15 flex items-center justify-between gap-2 shrink-0">
+        {/* Left: Back to Lobby Button */}
+        <button
+          type="button"
+          onClick={() => {
+            soundEngine.playMenuSelect();
+            onClose();
+          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-[11px] font-mono font-bold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
+        >
+          <span>←</span>
+          <span>VOLTAR AO LOBBY</span>
+        </button>
 
-        {/* MAIN BODY GRID */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
-          
-          {/* LEFT COLUMN: WEAPON LIST */}
-          <div className="lg:col-span-4 bg-[#090b0e] border-r border-white/10 p-4 overflow-y-auto space-y-2">
-            <div className="text-[11px] font-mono font-bold text-slate-400 tracking-wider uppercase mb-2 px-1">
-              SELECIONAR ARMA DO ARSENAL ({Object.keys(WEAPON_SPECS).length})
-            </div>
-
-            {(Object.keys(WEAPON_SPECS) as WeaponId[]).map((wId) => {
-              const spec = WEAPON_SPECS[wId];
-              const unlocked = isWeaponUnlockedAtXp(wId, playerXp);
-              const isSelected = selectedId === wId;
-              const isEquipped = activeWeapon === wId;
-              const reqRank = getRequiredXpForWeapon(wId);
-
-              return (
-                <div
-                  key={wId}
-                  onClick={() => {
-                    soundEngine.playMenuSelect();
-                    setSelectedId(wId);
-                  }}
-                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
-                    isSelected
-                      ? 'bg-amber-500/25 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)]'
-                      : unlocked
-                        ? 'bg-black/60 border-white/15 hover:border-white/40 hover:bg-white/10'
-                        : 'bg-black/90 border-slate-800 opacity-60'
-                  }`}
-                >
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-amber-400 font-bold">{spec.caliber}</span>
-                      {isEquipped && (
-                        <span className="text-[8px] font-mono font-black bg-amber-400 text-black px-1.5 py-0.2 rounded">
-                          EQUIPADA
-                        </span>
-                      )}
-                    </div>
-                    <span className="font-display font-bold text-sm sm:text-base text-white tracking-wide mt-0.5">
-                      {spec.name}
-                    </span>
-                    <span className="text-[11px] font-mono text-slate-400">{spec.category}</span>
-                  </div>
-
-                  <div className="text-right font-mono text-xs">
-                    {unlocked ? (
-                      <span className="text-emerald-400 font-bold">DESBLOQUEADA ✓</span>
-                    ) : (
-                      <span className="text-amber-400 font-bold">🔒 NÍV {reqRank.requiredLevel}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* RIGHT / CENTER COLUMN: 3D VIEWER & STATS (COD MW ATTACHED IMAGE STYLE) */}
-          <div className="lg:col-span-8 bg-[#0e1117] p-6 flex flex-col justify-between overflow-y-auto">
-            
-            {/* Top Details & Title */}
-            <div>
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <div className="text-xs font-mono text-amber-400 font-bold tracking-widest uppercase">
-                    {weaponInfo.category} · {weaponInfo.caliber}
-                  </div>
-                  <h1 className="font-display font-black text-3xl sm:text-4xl text-white tracking-wider mt-1">
-                    {weaponInfo.name.toUpperCase()}
-                  </h1>
-                  <p className="font-mono text-xs text-slate-300 max-w-xl mt-2 leading-relaxed">
-                    {weaponInfo.description}
-                  </p>
-                </div>
-
-                {/* Mastery Badge */}
-                <div className="flex items-center gap-2 bg-black/60 border border-amber-500/40 rounded-xl px-4 py-2.5">
-                  <span className="text-2xl">🔥</span>
-                  <div className="flex flex-col font-mono">
-                    <span className="text-[10px] text-slate-400 uppercase tracking-wider">MASTERY ELIMS</span>
-                    <span className="text-base font-bold text-amber-400">4,821 ELIMS</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* LIVE 3D GLB WEAPON VIEWER CANVAS */}
-              <div className="relative w-full h-56 sm:h-68 bg-gradient-to-b from-black/80 via-black/40 to-black/90 border border-white/15 rounded-2xl overflow-hidden shadow-inner flex items-center justify-center">
-                <div ref={canvasRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-                <div className="absolute bottom-3 left-4 font-mono text-[10px] text-amber-400 bg-black/70 px-2.5 py-1 rounded border border-white/10 pointer-events-none">
-                  🔍 INSPEÇÃO 3D EM TEMPO REAL (ROTAÇÃO CINEMATOGRÁFICA)
-                </div>
-                {!isUnlocked && (
-                  <div className="absolute top-3 right-3 bg-black/80 border border-amber-500/40 rounded-lg px-2.5 py-1 font-mono text-[10px] text-amber-300 pointer-events-none">
-                    PATENTE RECOMENDADA: NÍV {req.requiredLevel} ({req.rankTitle})
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* DETAILED WEAPON STATS BARS */}
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-              <div className="space-y-2.5 font-mono text-xs">
-                <div className="text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1">
-                  ESPECIFICAÇÕES TÁTICAS DE COMBATE
-                </div>
-                {[
-                  { label: 'FIREPOWER (DANHO)', val: weaponInfo.firepower, color: 'bg-amber-500' },
-                  { label: 'ACCURACY (PRECISÃO)', val: weaponInfo.accuracy, color: 'bg-emerald-500' },
-                  { label: 'MOBILITY (MOBILIDADE)', val: weaponInfo.mobility, color: 'bg-sky-500' },
-                  { label: 'HANDLING (MANUSEIO)', val: weaponInfo.handling, color: 'bg-purple-500' },
-                ].map((stat) => (
-                  <div key={stat.label} className="flex items-center gap-3">
-                    <span className="w-40 text-slate-400 text-[11px] shrink-0">{stat.label}</span>
-                    <div className="flex-1 h-2 bg-slate-900 rounded-full overflow-hidden border border-white/10">
-                      <div className={`h-full ${stat.color} transition-all duration-500`} style={{ width: `${stat.val}%` }} />
-                    </div>
-                    <span className="w-10 text-right font-bold text-white">{stat.val}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Ammo & Stats Summary Boxes */}
-              <div className="grid grid-cols-2 gap-3 font-mono">
-                <div className="bg-black/60 border border-white/15 rounded-xl p-3.5 flex flex-col justify-center">
-                  <span className="text-[10px] text-slate-400 uppercase">CAPACIDADE DO PENTE</span>
-                  <span className="text-2xl font-black text-white mt-0.5">{weaponInfo.magSize} <span className="text-xs text-amber-400 font-normal">ROUNDS</span></span>
-                </div>
-                <div className="bg-black/60 border border-white/15 rounded-xl p-3.5 flex flex-col justify-center">
-                  <span className="text-[10px] text-slate-400 uppercase">MUNIÇÃO DE RESERVA</span>
-                  <span className="text-2xl font-black text-white mt-0.5">{weaponInfo.reserve} <span className="text-xs text-amber-400 font-normal">ROUNDS</span></span>
-                </div>
-              </div>
-            </div>
-
-            {/* ACTION FOOTER BUTTONS */}
-            <div className="mt-6 pt-4 border-t border-white/15 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
-                <span>STATUS:</span>
-                <span className="text-emerald-400 font-bold">
-                  PRONTA PARA COMBATE &amp; TESTE
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    soundEngine.playMenuSelect();
-                    onSelectWeapon(selectedId);
-                  }}
-                  className={`px-6 py-3 rounded-xl font-display font-black text-sm uppercase tracking-widest transition-all cursor-pointer ${
-                    activeWeapon === selectedId
-                      ? 'bg-emerald-600 text-white shadow-[0_0_20px_rgba(16,185,129,0.5)]'
-                      : 'bg-amber-500 hover:bg-amber-400 text-black shadow-[0_0_20px_rgba(245,158,11,0.5)]'
-                  }`}
-                >
-                  {activeWeapon === selectedId ? 'ARMA EQUIPADA ✓' : 'EQUIPAR ARMA'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    soundEngine.playMenuSelect();
-                    onSelectWeapon(selectedId);
-                    onClose();
-                    onStartTraining();
-                  }}
-                  className="px-6 py-3 rounded-xl font-display font-black text-sm uppercase tracking-widest border bg-white/10 hover:bg-white/20 border-white/30 text-white transition-all cursor-pointer"
-                >
-                  ESTANDE DE TIRO [TESTAR]
-                </button>
-              </div>
-            </div>
-
-          </div>
-
+        {/* Center Category Filter Tabs */}
+        <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar">
+          {[
+            { id: 'ALL', label: 'TODAS (8)' },
+            { id: 'ASSALTO', label: 'ASSALTO' },
+            { id: 'SMG', label: 'SMG' },
+            { id: 'SNIPER', label: 'SNIPER' },
+            { id: 'LMG', label: 'LMG' },
+            { id: 'PISTOLA', label: 'PISTOLA' },
+          ].map((cat) => {
+            const isSelected = activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => {
+                  soundEngine.playMenuSelect();
+                  setActiveCategory(cat.id as WeaponCategory);
+                }}
+                className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-mono font-bold tracking-wider transition-colors cursor-pointer shrink-0 ${
+                  isSelected
+                    ? 'bg-amber-500 text-slate-950 font-black shadow-[0_0_12px_rgba(245,158,11,0.5)]'
+                    : 'bg-black/50 text-slate-400 hover:text-slate-200 border border-white/10'
+                }`}
+              >
+                {cat.label}
+              </button>
+            );
+          })}
         </div>
 
+        {/* Right: Player Warface Rank Badge */}
+        <div className="hidden sm:flex items-center gap-2 bg-black/60 border border-amber-500/40 rounded-xl px-2.5 py-1 shrink-0">
+          <div
+            className="w-5 h-5 rounded border flex items-center justify-center font-black text-[10px] shadow"
+            style={{
+              borderColor: currentRank.badgeColor,
+              color: currentRank.badgeColor,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+            }}
+          >
+            {currentRank.badge}
+          </div>
+          <span className="text-[10px] font-mono font-bold text-amber-300">
+            NÍV. {currentRank.level} · {currentRank.title.toUpperCase()}
+          </span>
+        </div>
+      </header>
+
+      {/* =================================================================== */}
+      {/* 2. SPLIT WORKSPACE: LEFT SPECS PANEL + RIGHT 3D VIEWING STAGE       */}
+      {/* =================================================================== */}
+      <div className="relative flex-1 w-full flex flex-row items-stretch overflow-hidden min-h-0">
+        {/* LEFT COLUMN: Dedicated Tactical Info & Specs Panel (Never overlaps 3D weapon!) */}
+        <aside className="relative z-20 w-64 sm:w-76 md:w-84 shrink-0 px-4 py-3 bg-[#090c12]/90 border-r border-white/10 flex flex-col justify-between overflow-y-auto">
+          <div>
+            <div className="text-[10px] font-mono font-bold text-amber-400 tracking-widest uppercase">
+              {spec.categoryTag} · {spec.caliber}
+            </div>
+            <h1 className="font-display font-black text-xl sm:text-2xl text-white tracking-wider mt-0.5 leading-tight">
+              {spec.name}
+            </h1>
+            <p className="font-mono text-[10px] text-slate-300 mt-1 leading-snug opacity-90 line-clamp-2">
+              {spec.description}
+            </p>
+          </div>
+
+          {/* Tactical Stats Box */}
+          <div className="bg-black/60 border border-white/15 rounded-xl p-2.5 my-1.5">
+            <div className="text-[9px] font-mono font-bold text-amber-400 tracking-wider uppercase mb-1.5">
+              ESPECIFICAÇÕES TÁTICAS
+            </div>
+            <div className="space-y-1.5 font-mono text-xs">
+              {[
+                { label: 'DANO', val: spec.firepower, color: 'bg-amber-500' },
+                { label: 'PRECISÃO', val: spec.accuracy, color: 'bg-emerald-500' },
+                { label: 'MOBILIDADE', val: spec.mobility, color: 'bg-sky-500' },
+              ].map((stat) => (
+                <div key={stat.label} className="flex items-center gap-2">
+                  <span className="w-20 text-[9px] text-slate-400 shrink-0">
+                    {stat.label}
+                  </span>
+                  <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden border border-white/10">
+                    <div
+                      className={`h-full ${stat.color}`}
+                      style={{ width: `${stat.val}%` }}
+                    />
+                  </div>
+                  <span className="w-7 text-right text-[10px] font-bold text-white">
+                    {stat.val}
+                  </span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between text-[10px] text-slate-300 pt-1.5 mt-1 border-t border-white/10">
+                <span>
+                  ALCANCE: <b className="text-white">{spec.range}</b>
+                </span>
+                <span>
+                  CADÊNCIA: <b className="text-white">{spec.fireRate}</b>
+                </span>
+                <span>
+                  PENTE: <b className="text-amber-300">{spec.magSize}R</b>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Unlock status banner if locked */}
+          {!isUnlocked && (
+            <div className="text-[10px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1">
+              🔒 Requer Nível {reqRank.requiredLevel} ({reqRank.rankTitle})
+            </div>
+          )}
+        </aside>
+
+        {/* RIGHT STAGE: Dedicated, Unobstructed 3D Weapon Showcase Viewport */}
+        <div
+          className="relative flex-1 h-full overflow-hidden cursor-grab active:cursor-grabbing bg-[radial-gradient(circle_at_center,rgba(30,41,59,0.45)_0%,rgba(7,9,13,0.98)_75%)]"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+        >
+          {/* Subtle Studio Showcase Frame & Reticle Backdrop */}
+          <div className="absolute inset-4 border border-white/10 rounded-2xl pointer-events-none flex items-center justify-center">
+            <div className="w-44 h-44 sm:w-56 sm:h-56 rounded-full border border-amber-500/15 bg-amber-500/[0.02]" />
+          </div>
+
+          {/* Dedicated 3D WebGL Canvas */}
+          <div ref={stageContainerRef} className="absolute inset-0 w-full h-full z-10" />
+
+          {/* Loading Indicator */}
+          {isLoadingModel && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+              <div className="px-3 py-1.5 rounded-lg bg-black/80 border border-amber-500/40 font-mono text-xs text-amber-300">
+                CARREGANDO MODELO 3D...
+              </div>
+            </div>
+          )}
+
+          {/* Top Bar inside Stage: 360° Hint + Zoom Controls */}
+          <div className="absolute top-3 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
+            <div className="bg-black/70 border border-amber-500/30 rounded-lg px-2.5 py-1 text-[10px] font-mono font-bold text-amber-400 uppercase tracking-wider">
+              ESTÚDIO DE INSPEÇÃO 3D · SOMENTE ARMA
+            </div>
+
+            <div className="flex items-center gap-1.5 pointer-events-auto">
+              <button
+                type="button"
+                onClick={() => handleZoomStep(-0.15)}
+                className="px-2.5 py-1 rounded-lg bg-black/75 hover:bg-white/15 border border-white/20 font-mono text-xs font-bold text-white cursor-pointer"
+                title="Diminuir Zoom"
+              >
+                − ZOOM
+              </button>
+              <button
+                type="button"
+                onClick={() => handleZoomStep(0.15)}
+                className="px-2.5 py-1 rounded-lg bg-black/75 hover:bg-white/15 border border-white/20 font-mono text-xs font-bold text-amber-300 cursor-pointer"
+                title="Aumentar Zoom"
+              >
+                + ZOOM
+              </button>
+              <div className="hidden md:flex bg-black/65 border border-white/15 rounded-lg px-2.5 py-1 items-center gap-1.5 font-mono text-[10px] text-slate-300">
+                <span>ARRASTE PARA GIRAR 360°</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Bar inside Stage: Action Buttons tucked cleanly at bottom-right */}
+          <div className="absolute bottom-3 right-4 z-20 pointer-events-auto flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playMenuSelect();
+                onSelectWeapon(selectedId);
+              }}
+              className={`px-5 py-2 rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-widest transition-all cursor-pointer ${
+                isEquipped
+                  ? 'bg-emerald-600 text-white shadow-[0_0_16px_rgba(16,185,129,0.45)]'
+                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-[0_0_16px_rgba(245,158,11,0.45)] active:scale-95'
+              }`}
+            >
+              {isEquipped ? 'EQUIPADA ✓' : 'EQUIPAR ARMA'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playMenuSelect();
+                onSelectWeapon(selectedId);
+                onClose();
+                onStartTraining();
+              }}
+              className="px-4 py-2 rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-widest bg-black/80 hover:bg-white/20 border border-white/30 text-white transition-all cursor-pointer active:scale-95 shadow-lg"
+            >
+              TESTAR NO ESTANDE
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* =================================================================== */}
+      {/* 3. BOTTOM HORIZONTAL WEAPON SELECTOR CAROUSEL                       */}
+      {/* =================================================================== */}
+      <footer className="relative z-30 w-full px-3 sm:px-6 py-2 bg-[#0a0d12]/95 border-t border-white/15 shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-2.5 min-w-max">
+          {weaponList.map((wId) => {
+            const wSpec = WEAPON_SPECS[wId];
+            const isSelected = selectedId === wId;
+            const isEq = activeWeapon === wId;
+            const unlocked = isWeaponUnlockedAtXp(wId, playerXp);
+            const req = getRequiredXpForWeapon(wId);
+
+            return (
+              <button
+                key={wId}
+                type="button"
+                onClick={() => {
+                  soundEngine.playMenuSelect();
+                  setSelectedId(wId);
+                }}
+                className={`relative w-42 sm:w-46 h-16 rounded-xl border p-2 flex flex-col justify-between transition-all cursor-pointer text-left ${
+                  isSelected
+                    ? 'bg-gradient-to-t from-amber-500/25 to-black/80 border-2 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
+                    : unlocked
+                      ? 'bg-black/60 border-white/20 hover:border-white/40 hover:bg-white/10'
+                      : 'bg-black/80 border-slate-800 opacity-75'
+                }`}
+              >
+                {/* Header Row */}
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-mono text-amber-400 font-bold truncate">
+                    {wSpec.caliber}
+                  </span>
+                  {isEq ? (
+                    <span className="text-[8px] font-mono font-black bg-emerald-500 text-slate-950 px-1.5 py-0.2 rounded">
+                      EQUIPADA
+                    </span>
+                  ) : !unlocked ? (
+                    <span className="text-[8px] font-mono font-bold text-amber-400">
+                      🔒 NÍV {req.requiredLevel}
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Center SVG Silhouette & Name */}
+                <div className="flex items-center gap-2">
+                  <WeaponIconSilhouette
+                    weaponId={wId}
+                    className="w-11 h-5 text-white/90 shrink-0"
+                  />
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-display font-black text-xs text-white truncate leading-tight">
+                      {wSpec.name}
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-400 truncate">
+                      {wSpec.categoryTag}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </footer>
     </div>
   );
 };

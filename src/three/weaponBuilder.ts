@@ -87,6 +87,7 @@ export interface TacticalWeaponRig {
   ejectionPortWorldPos: THREE.Object3D;
   muzzleWorldPos: THREE.Object3D;
   laserOriginWorldPos: THREE.Object3D;
+  armsRigContainer: THREE.Group;
 }
 
 const _ikShoulderWorld = new THREE.Vector3();
@@ -1748,6 +1749,7 @@ export function buildTacticalWeaponRig(
     ejectionPortWorldPos,
     muzzleWorldPos,
     laserOriginWorldPos,
+    armsRigContainer,
   };
 }
 
