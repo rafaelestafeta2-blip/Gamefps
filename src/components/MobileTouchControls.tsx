@@ -19,20 +19,74 @@ interface MobileTouchControlsProps {
   onCycleZoom: () => void;
 }
 
+interface CrouchProneButtonProps {
+  stance: HudState['stance'];
+  onCrouchOrSlide: () => void;
+}
+
+const CrouchProneButton: React.FC<CrouchProneButtonProps> = ({
+  stance,
+  onCrouchOrSlide,
+}) => {
+  const isProne = stance === 'PRONE';
+  const isCrouchOrSlide = stance === 'CROUCH' || stance === 'SLIDE';
+
+  return (
+    <button
+      type="button"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onCrouchOrSlide();
+      }}
+      aria-label="Agachar e Deitar no Chão"
+      title="Toque para agachar e deitar no chão (Posição Prone)"
+      className={`fixed bottom-5 right-5 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-10 active:scale-90 transition-transform ${
+        isProne
+          ? 'bg-amber-500 border-amber-300 text-black shadow-[0_0_18px_rgba(245,158,11,0.8)] font-bold'
+          : isCrouchOrSlide
+            ? 'bg-white/35 border-amber-300 text-amber-300'
+            : 'bg-black/45 border-white/35 text-white/95'
+      }`}
+    >
+      {isProne ? (
+        // Prone Soldier Silhouette (Lying flat on stomach)
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+          <circle cx="5" cy="14" r="2.2" fill="currentColor" />
+          <path
+            d="M3 17.5L8 16.5L14 16.5L21 16.5M10 16.5L7 19.5"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        // Crouching Soldier Silhouette
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <circle cx="13.5" cy="6" r="2.2" fill="currentColor" />
+          <path
+            d="M7 11.5L12 10L15 13.5L10.5 15.5L14.5 19.5M10.5 15.5L7.5 19.5"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+    </button>
+  );
+};
+
 const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
   hud,
   onMove,
   onLookDelta,
   onFireHeld,
   onToggleAds,
-  onToggleWeaponSlot,
   onReload,
   onBoltRack,
-  onMagCheck,
-  onInspectWeapon,
   onJump,
   onCrouchOrSlide,
-  onToggleLean,
   onHoldBreath,
   onCycleZoom,
 }) => {
@@ -46,11 +100,11 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
   const [isSprinting, setIsSprinting] = useState(false);
   const [joyActive, setJoyActive] = useState(false);
 
-  // Right Touch-Look Pad State
+  // Full-Screen Touch-Look Camera State (Right thumb / Free screen area)
   const lookPointerIdRef = useRef<number | null>(null);
   const lookLastPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Right Fire-and-Drag Button State
+  // Right Fire-and-Aim Button State
   const firePointerIdRef = useRef<number | null>(null);
   const fireLastPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [firePressed, setFirePressed] = useState(false);
@@ -83,27 +137,31 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
     setKnobOffset({ x: kx, y: ky });
 
     const normX = kx / maxRadius;
-    const normY = -ky / maxRadius; // Up on screen is +Forward
+    const normY = -ky / maxRadius;
     const sprintActive = normY > 0.78;
     setIsSprinting(sprintActive);
     callbacksRef.current.onMove(normX, normY, sprintActive);
   };
 
-  // Global window pointer tracking so dragging outside any control works without setPointerCapture errors
   useEffect(() => {
     const handleGlobalPointerMove = (e: PointerEvent) => {
       if (e.pointerId === joyPointerIdRef.current) {
         updateJoystickFromPoint(e.clientX, e.clientY);
       } else if (e.pointerId === lookPointerIdRef.current) {
-        const dx = e.clientX - lookLastPosRef.current.x;
-        const dy = e.clientY - lookLastPosRef.current.y;
+        const rawDx = e.clientX - lookLastPosRef.current.x;
+        const rawDy = e.clientY - lookLastPosRef.current.y;
         lookLastPosRef.current = { x: e.clientX, y: e.clientY };
-        callbacksRef.current.onLookDelta(dx, dy);
+        // Clamp spikes from multi-touch transitions
+        if (Math.abs(rawDx) < 140 && Math.abs(rawDy) < 140) {
+          callbacksRef.current.onLookDelta(rawDx, rawDy);
+        }
       } else if (e.pointerId === firePointerIdRef.current) {
-        const dx = e.clientX - fireLastPosRef.current.x;
-        const dy = e.clientY - fireLastPosRef.current.y;
+        const rawDx = e.clientX - fireLastPosRef.current.x;
+        const rawDy = e.clientY - fireLastPosRef.current.y;
         fireLastPosRef.current = { x: e.clientX, y: e.clientY };
-        callbacksRef.current.onLookDelta(dx, dy);
+        if (Math.abs(rawDx) < 140 && Math.abs(rawDy) < 140) {
+          callbacksRef.current.onLookDelta(rawDx, rawDy);
+        }
       }
     };
 
@@ -148,14 +206,12 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         el.setPointerCapture(pointerId);
       }
     } catch {
-      // Ignore InvalidStateError on synthetic/emulated mobile touch events;
-      // window-level pointermove/pointerup listeners handle tracking seamlessly.
+      // Handled by global window pointer listeners
     }
   };
 
   const handleJoyPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    if (joyPointerIdRef.current !== null) return;
     joyPointerIdRef.current = e.pointerId;
     setJoyActive(true);
     safeCapturePointer(e.currentTarget, e.pointerId);
@@ -163,7 +219,8 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
   };
 
   const handleLookPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (lookPointerIdRef.current !== null) return;
+    e.stopPropagation();
+    // Always accept the latest camera look touch so fullscreen transitions never lock the pointerId
     lookPointerIdRef.current = e.pointerId;
     lookLastPosRef.current = { x: e.clientX, y: e.clientY };
     safeCapturePointer(e.currentTarget, e.pointerId);
@@ -187,281 +244,259 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
       className="fixed inset-0 z-20 pointer-events-none select-none overflow-hidden"
       style={{ touchAction: 'none' }}
     >
-      {/* Full Right-Half & Center Touch-Look Aiming Zone */}
+      {/* =================================================================== */}
+      {/* FULL-SCREEN TOUCH-LOOK CAMERA LAYER (COMO NO COD MOBILE / FREE FIRE)*/}
+      {/* Qualquer área livre da tela gira a câmera e controla a mira         */}
+      {/* =================================================================== */}
       <div
         onPointerDown={handleLookPointerDown}
-        className="fixed top-14 bottom-20 left-[38%] right-0 pointer-events-auto"
+        className="fixed inset-0 pointer-events-auto"
         style={{ touchAction: 'none' }}
-        aria-label="Área de toque para girar a câmera e mirar"
+        aria-label="Área livre da tela para movimentar a câmera e mirar"
       />
 
       {/* =================================================================== */}
-      {/* LEFT THUMB ZONE: ANALOG VIRTUAL JOYSTICK + Q/E LEAN                 */}
+      {/* LEFT THUMB ZONE: CALL OF DUTY MOBILE VIRTUAL JOYSTICK (NO TEXT)     */}
       {/* =================================================================== */}
-      <div className="fixed bottom-14 left-5 sm:left-8 flex flex-col items-center gap-3 pointer-events-auto">
-        {/* Q/E Corner Lean Buttons */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onToggleLean(-1);
-            }}
-            className={`min-h-[44px] min-w-[54px] px-2.5 rounded-xl border font-mono text-xs font-semibold transition-colors ${
-              hud.leanDirection === -1
-                ? 'bg-amber-500 text-slate-950 border-amber-400'
-                : 'bg-[#0b0e14]/88 text-slate-200 border-white/15 active:bg-slate-800'
-            }`}
-          >
-            ◄ Q
-          </button>
-
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onToggleLean(1);
-            }}
-            className={`min-h-[44px] min-w-[54px] px-2.5 rounded-xl border font-mono text-xs font-semibold transition-colors ${
-              hud.leanDirection === 1
-                ? 'bg-amber-500 text-slate-950 border-amber-400'
-                : 'bg-[#0b0e14]/88 text-slate-200 border-white/15 active:bg-slate-800'
-            }`}
-          >
-            E ►
-          </button>
-        </div>
-
-        {/* 360° Virtual Analog Stick */}
+      <div className="fixed bottom-12 left-7 sm:left-12 pointer-events-auto z-10">
         <div
           ref={joyContainerRef}
           onPointerDown={handleJoyPointerDown}
           style={{ touchAction: 'none' }}
-          className={`relative w-32 h-32 rounded-full bg-[#0b0e14]/80 border-2 flex items-center justify-center transition-colors ${
+          className={`relative w-32 h-32 rounded-full bg-black/25 border flex items-center justify-center transition-colors ${
             isSprinting
-              ? 'border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.3)]'
-              : 'border-white/20'
+              ? 'border-amber-400/80 shadow-[0_0_16px_rgba(250,204,21,0.25)]'
+              : 'border-white/25'
           }`}
         >
-          {/* Sprint Top Indicator */}
-          <span
-            className={`absolute -top-5 text-[10px] font-mono font-semibold tracking-wider px-2 py-0.5 rounded ${
-              isSprinting
-                ? 'bg-amber-500 text-slate-950'
-                : 'text-slate-400 bg-[#0b0e14]/80'
+          {/* COD Mobile Curved Sprint Chevron Arc at Top of Joystick */}
+          <svg
+            width="44"
+            height="22"
+            viewBox="0 0 44 22"
+            fill="none"
+            className={`absolute -top-3.5 pointer-events-none transition-colors ${
+              isSprinting ? 'text-amber-400' : 'text-white/75'
             }`}
           >
-            {isSprinting ? 'CORRENDO' : '▲ CORRER'}
-          </span>
+            <path
+              d="M6 16C11 11 16.5 9 22 9C27.5 9 33 11 38 16"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M17 7L22 2L27 7"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
 
-          {/* Crosshair Axis Guides inside Joystick */}
-          <div className="w-16 h-[1px] bg-white/10 absolute pointer-events-none" />
-          <div className="h-16 w-[1px] bg-white/10 absolute pointer-events-none" />
-
-          {/* Movable Thumb Knob */}
+          {/* Clean Circular Thumb Knob (Matching COD Mobile Screenshot) */}
           <div
-            className={`w-14 h-14 rounded-full border-2 flex items-center justify-center pointer-events-none transition-transform duration-75 ${
+            className={`w-12 h-12 rounded-full border-2 pointer-events-none transition-transform duration-75 ${
               joyActive
-                ? 'bg-amber-500/90 border-amber-200 text-slate-950 scale-105'
-                : 'bg-slate-800/90 border-white/30 text-slate-200'
+                ? 'bg-white/85 border-white scale-105 shadow-md'
+                : 'bg-white/65 border-white/80'
             }`}
             style={{
               transform: `translate(${knobOffset.x}px, ${knobOffset.y}px)`,
             }}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M12 3L15 7H9L12 3ZM12 21L9 17H15L12 21ZM3 12L7 9V15L3 12ZM21 12L17 15V9L21 12Z"
-                fill="currentColor"
-              />
-            </svg>
-          </div>
+          />
         </div>
-
-        <span className="text-[10px] font-mono text-slate-400">
-          MOVER / CORRER
-        </span>
       </div>
 
       {/* =================================================================== */}
-      {/* RIGHT THUMB ZONE: CALL OF DUTY MOBILE HUD CLUSTER                   */}
+      {/* RIGHT THUMB ZONE: CALL OF DUTY MOBILE ICON-ONLY BUTTON CLUSTER      */}
       {/* =================================================================== */}
-      <div className="fixed bottom-10 right-4 sm:right-8 flex flex-col items-end gap-2 pointer-events-auto">
-        {/* Top Secondary Action Row: Breath, LPVO Zoom, Bolt Rack, Inspect */}
-        <div className="flex items-center gap-1.5 mb-1">
-          {hud.isAds && (
-            <>
+      {/* Contextual Icon Buttons (Hold Breath / Zoom / Bolt Rack) */}
+      <div className="fixed bottom-56 right-24 flex items-center gap-2 pointer-events-auto z-10">
+        {hud.isAds && (
+          <>
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                onHoldBreath(true);
+              }}
+              onPointerUp={(e) => {
+                e.stopPropagation();
+                onHoldBreath(false);
+              }}
+              onPointerCancel={() => onHoldBreath(false)}
+              aria-label="Segurar fôlego"
+              className={`w-10 h-10 rounded-full border flex items-center justify-center transition-colors ${
+                hud.isHoldingBreath
+                  ? 'bg-cyan-400/80 text-slate-950 border-white'
+                  : 'bg-black/45 text-white/90 border-white/30'
+              }`}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 4V13M12 13C9.5 13 7 10.5 5 11C3 11.5 2.5 15 4 18C5.5 21 9 20 10.5 17.5M12 13C14.5 13 17 10.5 19 11C21 11.5 21.5 15 20 18C18.5 21 15 20 13.5 17.5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+
+            {hud.optic === 'lpvo' && !hud.cantedActive && (
               <button
                 type="button"
                 onPointerDown={(e) => {
                   e.stopPropagation();
-                  onHoldBreath(true);
+                  onCycleZoom();
                 }}
-                onPointerUp={(e) => {
-                  e.stopPropagation();
-                  onHoldBreath(false);
-                }}
-                onPointerCancel={() => onHoldBreath(false)}
-                className={`h-9 px-2.5 rounded-lg border font-mono text-[11px] font-semibold shadow-md transition-colors ${
-                  hud.isHoldingBreath
-                    ? 'bg-cyan-400 text-slate-950 border-cyan-200'
-                    : 'bg-[#0b0e14]/92 text-cyan-300 border-cyan-500/40'
-                }`}
+                aria-label="Alternar zoom"
+                className="w-10 h-10 rounded-full bg-black/45 border border-white/30 text-amber-300 flex items-center justify-center active:scale-90 transition-transform"
               >
-                FÔLEGO
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                  <path d="M20 20L16 16M11 8V14M8 11H14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
               </button>
+            )}
+          </>
+        )}
 
-              {hud.optic === 'lpvo' && !hud.cantedActive && (
-                <button
-                  type="button"
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    onCycleZoom();
-                  }}
-                  className="h-9 px-2 rounded-lg bg-[#0b0e14]/92 border border-amber-500/40 text-amber-300 font-mono text-[11px] font-semibold shadow-md"
-                >
-                  {hud.lpvoZoom.toFixed(0)}X
-                </button>
-              )}
-            </>
-          )}
-
+        {needsBoltAction && (
           <button
             type="button"
             onPointerDown={(e) => {
               e.stopPropagation();
               onBoltRack();
             }}
-            className={`h-9 px-2.5 rounded-lg border font-mono text-[11px] font-semibold shadow-md transition-colors ${
-              needsBoltAction
-                ? 'bg-amber-500 text-slate-950 border-amber-300 animate-pulse'
-                : 'bg-[#0b0e14]/92 text-slate-300 border-white/15 active:bg-slate-800'
-            }`}
-          >
-            FERROLHO
-          </button>
-
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onInspectWeapon();
-            }}
-            className="h-9 px-2.5 rounded-lg bg-[#0b0e14]/92 border border-emerald-500/30 text-emerald-300 font-mono text-[11px] font-medium shadow-md active:bg-slate-800"
-          >
-            INSPECIONAR
-          </button>
-        </div>
-
-        {/* COD Mobile Primary Thumb Action Diamond Grid */}
-        <div className="relative w-64 h-48">
-          {/* 1. WEAPON SWITCH BUTTON (Top Left of Fire Button) */}
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onToggleWeaponSlot();
-            }}
-            className="absolute top-2 left-2 w-14 h-14 rounded-full border-2 bg-[#0b0e14]/94 border-amber-400/80 text-amber-300 flex flex-col items-center justify-center font-mono text-[9px] font-bold shadow-lg active:scale-90 transition-transform"
-            title="Alternar entre Rifle e Pistola"
+            aria-label="Puxar ferrolho"
+            className="w-11 h-11 rounded-full bg-amber-500/80 border-2 border-white text-slate-950 flex items-center justify-center animate-pulse shadow-lg"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              <path
+                d="M4 12H16M16 12L12 8M16 12L12 16M20 7V17"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
-            <span>TROCAR</span>
           </button>
-
-          {/* 2. ADS MIRA BUTTON (Top Right of Fire Button) */}
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onToggleAds();
-            }}
-            className={`absolute top-0 right-14 w-16 h-16 rounded-full border-2 flex flex-col items-center justify-center font-mono text-[10px] font-bold transition-all shadow-lg active:scale-90 ${
-              hud.isAds
-                ? 'bg-amber-500 text-slate-950 border-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.5)] scale-105'
-                : 'bg-[#0b0e14]/94 text-slate-100 border-white/30 active:bg-slate-800'
-            }`}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2" />
-              <line x1="12" y1="2" x2="12" y2="6" stroke="currentColor" strokeWidth="2" />
-              <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" strokeWidth="2" />
-              <line x1="2" y1="12" x2="6" y2="12" stroke="currentColor" strokeWidth="2" />
-              <line x1="18" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="2" />
-            </svg>
-            <span>MIRA</span>
-          </button>
-
-          {/* 3. RELOAD BUTTON (Middle Left of Fire Button) */}
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onReload(false);
-            }}
-            className="absolute bottom-16 left-12 w-14 h-14 rounded-full border-2 bg-[#0b0e14]/94 border-slate-400 text-slate-100 flex flex-col items-center justify-center font-mono text-[9px] font-bold shadow-lg active:scale-90 transition-transform"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>RECARGA</span>
-          </button>
-
-          {/* 4. PRIMARY ATIRAR / FIRE BUTTON (Large Bottom Right) */}
-          <button
-            type="button"
-            onPointerDown={handleFirePointerDown}
-            style={{ touchAction: 'none' }}
-            className={`absolute bottom-2 right-0 w-22 h-22 rounded-full border-2 flex flex-col items-center justify-center font-display font-bold text-xs tracking-wider transition-transform ${
-              firePressed
-                ? 'bg-red-500/95 text-white border-amber-200 scale-95 shadow-[0_0_28px_rgba(239,68,68,0.7)]'
-                : 'bg-red-600/90 text-white border-red-300/70 shadow-2xl'
-            }`}
-          >
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2.2" />
-              <circle cx="12" cy="12" r="3.5" fill="currentColor" />
-            </svg>
-            <span className="mt-0.5 font-sans font-black tracking-widest text-[11px]">ATIRAR</span>
-          </button>
-
-          {/* 5. CROUCH / SLIDE BUTTON (Bottom Left Stack) */}
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onCrouchOrSlide();
-            }}
-            className={`absolute bottom-1 left-0 w-12 h-12 rounded-2xl border-2 flex flex-col items-center justify-center font-mono text-[9px] font-bold shadow-md transition-colors ${
-              hud.stance === 'CROUCH' || hud.stance === 'SLIDE'
-                ? 'bg-amber-500 text-slate-950 border-amber-300'
-                : 'bg-[#0b0e14]/94 text-slate-200 border-white/20 active:bg-slate-800'
-            }`}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path d="M19 14l-7 7-7-7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>{isSprinting ? 'SLIDE' : 'AGACHAR'}</span>
-          </button>
-
-          {/* 6. JUMP BUTTON (Above Crouch Button) */}
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onJump();
-            }}
-            className="absolute bottom-16 left-0 w-12 h-12 rounded-2xl border-2 bg-[#0b0e14]/94 border-white/20 text-slate-200 flex flex-col items-center justify-center font-mono text-[9px] font-bold shadow-md active:bg-slate-800"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path d="M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>PULAR</span>
-          </button>
-        </div>
+        )}
       </div>
+
+      {/* 1. ADS / AIM CROSSHAIR BUTTON (Upper-Right, matching COD Mobile screenshot) */}
+      <button
+        type="button"
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onToggleAds();
+        }}
+        aria-label="Mirar"
+        className={`fixed bottom-38 right-24 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-10 transition-transform active:scale-90 ${
+          hud.isAds
+            ? 'bg-white/35 border-amber-300 text-amber-300 scale-105 shadow-[0_0_15px_rgba(250,204,21,0.4)]'
+            : 'bg-black/45 border-white/35 text-white/90'
+        }`}
+      >
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="7.5" stroke="currentColor" strokeWidth="1.8" />
+          <circle cx="12" cy="12" r="2" stroke="currentColor" strokeWidth="1.5" />
+          <line x1="12" y1="2" x2="12" y2="7" stroke="currentColor" strokeWidth="1.8" />
+          <line x1="12" y1="17" x2="12" y2="22" stroke="currentColor" strokeWidth="1.8" />
+          <line x1="2" y1="12" x2="7" y2="12" stroke="currentColor" strokeWidth="1.8" />
+          <line x1="17" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="1.8" />
+        </svg>
+      </button>
+
+      {/* 2. JUMP BUTTON (Far-Right Middle, Jumping Soldier Silhouette) */}
+      <button
+        type="button"
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onJump();
+        }}
+        aria-label="Pular"
+        className="fixed bottom-28 right-5 w-13 h-13 rounded-full bg-black/45 border border-white/35 text-white/95 flex items-center justify-center pointer-events-auto z-10 active:scale-90 transition-transform"
+      >
+        <svg width="25" height="25" viewBox="0 0 24 24" fill="none">
+          <circle cx="13" cy="4.5" r="2.2" fill="currentColor" />
+          <path
+            d="M7 9.5L11.5 8L15.5 10.5L18.5 7.5M11.5 8L10.5 13.5L7 16.5M10.5 13.5L14.5 15.5L16.5 19.5"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+
+      {/* 3. PRIMARY FIRE BUTTON (Large Translucent Circle with Diagonal Bullet Icon) */}
+      <button
+        type="button"
+        onPointerDown={handleFirePointerDown}
+        style={{ touchAction: 'none' }}
+        aria-label="Atirar"
+        className={`fixed bottom-18 right-38 sm:right-44 w-21 h-21 rounded-full border-2 flex items-center justify-center pointer-events-auto z-10 transition-transform ${
+          firePressed
+            ? 'bg-white/35 border-amber-300 scale-95 shadow-[0_0_24px_rgba(255,255,255,0.45)]'
+            : 'bg-black/35 border-white/55 shadow-lg'
+        }`}
+      >
+        <div className="w-17 h-17 rounded-full border border-white/25 flex items-center justify-center">
+          <svg
+            width="38"
+            height="38"
+            viewBox="0 0 24 24"
+            fill="none"
+            className="-rotate-45 text-white drop-shadow"
+          >
+            <path
+              d="M12 2C9.8 5 9 8 9 11.5H15C15 8 14.2 5 12 2Z"
+              fill="currentColor"
+            />
+            <rect x="9" y="12.5" width="6" height="7" rx="0.5" fill="currentColor" />
+            <rect x="8.5" y="20.2" width="7" height="1.8" rx="0.5" fill="currentColor" />
+          </svg>
+        </div>
+      </button>
+
+      {/* 4. RELOAD BUTTON (Below-Right of Fire Button, 3 Bullets + Reload Arc Icon) */}
+      <button
+        type="button"
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onReload(false);
+        }}
+        aria-label="Recarregar"
+        className={`fixed bottom-8 right-22 w-12 h-12 rounded-full border flex items-center justify-center pointer-events-auto z-10 active:scale-90 transition-transform ${
+          hud.reloadPhase !== 'IDLE'
+            ? 'bg-amber-500/40 border-amber-300 text-amber-200'
+            : 'bg-black/45 border-white/35 text-white/95'
+        }`}
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <g transform="rotate(-30 12 12)">
+            <rect x="7" y="7" width="2.2" height="7" rx="1" fill="currentColor" />
+            <rect x="10.8" y="6" width="2.2" height="7" rx="1" fill="currentColor" />
+            <rect x="14.6" y="7" width="2.2" height="7" rx="1" fill="currentColor" />
+          </g>
+          <path
+            d="M5 16.5C7 19.5 11.5 20.5 15.5 19C17.5 18.2 19 16.5 19.5 14.5M19.5 14.5L16.8 15.2M19.5 14.5L20.5 17.2"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+
+      {/* 5. CROUCH / PRONE / SLIDE BUTTON (Tap for Crouch, Hold for Prone) */}
+      <CrouchProneButton
+        stance={hud.stance}
+        onCrouchOrSlide={onCrouchOrSlide}
+      />
     </div>
   );
 };
@@ -474,7 +509,7 @@ export const MobileTouchControls = React.memo(
     prev.hud.boltLockedBack === next.hud.boltLockedBack &&
     prev.hud.chambered === next.hud.chambered &&
     prev.hud.stance === next.hud.stance &&
-    prev.hud.leanDirection === next.hud.leanDirection &&
+    prev.hud.reloadPhase === next.hud.reloadPhase &&
     prev.hud.optic === next.hud.optic &&
     prev.hud.cantedActive === next.hud.cantedActive &&
     prev.hud.lpvoZoom === next.hud.lpvoZoom &&

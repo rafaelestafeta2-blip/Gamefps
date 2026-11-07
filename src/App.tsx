@@ -67,24 +67,41 @@ const INITIAL_HUD_STATE: HudState = {
   hitMarkerAlpha: 0,
   hitMarkerIsCrit: false,
   damageFlashAlpha: 0,
+  // Warface Rank Progression System
+  playerXp: 0,
+  rankLevel: 1,
+  rankTitle: 'Recruta I',
+  rankBadge: '★',
+  rankBadgeColor: '#94a3b8',
+  nextRankXp: 250,
+  lastXpGained: 0,
+  rankUpNotification: null,
+
   muted: false,
   dockCollapsed: true,
   touchControlsVisible: true,
   isCrouchingToggled: false,
+  isProneToggled: false,
   qualityPreset: 'BALANCED_60',
   dynamicResolutionEnabled: true,
   liveFps: 60,
   renderScalePercent: 100,
-  gyroMode: 'ADS_ONLY',
-  gyroSensitivity: 1.2,
+  gyroMode: 'OFF',
+  gyroSensitivity: 1.0,
+  lookSensitivity: 1.0,
+  adsSensitivity: 1.0,
   hapticsEnabled: true,
   isFullscreen: false,
+  graphicQuality: 'HIGH',
+  fpsLimit: 60,
 };
 
 export default function App() {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<TacticalFPSEngine | null>(null);
   const [hud, setHud] = useState<HudState>(INITIAL_HUD_STATE);
+  const [preloadProgress, setPreloadProgress] = useState(0);
+  const [preloadStatus, setPreloadStatus] = useState('INICIALIZANDO GERENCIADOR DE RECURSOS (THREE.LoadingManager)...');
 
   useEffect(() => {
     const container = canvasMountRef.current;
@@ -108,6 +125,24 @@ export default function App() {
       engineRef.current = null;
     };
   }, []);
+
+  // Trigger AssetPreloader sequence whenever screen changes to LOADING
+  useEffect(() => {
+    if (hud.screen === 'LOADING' && engineRef.current) {
+      setPreloadProgress(0);
+      setPreloadStatus('LIMPANDO MEMÓRIA E INICIALIZANDO CARREGAMENTO...');
+
+      engineRef.current
+        .preloadAssets((pct, status) => {
+          setPreloadProgress(pct);
+          setPreloadStatus(status);
+        })
+        .catch((err) => {
+          console.warn('Asset preloader finished with fallback:', err);
+          setPreloadProgress(100);
+        });
+    }
+  }, [hud.screen]);
 
   return (
     <main
@@ -134,9 +169,11 @@ export default function App() {
         />
       )}
 
-      {/* 2. Tactical Loading Screen with Artwork & Progress Bar */}
+      {/* 2. Tactical Loading Screen with Artwork & Real Progress Bar */}
       {hud.screen === 'LOADING' && (
         <LoadingScreen
+          progress={preloadProgress}
+          statusLabel={preloadStatus}
           onComplete={() => {
             engineRef.current?.setScreenState('MAIN_MENU');
             setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
@@ -228,6 +265,10 @@ export default function App() {
             onToggleFullscreen={() => {
               void engineRef.current?.toggleFullscreenLandscape();
             }}
+            onSetGraphicQuality={(quality) =>
+              engineRef.current?.setGraphicQuality(quality)
+            }
+            onSetFpsLimit={(fps) => engineRef.current?.setFpsLimit(fps)}
             onPause={() => engineRef.current?.pauseGame()}
           />
         </>
@@ -256,11 +297,21 @@ export default function App() {
         onSetGyroSensitivity={(sens: number) =>
           engineRef.current?.setGyroSensitivity(sens)
         }
+        onSetLookSensitivity={(sens: number) =>
+          engineRef.current?.setLookSensitivity(sens)
+        }
+        onSetAdsSensitivity={(sens: number) =>
+          engineRef.current?.setAdsSensitivity(sens)
+        }
         onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
         onToggleHaptics={() => engineRef.current?.toggleHaptics()}
         onToggleFullscreen={() => {
           void engineRef.current?.toggleFullscreenLandscape();
         }}
+        onSetGraphicQuality={(quality) =>
+          engineRef.current?.setGraphicQuality(quality)
+        }
+        onSetFpsLimit={(fps) => engineRef.current?.setFpsLimit(fps)}
       />
     </main>
   );

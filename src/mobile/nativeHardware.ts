@@ -72,43 +72,20 @@ export class MobileHardwareManager {
   }
 
   // =========================================================================
-  // 2. GYROSCOPE PRECISION AIMING (WITH ANTI-JITTER LOW-PASS FILTER)
+  // 2. GYROSCOPE DISABLED (TOUCH-ONLY CAMERA & AIM CONTROL)
   // =========================================================================
   public async enableGyroscope(
-    onDelta: (dx: number, dy: number) => void
+    _onDelta: (dx: number, dy: number) => void
   ): Promise<boolean> {
-    this.onGyroDeltaCallback = onDelta;
-
-    // Request iOS 13+ DeviceOrientation permission if required
-    try {
-      const DevOrient = window.DeviceOrientationEvent as unknown as {
-        requestPermission?: () => Promise<'granted' | 'denied'>;
-      };
-      if (DevOrient && typeof DevOrient.requestPermission === 'function') {
-        const res = await DevOrient.requestPermission();
-        if (res !== 'granted') return false;
-      }
-    } catch {
-      // Non-iOS or already permitted
-    }
-
-    if (!this.gyroActive) {
-      this.gyroActive = true;
-      this.lastBeta = null;
-      this.lastGamma = null;
-      window.addEventListener('deviceorientation', this.handleDeviceOrientation, {
-        passive: true,
-      });
-    }
-    return true;
+    this.disableGyroscope();
+    return false;
   }
 
   public disableGyroscope(): void {
-    if (!this.gyroActive) return;
     this.gyroActive = false;
     this.lastBeta = null;
     this.lastGamma = null;
-    window.removeEventListener('deviceorientation', this.handleDeviceOrientation);
+    this.onGyroDeltaCallback = null;
   }
 
   public recalibrateGyroCenter(): void {
@@ -117,40 +94,6 @@ export class MobileHardwareManager {
     this.filteredDx = 0;
     this.filteredDy = 0;
   }
-
-  private handleDeviceOrientation = (e: DeviceOrientationEvent) => {
-    if (!this.gyroActive || !this.onGyroDeltaCallback) return;
-    if (e.beta === null || e.gamma === null) return;
-
-    if (this.lastBeta === null || this.lastGamma === null) {
-      this.lastBeta = e.beta;
-      this.lastGamma = e.gamma;
-      return;
-    }
-
-    // Calculate raw angular delta (handling landscape orientation naturally)
-    let dBeta = e.beta - this.lastBeta;
-    let dGamma = e.gamma - this.lastGamma;
-    this.lastBeta = e.beta;
-    this.lastGamma = e.gamma;
-
-    // Clamp sudden angle wraps
-    if (Math.abs(dBeta) > 25) dBeta = 0;
-    if (Math.abs(dGamma) > 25) dGamma = 0;
-
-    // Determine screen orientation (landscape vs portrait)
-    const isLandscape = window.innerWidth > window.innerHeight;
-    const rawDx = isLandscape ? -dBeta * 4.2 : dGamma * 4.2;
-    const rawDy = isLandscape ? dGamma * 4.2 : dBeta * 4.2;
-
-    // Exponential smoothing filter to eliminate hand micro-tremor jitter
-    this.filteredDx = this.filteredDx * 0.35 + rawDx * 0.65;
-    this.filteredDy = this.filteredDy * 0.35 + rawDy * 0.65;
-
-    if (Math.abs(this.filteredDx) > 0.04 || Math.abs(this.filteredDy) > 0.04) {
-      this.onGyroDeltaCallback(this.filteredDx, this.filteredDy);
-    }
-  };
 
   // =========================================================================
   // 3. FULLSCREEN IMMERSIVE MODE + LANDSCAPE ORIENTATION LOCK

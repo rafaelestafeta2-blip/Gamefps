@@ -17,9 +17,13 @@ interface GameShellModalsProps {
   onToggleDrs: () => void;
   onSetGyroMode: (mode: GyroMode) => void;
   onSetGyroSensitivity: (sens: number) => void;
+  onSetLookSensitivity: (sens: number) => void;
+  onSetAdsSensitivity: (sens: number) => void;
   onRecalibrateGyro: () => void;
   onToggleHaptics: () => void;
   onToggleFullscreen: () => void;
+  onSetGraphicQuality?: (quality: 'HIGH' | 'LOW') => void;
+  onSetFpsLimit?: (fps: number) => void;
 }
 
 export const GameShellModals: React.FC<GameShellModalsProps> = ({
@@ -31,11 +35,12 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
   onSelectDrillMode,
   onSetQualityPreset,
   onToggleDrs,
-  onSetGyroMode,
-  onSetGyroSensitivity,
-  onRecalibrateGyro,
+  onSetLookSensitivity,
+  onSetAdsSensitivity,
   onToggleHaptics,
   onToggleFullscreen,
+  onSetGraphicQuality,
+  onSetFpsLimit,
 }) => {
   const [showApkModal, setShowApkModal] = useState(false);
 
@@ -56,10 +61,10 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2.5">
         <div>
           <div className="text-xs font-mono font-semibold text-amber-400">
-            MOTOR MOBILE ANTI-TRAVAMENTO (GPU + SENSORES NATIVOS)
+            SENSIBILIDADE DA MIRA, CÂMERA &amp; GRÁFICOS
           </div>
           <div className="text-[11px] text-slate-400">
-            Escala Dinâmica de Resolução (DRS), Giroscópio e Haptics Nativo
+            Ajuste a velocidade de rotação da câmera e da mira aberta (ADS)
           </div>
         </div>
         <button
@@ -71,6 +76,141 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
             ? 'Sair da Tela Cheia'
             : 'Ativar Tela Cheia Horizontal'}
         </button>
+      </div>
+
+      {/* Camera & Aim Sensitivity Controls */}
+      <div className="bg-[#090c12] border border-amber-500/30 rounded-lg p-3 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-mono font-bold text-slate-200">
+            SENSIBILIDADE DA MIRA (TOQUE NA TELA)
+          </span>
+          <div className="flex items-center gap-1.5">
+            {(
+              [
+                ['Baixa', 0.6, 0.7],
+                ['Padrão', 1.0, 1.0],
+                ['Alta', 1.5, 1.2],
+                ['Pró', 2.2, 1.5],
+              ] as [string, number, number][]
+            ).map(([label, lookVal, adsVal]) => {
+              const isSelected =
+                Math.abs(hud.lookSensitivity - lookVal) < 0.08 &&
+                Math.abs(hud.adsSensitivity - adsVal) < 0.08;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => {
+                    onSetLookSensitivity(lookVal);
+                    onSetAdsSensitivity(adsVal);
+                  }}
+                  className={`px-2 py-0.5 rounded text-[11px] font-mono border transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'bg-amber-500 text-slate-950 font-bold border-amber-400'
+                      : 'bg-slate-900 text-slate-300 border-white/15 hover:border-amber-400/50'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Free Look Camera Sensitivity */}
+          <div className="bg-[#0d121b] border border-white/10 rounded-lg p-2.5">
+            <div className="flex items-center justify-between text-xs font-mono text-slate-200 mb-1.5">
+              <span>Câmera / Giro Livre</span>
+              <span className="text-amber-400 font-bold tabular-nums">
+                {Math.round(hud.lookSensitivity * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.2"
+              max="3.0"
+              step="0.05"
+              value={hud.lookSensitivity}
+              onChange={(e) => onSetLookSensitivity(parseFloat(e.target.value))}
+              className="w-full accent-amber-500 cursor-pointer"
+            />
+          </div>
+
+          {/* ADS Scope Sensitivity */}
+          <div className="bg-[#0d121b] border border-white/10 rounded-lg p-2.5">
+            <div className="flex items-center justify-between text-xs font-mono text-slate-200 mb-1.5">
+              <span>Mira Aberta (ADS / Luneta)</span>
+              <span className="text-amber-400 font-bold tabular-nums">
+                {Math.round(hud.adsSensitivity * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.2"
+              max="3.0"
+              step="0.05"
+              value={hud.adsSensitivity}
+              onChange={(e) => onSetAdsSensitivity(parseFloat(e.target.value))}
+              className="w-full accent-amber-500 cursor-pointer"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Graphic Quality (ALTO / BAIXO) & FPS Limit Selector */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
+        <div className="bg-[#090c12] border border-white/10 rounded-lg p-2.5">
+          <div className="text-slate-300 font-bold mb-1.5">
+            QUALIDADE GRÁFICA (SOMBRAS &amp; DPR):
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => onSetGraphicQuality?.('HIGH')}
+              className={`py-1.5 px-2 rounded-lg font-bold border transition-colors cursor-pointer ${
+                hud.graphicQuality === 'HIGH'
+                  ? 'bg-amber-500 text-slate-950 border-amber-300'
+                  : 'bg-slate-900 border-white/15 text-slate-300 hover:text-white'
+              }`}
+            >
+              ALTO (HQ)
+            </button>
+            <button
+              type="button"
+              onClick={() => onSetGraphicQuality?.('LOW')}
+              className={`py-1.5 px-2 rounded-lg font-bold border transition-colors cursor-pointer ${
+                hud.graphicQuality === 'LOW'
+                  ? 'bg-amber-500 text-slate-950 border-amber-300'
+                  : 'bg-slate-900 border-white/15 text-slate-300 hover:text-white'
+              }`}
+            >
+              BAIXO (60 FPS)
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-[#090c12] border border-white/10 rounded-lg p-2.5">
+          <div className="text-slate-300 font-bold mb-1.5">
+            LIMITE DE FPS:
+          </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {[30, 60, 120, 0].map((fps) => (
+              <button
+                key={fps}
+                type="button"
+                onClick={() => onSetFpsLimit?.(fps)}
+                className={`py-1.5 rounded-lg font-bold border text-[11px] transition-colors cursor-pointer ${
+                  hud.fpsLimit === fps
+                    ? 'bg-amber-500 text-slate-950 border-amber-300'
+                    : 'bg-slate-900 border-white/15 text-slate-300 hover:text-white'
+                }`}
+              >
+                {fps === 0 ? 'MAX' : `${fps}`}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* GPU Quality Presets */}
@@ -103,7 +243,7 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
               Competitivo 120 FPS
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">
-              Zero sombras pesadas, latência mínima para celulares intermediários.
+              Zero sombras pesadas, latência mínima.
             </div>
           </button>
 
@@ -120,7 +260,7 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
               Equilibrado 60 FPS
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">
-              PBR tático + sombras otimizadas + DRS automático 65%–100%.
+              PBR tático + sombras otimizadas + DRS.
             </div>
           </button>
 
@@ -137,93 +277,36 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
               Ultra PBR Nativo
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">
-              Nitidez máxima 2.0x DPR e sombras suaves para GPUs topo de linha.
+              Nitidez máxima e sombras suaves.
             </div>
           </button>
         </div>
       </div>
 
-      {/* Gyroscope & Haptics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-        <div className="bg-[#090c12] border border-white/10 rounded-lg p-2.5">
-          <div className="flex items-center justify-between text-xs font-mono text-slate-300 mb-1.5">
-            <span>MIRA POR GIROSCÓPIO</span>
-            {hud.gyroMode !== 'OFF' && (
-              <button
-                type="button"
-                onClick={onRecalibrateGyro}
-                className="text-[10px] text-amber-400 hover:underline cursor-pointer"
-              >
-                Recalibrar Centro
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-3 gap-1 mb-2">
-            {(
-              [
-                ['OFF', 'Desligado'],
-                ['ADS_ONLY', 'Só na Mira'],
-                ['ALWAYS', 'Sempre'],
-              ] as [GyroMode, string][]
-            ).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => onSetGyroMode(mode)}
-                className={`py-1 px-1.5 rounded text-[11px] font-mono border transition-colors cursor-pointer ${
-                  hud.gyroMode === mode
-                    ? 'bg-amber-500 text-slate-950 font-semibold border-amber-400'
-                    : 'bg-slate-900 text-slate-400 border-white/10'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
-            <span>Sensibilidade: {hud.gyroSensitivity.toFixed(1)}x</span>
-            <input
-              type="range"
-              min="0.2"
-              max="3.0"
-              step="0.1"
-              value={hud.gyroSensitivity}
-              onChange={(e) => onSetGyroSensitivity( parseFloat(e.target.value) )}
-              className="flex-1 accent-amber-500 cursor-pointer"
-            />
-          </div>
+      {/* Haptics & Native APK Row */}
+      <div className="bg-[#090c12] border border-white/10 rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-mono text-slate-300">
+          FEEDBACK TÁTIL (VIBRAÇÃO) &amp; APK ANDROID
         </div>
-
-        <div className="bg-[#090c12] border border-white/10 rounded-lg p-2.5 flex flex-col justify-between">
-          <div>
-            <div className="text-xs font-mono text-slate-300 mb-1">
-              FEEDBACK TÁTIL &amp; APK ANDROID
-            </div>
-            <div className="text-[11px] text-slate-400 mb-2">
-              Vibração física sincronizada com disparos 5.56mm, encaixe do PMAG,
-              ferrolho e impactos.
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onToggleHaptics}
-              className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-mono font-semibold border transition-colors cursor-pointer ${
-                hud.hapticsEnabled
-                  ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
-                  : 'bg-slate-900 border-white/10 text-slate-400'
-              }`}
-            >
-              Vibração: {hud.hapticsEnabled ? 'ATIVADA' : 'DESATIVADA'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowApkModal(true)}
-              className="py-1.5 px-3 rounded-lg text-xs font-mono font-semibold bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 hover:bg-cyan-500/30 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              Gerar APK Nativo
-            </button>
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleHaptics}
+            className={`py-1.5 px-3 rounded-lg text-xs font-mono font-semibold border transition-colors cursor-pointer ${
+              hud.hapticsEnabled
+                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                : 'bg-slate-900 border-white/10 text-slate-400'
+            }`}
+          >
+            Vibração: {hud.hapticsEnabled ? 'ATIVADA' : 'DESATIVADA'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowApkModal(true)}
+            className="py-1.5 px-3 rounded-lg text-xs font-mono font-semibold bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 hover:bg-cyan-500/30 transition-colors cursor-pointer whitespace-nowrap"
+          >
+            Gerar APK Nativo
+          </button>
         </div>
       </div>
     </div>

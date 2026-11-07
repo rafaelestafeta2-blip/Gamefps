@@ -13,6 +13,12 @@ import {
   QualityPreset,
   WeaponId,
 } from '../types/game';
+import {
+  getNextRank,
+  getRankForXp,
+  loadSavedPlayerXp,
+  savePlayerXp,
+} from '../progression/ranks';
 import { BallisticsFXPool } from './ballisticsPool';
 import {
   buildPreProductionLevel,
@@ -25,6 +31,7 @@ import {
   getOpticAdsTransform,
   TacticalWeaponRig,
 } from './weaponBuilder';
+import { AssetPreloader } from './preloader';
 
 // Pre-allocated math helpers outside the frame loop (Zero GC)
 const _forward = new THREE.Vector3();
@@ -193,23 +200,50 @@ export class TacticalFPSEngine {
     hitMarkerIsCrit: false,
     damageFlashAlpha: 0,
 
+    // Warface Rank Progression System
+    playerXp: 0,
+    rankLevel: 1,
+    rankTitle: 'Recruta I',
+    rankBadge: '★',
+    rankBadgeColor: '#94a3b8',
+    nextRankXp: 250,
+    lastXpGained: 0,
+    rankUpNotification: null,
+
     muted: false,
     dockCollapsed: true,
     touchControlsVisible: true,
     isCrouchingToggled: false,
+    isProneToggled: false,
     qualityPreset: 'BALANCED_60',
     dynamicResolutionEnabled: true,
     liveFps: 60,
     renderScalePercent: 100,
-    gyroMode: 'ADS_ONLY',
-    gyroSensitivity: 1.2,
+    gyroMode: 'OFF',
+    gyroSensitivity: 1.0,
+    lookSensitivity: 1.0,
+    adsSensitivity: 1.0,
     hapticsEnabled: true,
     isFullscreen: false,
+    graphicQuality: 'HIGH',
+    fpsLimit: 60,
   };
 
   constructor(container: HTMLElement, onHudUpdate: (state: HudState) => void) {
     this.container = container;
     this.onHudUpdate = onHudUpdate;
+
+    // Load saved Warface Rank Progression XP
+    const savedXp = loadSavedPlayerXp();
+    const rankInfo = getRankForXp(savedXp);
+    const nextRank = getNextRank(rankInfo.level);
+
+    this.state.playerXp = savedXp;
+    this.state.rankLevel = rankInfo.level;
+    this.state.rankTitle = rankInfo.title;
+    this.state.rankBadge = rankInfo.badge;
+    this.state.rankBadgeColor = rankInfo.badgeColor;
+    this.state.nextRankXp = nextRank ? nextRank.requiredXp : rankInfo.requiredXp;
 
     // 1. Mandatory Software-WebGL Guard
     this.isSoftwareGl = (() => {
@@ -329,6 +363,18 @@ export class TacticalFPSEngine {
     this.startLoop();
   }
 
+  public async preloadAssets(
+    onProgress: (pct: number, statusLabel: string) => void
+  ): Promise<void> {
+    await AssetPreloader.executePreloadSequence(
+      this.renderer,
+      this.scene,
+      this.camera,
+      this.isSoftwareGl,
+      onProgress
+    );
+  }
+
   // =========================================================================
   // PUBLIC CONTROLS FOR UI OVERLAYS & KEYBOARD
   // =========================================================================
@@ -383,17 +429,58 @@ export class TacticalFPSEngine {
     this.emitHud();
   }
 
+  public addPlayerXp(amount: number): void {
+    if (amount <= 0) return;
+    const oldLevel = this.state.rankLevel;
+    this.state.playerXp += amount;
+    this.state.lastXpGained = amount;
+    savePlayerXp(this.state.playerXp);
+
+    const rankInfo = getRankForXp(this.state.playerXp);
+    this.state.rankLevel = rankInfo.level;
+    this.state.rankTitle = rankInfo.title;
+    this.state.rankBadge = rankInfo.badge;
+    this.state.rankBadgeColor = rankInfo.badgeColor;
+
+    const nextRank = getNextRank(rankInfo.level);
+    this.state.nextRankXp = nextRank ? nextRank.requiredXp : rankInfo.requiredXp;
+
+    if (rankInfo.level > oldLevel) {
+      this.state.rankUpNotification = `PROMOÇÃO DE PATENTE! NÍVEL ${rankInfo.level} — ${rankInfo.title.toUpperCase()} (${rankInfo.unlockRewardLabel})`;
+      soundEngine.playMechanicalSwitch(1.4);
+      mobileHardware.vibrateHitConfirm(true);
+      setTimeout(() => {
+        this.state.rankUpNotification = null;
+        this.emitHud();
+      }, 6000);
+    }
+  }
+
   public setOptic(optic: OpticType): void {
     this.state.optic = optic;
+    this.state.cantedActive = false;
+    this.weaponRig.cantedSightGroup.visible = false;
     this.weaponRig.holoSightGroup.visible = optic === 'holo';
     this.weaponRig.lpvoScopeGroup.visible = optic === 'lpvo';
     this.weaponRig.ironSightsGroup.visible = optic === 'iron';
+    const labels: Record<OpticType, string> = {
+      iron: 'MIRA DE FERRO PADRÃO ATIVADA',
+      holo: 'MIRA HOLOGRÁFICA EOTECH ATIVADA',
+      lpvo: 'LUNETA TÁTICA LPVO (1-4X) ATIVADA',
+    };
+    this.state.reloadTypeLabel = labels[optic];
+    this.magCheckTimer = 1.6;
     soundEngine.playMechanicalSwitch(1.1);
     this.emitHud();
   }
 
   public toggleCantedSight(): void {
     this.state.cantedActive = !this.state.cantedActive;
+    this.weaponRig.cantedSightGroup.visible = this.state.cantedActive;
+    this.state.reloadTypeLabel = this.state.cantedActive
+      ? 'MIRA INCLINADA 45° ATIVADA'
+      : 'MIRA INCLINADA 45° DESATIVADA';
+    this.magCheckTimer = 1.6;
     soundEngine.playMechanicalSwitch(1.25);
     this.emitHud();
   }
@@ -401,6 +488,10 @@ export class TacticalFPSEngine {
   public toggleSuppressor(): void {
     this.state.suppressorAttached = !this.state.suppressorAttached;
     this.weaponRig.suppressorGroup.visible = this.state.suppressorAttached;
+    this.state.reloadTypeLabel = this.state.suppressorAttached
+      ? 'SUPRESSOR ACÚSTICO ACOPLADO'
+      : 'SUPRESSOR ACÚSTICO REMOVIDO';
+    this.magCheckTimer = 1.6;
     soundEngine.playMechanicalSwitch(0.8);
     this.emitHud();
   }
@@ -409,6 +500,10 @@ export class TacticalFPSEngine {
     this.state.laserActive = !this.state.laserActive;
     this.weaponRig.peqLaserBeam.visible = this.state.laserActive;
     this.laserDotMesh.visible = this.state.laserActive;
+    this.state.reloadTypeLabel = this.state.laserActive
+      ? 'LASER TÁTICO PEQ-15 ATIVADO'
+      : 'LASER TÁTICO PEQ-15 DESATIVADO';
+    this.magCheckTimer = 1.6;
     soundEngine.playMechanicalSwitch(1.35);
     this.emitHud();
   }
@@ -417,6 +512,13 @@ export class TacticalFPSEngine {
     const order: FireMode[] = ['SEMI', 'BURST', 'AUTO'];
     const idx = (order.indexOf(this.state.fireMode) + 1) % order.length;
     this.state.fireMode = order[idx];
+    const modeNames: Record<FireMode, string> = {
+      SEMI: 'MODO DE DISPARO: SEMIAUTOMÁTICO (TIRO ÚNICO)',
+      BURST: 'MODO DE DISPARO: RAJADA CURTA (3 TIROS)',
+      AUTO: 'MODO DE DISPARO: AUTOMÁTICO CONTÍNUO',
+    };
+    this.state.reloadTypeLabel = modeNames[this.state.fireMode];
+    this.magCheckTimer = 1.5;
     soundEngine.playMechanicalSwitch(1.15);
     this.emitHud();
   }
@@ -578,6 +680,10 @@ export class TacticalFPSEngine {
   public applyTouchLookDelta(dx: number, dy: number): void {
     if (this.state.screen !== 'PLAYING') return;
 
+    const userSens = this.state.isAds
+      ? this.state.lookSensitivity * this.state.adsSensitivity
+      : this.state.lookSensitivity;
+
     const zoomSensFactor =
       this.state.isAds && this.state.optic === 'lpvo' && !this.state.cantedActive
         ? 0.48 / Math.sqrt(this.state.lpvoZoom)
@@ -585,7 +691,7 @@ export class TacticalFPSEngine {
           ? 0.68
           : 1.0;
 
-    const sens = 0.0042 * zoomSensFactor;
+    const sens = 0.0044 * zoomSensFactor * userSens;
     this.yaw -= dx * sens;
     this.pitch = THREE.MathUtils.clamp(
       this.pitch - dy * sens,
@@ -627,8 +733,20 @@ export class TacticalFPSEngine {
   public triggerJump(): void {
     if (this.state.screen !== 'PLAYING') return;
     this.state.isCrouchingToggled = false;
+    this.state.isProneToggled = false;
     this.slideTimer = 0;
     this.jumpBufferTimer = 0.18;
+    this.emitHud();
+  }
+
+  public triggerProne(): void {
+    if (this.state.screen !== 'PLAYING') return;
+    this.slideTimer = 0;
+    this.state.isProneToggled = !this.state.isProneToggled;
+    if (this.state.isProneToggled) {
+      this.state.isCrouchingToggled = false;
+    }
+    soundEngine.playMechanicalSwitch(0.75);
     this.emitHud();
   }
 
@@ -641,16 +759,29 @@ export class TacticalFPSEngine {
       this.isGrounded &&
       this.slideTimer <= 0;
 
-    if (isMovingForwardFast && !this.state.isCrouchingToggled) {
+    if (isMovingForwardFast && !this.state.isCrouchingToggled && !this.state.isProneToggled) {
       this.slideTimer = 0.68;
       this.camera.getWorldDirection(_forward);
       _forward.y = 0;
       _forward.normalize();
       this.slideDir.copy(_forward);
       this.state.isCrouchingToggled = true;
+      this.state.isProneToggled = false;
       soundEngine.playMechanicalSwitch(0.65);
+    } else if (this.state.isProneToggled) {
+      // Stand up from Prone
+      this.state.isProneToggled = false;
+      this.state.isCrouchingToggled = false;
+      soundEngine.playMechanicalSwitch(0.85);
+    } else if (this.state.isCrouchingToggled) {
+      // Drop to Prone from Crouch
+      this.state.isCrouchingToggled = false;
+      this.state.isProneToggled = true;
+      soundEngine.playMechanicalSwitch(0.75);
     } else {
-      this.state.isCrouchingToggled = !this.state.isCrouchingToggled;
+      // Crouch from Stand
+      this.state.isCrouchingToggled = true;
+      this.state.isProneToggled = false;
       soundEngine.playMechanicalSwitch(0.8);
     }
     this.emitHud();
@@ -683,27 +814,44 @@ export class TacticalFPSEngine {
   // =========================================================================
   public setQualityPreset(preset: QualityPreset): void {
     this.state.qualityPreset = preset;
+    if (preset === 'COMPETITIVE_120') {
+      this.setGraphicQuality('LOW');
+      this.setFpsLimit(120);
+    } else if (preset === 'BALANCED_60') {
+      this.setGraphicQuality('HIGH');
+      this.setFpsLimit(60);
+    } else {
+      this.setGraphicQuality('HIGH');
+      this.setFpsLimit(0);
+    }
+  }
+
+  public setGraphicQuality(quality: 'HIGH' | 'LOW'): void {
+    this.state.graphicQuality = quality;
     if (!this.isSoftwareGl) {
       const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
-      if (preset === 'COMPETITIVE_120') {
-        this.renderer.shadowMap.enabled = false;
-        this.keyLight.castShadow = false;
-        this.currentRenderScale = Math.min(dpr, 1.0);
-      } else if (preset === 'BALANCED_60') {
-        this.renderer.shadowMap.enabled = true;
-        this.keyLight.castShadow = true;
-        this.currentRenderScale = Math.min(dpr, 1.35);
-      } else {
+      if (quality === 'HIGH') {
         this.renderer.shadowMap.enabled = true;
         this.keyLight.castShadow = true;
         this.currentRenderScale = dpr;
+      } else {
+        this.renderer.shadowMap.enabled = false;
+        this.keyLight.castShadow = false;
+        this.currentRenderScale = 1.0;
       }
       this.renderer.setPixelRatio(this.currentRenderScale);
+      this.renderer.shadowMap.needsUpdate = true;
       this.state.renderScalePercent = Math.round(
         (this.currentRenderScale / dpr) * 100
       );
     }
-    soundEngine.playMechanicalSwitch(1.1);
+    soundEngine.playMechanicalSwitch(1.15);
+    this.emitHud();
+  }
+
+  public setFpsLimit(fps: number): void {
+    this.state.fpsLimit = Math.max(0, Math.min(120, fps));
+    soundEngine.playMechanicalSwitch(1.05);
     this.emitHud();
   }
 
@@ -736,6 +884,16 @@ export class TacticalFPSEngine {
 
   public setGyroSensitivity(sens: number): void {
     this.state.gyroSensitivity = THREE.MathUtils.clamp(sens, 0.2, 3.0);
+    this.emitHud();
+  }
+
+  public setLookSensitivity(sens: number): void {
+    this.state.lookSensitivity = THREE.MathUtils.clamp(sens, 0.2, 3.0);
+    this.emitHud();
+  }
+
+  public setAdsSensitivity(sens: number): void {
+    this.state.adsSensitivity = THREE.MathUtils.clamp(sens, 0.2, 3.0);
     this.emitHud();
   }
 
@@ -819,15 +977,8 @@ export class TacticalFPSEngine {
     this.state.headshots = 0;
     this.state.courseTimerSec = 0;
     this.state.damageFlashAlpha = 0;
-    this.state.chambered = 1;
-    // All players start with the default P50_Heavy_Pistol.glb on scenario reset
-    this.state.activeWeapon = 'P50_PISTOL';
-    this.weaponRig.setActiveWeapon('P50_PISTOL');
-    this.state.magCapacity = 12;
-    this.state.currentMagRounds = 12;
-    this.state.magazines = [12, 12, 12, 12];
-    this.state.fireMode = 'SEMI';
-    this.setOptic('iron');
+    const startingWeapon = this.state.activeWeapon || this.primaryWeapon || 'M4_CARBINE';
+    this.selectWeapon(startingWeapon);
     this.state.boltLockedBack = false;
     this.state.reloadPhase = 'IDLE';
 
@@ -909,7 +1060,14 @@ export class TacticalFPSEngine {
     switch (e.code) {
       case 'Space':
         e.preventDefault();
-        this.jumpBufferTimer = 0.15;
+        this.triggerJump();
+        break;
+      case 'KeyZ':
+        this.triggerProne();
+        break;
+      case 'KeyC':
+      case 'ControlLeft':
+        this.toggleCrouchOrSlide();
         break;
       case 'KeyR': {
         const now = performance.now();
@@ -951,6 +1109,7 @@ export class TacticalFPSEngine {
         } else {
           this.triggerWeaponInspect();
         }
+        break;
       case 'Tab':
         e.preventDefault();
         this.toggleWeaponSlot();
@@ -1056,6 +1215,10 @@ export class TacticalFPSEngine {
       return;
     }
 
+    const userSens = this.state.isAds
+      ? this.state.lookSensitivity * this.state.adsSensitivity
+      : this.state.lookSensitivity;
+
     const zoomSensFactor =
       this.state.isAds && this.state.optic === 'lpvo' && !this.state.cantedActive
         ? 0.45 / Math.sqrt(this.state.lpvoZoom)
@@ -1063,7 +1226,7 @@ export class TacticalFPSEngine {
           ? 0.65
           : 1.0;
 
-    const sens = 0.0021 * zoomSensFactor;
+    const sens = 0.0021 * zoomSensFactor * userSens;
     const dx = e.movementX || 0;
     const dy = e.movementY || 0;
 
@@ -1552,6 +1715,7 @@ export class TacticalFPSEngine {
       this.fxPool.spawnImpactFX(hitPoint, hitNormal, true, false);
       target.hitTiltVelocity = -12.5;
       this.state.score += 75;
+      this.addPlayerXp(25);
       this.state.hitMarkerAlpha = 1.0;
       this.state.hitMarkerIsCrit = false;
       this.state.lastHitZone = 'TORSO';
@@ -1566,6 +1730,7 @@ export class TacticalFPSEngine {
       this.state.hitMarkerAlpha = 1.0;
       this.state.hitMarkerIsCrit = false;
       this.state.lastHitZone = 'ARMOR';
+      this.addPlayerXp(20);
 
       if (target.armorHealth <= 0 && target.armorMesh) {
         target.armorMesh.visible = false;
@@ -1589,10 +1754,12 @@ export class TacticalFPSEngine {
 
     if (isHead) {
       this.state.headshots += 1;
+      this.addPlayerXp(50);
       soundEngine.playImpact('HEADSHOT');
       mobileHardware.vibrateHitConfirm(true);
       this.hitstopTimer = 0.042; // Weight-scaled 42ms simulation hitstop on headshot
     } else {
+      this.addPlayerXp(15);
       soundEngine.playImpact('TORSO');
       mobileHardware.vibrateHitConfirm(false);
     }
@@ -1610,6 +1777,7 @@ export class TacticalFPSEngine {
       target.isTelegraphing = false;
       if (target.laserLine) target.laserLine.visible = false;
       this.state.score += isHead ? 150 : 100;
+      this.addPlayerXp(100);
       this.state.lastHitZone = 'KILL';
 
       // Update remaining drill targets
@@ -1631,6 +1799,7 @@ export class TacticalFPSEngine {
               this.state.courseTimerSec.toFixed(2)
             );
           }
+          this.addPlayerXp(350);
           this.state.screen = 'VICTORY';
           if (document.pointerLockElement) {
             document.exitPointerLock();
@@ -1669,6 +1838,15 @@ export class TacticalFPSEngine {
 
     const now = performance.now();
     const rawDt = (now - this.lastTime) / 1000;
+
+    if (this.state.fpsLimit > 0) {
+      const minInterval = 1 / this.state.fpsLimit;
+      if (rawDt < minInterval * 0.9) {
+        this.frameId = requestAnimationFrame(this.tick);
+        return;
+      }
+    }
+
     this.lastTime = now;
     // Clamp delta time to prevent physics tunneling on tab switch
     const dt = Math.min(Math.max(rawDt, 0.001), 0.05);
@@ -1980,6 +2158,8 @@ export class TacticalFPSEngine {
     if (this.slideTimer > 0) {
       this.slideTimer -= dt;
       this.state.stance = 'SLIDE';
+    } else if (this.state.isProneToggled || this.keysHeld.has('KeyZ')) {
+      this.state.stance = 'PRONE';
     } else if (crouchHeld) {
       this.state.stance = 'CROUCH';
     } else if (sprintHeld) {
@@ -2040,6 +2220,7 @@ export class TacticalFPSEngine {
       let maxSpeed = 4.6;
       if (this.state.stance === 'SPRINT') maxSpeed = 6.8;
       else if (this.state.stance === 'CROUCH') maxSpeed = 2.65;
+      else if (this.state.stance === 'PRONE') maxSpeed = 1.25;
       if (this.state.isAds) maxSpeed *= 0.68;
 
       this.playerVel.x = THREE.MathUtils.damp(
@@ -2115,13 +2296,15 @@ export class TacticalFPSEngine {
       this.landingDipVel = 0;
     }
 
-    // Eye height interpolation (Stand: 1.68m, Crouch: 1.08m, Slide: 0.86m)
+    // Eye height interpolation (Stand: 1.68m, Crouch: 1.08m, Slide: 0.86m, Prone: 0.42m)
     const targetEye =
       this.state.stance === 'SLIDE'
         ? 0.86
-        : this.state.stance === 'CROUCH'
-          ? 1.08
-          : 1.68;
+        : this.state.stance === 'PRONE'
+          ? 0.42
+          : this.state.stance === 'CROUCH'
+            ? 1.08
+            : 1.68;
     this.currentEyeHeight = THREE.MathUtils.damp(
       this.currentEyeHeight,
       targetEye,

@@ -5,6 +5,8 @@ const loadingArtwork = '/assets/images/tactical_loading_art_1794056561341.jpg';
 
 interface LoadingScreenProps {
   onComplete: () => void;
+  progress?: number;
+  statusLabel?: string;
 }
 
 const TIPS = [
@@ -13,35 +15,58 @@ const TIPS = [
   'DICA: Disparos em semi-automático oferecem maior precisão e controle de recuo em alvos distantes.',
   'DICA: No estande balístico, atire nos gongos de aço AR500 para ouvir o impacto sonoro característico.',
   'DICA: Pressione [H] para abrir a bancada e personalizar mira holográfica, LPVO, supressor e laser PEQ.',
+  'DICA: Suba de patente no sistema Warface eliminando alvos para desbloquear novas armas e mira telescópica LPVO.',
 ];
 
-export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
-  const [progress, setProgress] = useState(0);
+export const LoadingScreen: React.FC<LoadingScreenProps> = ({
+  onComplete,
+  progress: externalProgress,
+  statusLabel,
+}) => {
+  const [internalProgress, setInternalProgress] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
+
+  const displayProgress =
+    typeof externalProgress === 'number'
+      ? Math.min(100, Math.max(0, externalProgress))
+      : internalProgress;
 
   useEffect(() => {
     const tipInterval = setInterval(() => {
       setTipIndex((prev) => (prev + 1) % TIPS.length);
-    }, 3200);
+    }, 3000);
 
-    const progressInterval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(progressInterval);
-          setTimeout(onComplete, 600);
-          return 100;
-        }
-        // Smooth organic progress curve (approx. 5.5 seconds total)
-        const step = prev < 30 ? 1.6 : prev < 70 ? 1.1 : prev < 90 ? 0.7 : 0.4;
-        return Math.min(100, prev + step);
-      });
-    }, 60);
+    let progressInterval: NodeJS.Timeout | undefined;
+
+    if (typeof externalProgress !== 'number') {
+      progressInterval = setInterval(() => {
+        setInternalProgress((prev) => {
+          if (prev >= 100) {
+            clearInterval(progressInterval);
+            setTimeout(onComplete, 400);
+            return 100;
+          }
+          const step = prev < 30 ? 2.5 : prev < 70 ? 1.8 : prev < 90 ? 1.2 : 0.8;
+          return Math.min(100, prev + step);
+        });
+      }, 50);
+    }
 
     return () => {
       clearInterval(tipInterval);
-      clearInterval(progressInterval);
+      if (progressInterval) clearInterval(progressInterval);
     };
-  }, [onComplete]);
+  }, [externalProgress, onComplete]);
+
+  // If controlled externally and reaches 100%, trigger completion
+  useEffect(() => {
+    if (typeof externalProgress === 'number' && externalProgress >= 100) {
+      const timer = setTimeout(() => {
+        onComplete();
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [externalProgress, onComplete]);
 
   return (
     <div className="fixed inset-0 z-50 bg-[#05070a] select-none overflow-hidden flex flex-col justify-between">
@@ -76,12 +101,12 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
         {/* System Telemetry Check */}
         <div className="hidden sm:flex flex-col items-end gap-1 font-mono text-[10px] tabular-nums text-slate-400 bg-black/60 px-3 py-2 rounded-lg border border-white/10">
           <div className="flex items-center gap-2">
-            <span className="text-slate-500">ARSENAL:</span>
-            <span className="text-emerald-400 font-semibold">8 ARMAS CALIBRADAS</span>
+            <span className="text-slate-500">PRELOADER:</span>
+            <span className="text-emerald-400 font-semibold">THREE.LoadingManager + GPU Shaders</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-slate-500">MUNDO 3D:</span>
-            <span className="text-emerald-400 font-semibold">ESTANDE E SALA DE ARMAS</span>
+            <span className="text-slate-500">ARSENAL 3D:</span>
+            <span className="text-emerald-400 font-semibold">8 ARMAS COMPILAÇÃO TOTAL</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-slate-500">FÍSICA BALÍSTICA:</span>
@@ -94,7 +119,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
       <div className="relative z-10 px-6 py-8 sm:px-12 sm:py-10 max-w-4xl w-full mx-auto">
         {/* Dynamic Tip Readout */}
         <div className="mb-4 bg-black/70 border border-white/10 rounded-xl px-4 py-2.5 backdrop-blur-xs flex items-center gap-3">
-          <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 animate-ping" />
           <p className="font-mono text-xs sm:text-sm text-slate-200 tracking-wide line-clamp-2">
             {TIPS[tipIndex]}
           </p>
@@ -102,20 +127,21 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
 
         {/* Percentage & Loading Status */}
         <div className="flex justify-between items-baseline mb-2 font-mono text-xs">
-          <span className="text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <span>CARREGANDO RECURSOS TÁTICOS</span>
-            <span className="text-amber-400">...</span>
+          <span className="text-slate-400 uppercase tracking-wider flex items-center gap-2 truncate pr-4">
+            <span className="text-amber-400 font-semibold">
+              {statusLabel || 'CARREGANDO RECURSOS E SHADERS DO JOGO...'}
+            </span>
           </span>
-          <span className="text-amber-400 font-bold tabular-nums text-sm sm:text-base">
-            {Math.round(progress)}%
+          <span className="text-amber-400 font-bold tabular-nums text-sm sm:text-base shrink-0">
+            {Math.round(displayProgress)}%
           </span>
         </div>
 
         {/* Tactical Progress Bar */}
         <div className="w-full h-2.5 sm:h-3 bg-slate-900/90 rounded-full border border-white/20 p-[1px] overflow-hidden shadow-2xl">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-amber-600 via-amber-400 to-amber-300 transition-all duration-75 shadow-[0_0_15px_rgba(245,158,11,0.8)] relative"
-            style={{ width: `${progress}%` }}
+            className="h-full rounded-full bg-gradient-to-r from-amber-600 via-amber-400 to-amber-300 transition-all duration-150 shadow-[0_0_15px_rgba(245,158,11,0.8)] relative"
+            style={{ width: `${displayProgress}%` }}
           >
             <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.2)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.2)_50%,rgba(255,255,255,0.2)_75%,transparent_75%,transparent)] bg-[size:16px_16px] animate-[shimmer_1.2s_linear_infinite]" />
           </div>
@@ -124,3 +150,4 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
     </div>
   );
 };
+

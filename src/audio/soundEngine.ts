@@ -26,6 +26,11 @@ export const MENU_MUSIC_LOCAL_URL =
 export const MENU_MUSIC_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/956355e99d304990fce90aa7bdbc7e704314f130/videoplayback.m4a';
 
+export const DRY_FIRE_WAV_LOCAL_URL =
+  '/sounds/a_rifle_being_dry_fired_once.wav';
+export const DRY_FIRE_WAV_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/7b2263cf0ce87b89429eb95de4ec622053dd3663/725402__serutonin-deprivd__a-rifle-being-dry-fired-once.wav';
+
 class TacticalSoundEngine {
   private ctx: AudioContext | null = null;
   private noiseBuffer: AudioBuffer | null = null;
@@ -56,6 +61,13 @@ class TacticalSoundEngine {
   private m4a1ShotAudioPool: HTMLAudioElement[] = [];
   private m4a1ShotPoolIdx = 0;
 
+  // Real Dry-Fire Click Audio Sample
+  private dryFireRawData: ArrayBuffer | null = null;
+  private dryFireBuffer: AudioBuffer | null = null;
+  private dryFireDecoding = false;
+  private dryFireAudioPool: HTMLAudioElement[] = [];
+  private dryFirePoolIdx = 0;
+
   // Main Menu Background Music
   private menuMusicAudio: HTMLAudioElement | null = null;
   private isMenuMusicPlaying = false;
@@ -77,10 +89,19 @@ class TacticalSoundEngine {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      this.preloadDesertEagleSample();
-      this.preloadPistolReloadSample();
-      this.preloadM4a1ReloadSample();
-      this.preloadM4a1ShotSample();
+      this.init();
+    }
+  }
+
+  public init(): void {
+    if (typeof window === 'undefined') return;
+    this.preloadDesertEagleSample();
+    this.preloadPistolReloadSample();
+    this.preloadM4a1ReloadSample();
+    this.preloadM4a1ShotSample();
+    this.preloadDryFireSample();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      void this.ctx.resume();
     }
   }
 
@@ -129,6 +150,54 @@ class TacticalSoundEngine {
       })
       .catch(() => {
         this.m4a1ShotDecoding = false;
+      });
+  }
+
+  private preloadDryFireSample(): void {
+    for (let i = 0; i < 4; i++) {
+      const audio = new Audio(DRY_FIRE_WAV_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = DRY_FIRE_WAV_GITHUB_RAW_URL;
+      };
+      this.dryFireAudioPool.push(audio);
+    }
+
+    fetch(DRY_FIRE_WAV_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local dry fire WAV fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(DRY_FIRE_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.dryFireRawData = buf;
+        if (this.ctx) {
+          this.tryDecodeDryFire(this.ctx);
+        }
+      })
+      .catch(() => {});
+  }
+
+  private tryDecodeDryFire(ctx: AudioContext): void {
+    if (
+      this.dryFireBuffer ||
+      this.dryFireDecoding ||
+      !this.dryFireRawData
+    ) {
+      return;
+    }
+    this.dryFireDecoding = true;
+    const copy = this.dryFireRawData.slice(0);
+    ctx
+      .decodeAudioData(copy)
+      .then((decoded) => {
+        this.dryFireBuffer = decoded;
+        this.dryFireDecoding = false;
+      })
+      .catch(() => {
+        this.dryFireDecoding = false;
       });
   }
 
@@ -537,20 +606,48 @@ class TacticalSoundEngine {
   }
 
   public playDryFire(): void {
+    if (this.muted) return;
     const ctx = this.ensureContext();
-    if (!ctx) return;
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(1900, now);
-    osc.frequency.exponentialRampToValueAtTime(520, now + 0.025);
-    gain.gain.setValueAtTime(0.25, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.035);
+
+    if (ctx) {
+      this.tryDecodeDryFire(ctx);
+    }
+
+    if (ctx && this.dryFireBuffer) {
+      const source = ctx.createBufferSource();
+      source.buffer = this.dryFireBuffer;
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(1.0, ctx.currentTime);
+      source.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      source.start();
+      return;
+    }
+
+    // Zero-latency HTMLAudioElement fallback pool
+    if (this.dryFireAudioPool.length > 0) {
+      const el = this.dryFireAudioPool[this.dryFirePoolIdx];
+      this.dryFirePoolIdx = (this.dryFirePoolIdx + 1) % this.dryFireAudioPool.length;
+      el.currentTime = 0;
+      el.play().catch(() => {});
+      return;
+    }
+
+    // Procedural backup click
+    if (ctx) {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(1900, now);
+      osc.frequency.exponentialRampToValueAtTime(520, now + 0.025);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.035);
+    }
   }
 
   public playMechanicalSwitch(pitchMultiplier = 1.0): void {

@@ -23,56 +23,52 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const size = 96;
+      const size = 104;
       const center = size / 2;
-      const scale = 1.8;
-      const maxRange = center - 5;
+      const scale = 2.0;
+      const maxRange = center - 6;
 
       ctx.clearRect(0, 0, size, size);
 
-      // Dark tactical background circle
-      ctx.beginPath();
-      ctx.arc(center, center, center - 2, 0, Math.PI * 2);
-      ctx.fillStyle = '#06090e';
-      ctx.fill();
+      // Dark square tactical terrain background (COD Mobile style)
+      ctx.fillStyle = '#141c24';
+      ctx.fillRect(0, 0, size, size);
 
-      // Outer border
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#334155';
-      ctx.stroke();
+      // Save context to rotate world relative to player or keep north-up tactical blocks
+      ctx.save();
+      ctx.translate(center, center);
 
-      // Inner distance rings
+      // Subtle tactical grid lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
       ctx.lineWidth = 1;
-      ctx.strokeStyle = '#1e293b';
-      ctx.beginPath();
-      ctx.arc(center, center, (center - 3) * 0.65, 0, Math.PI * 2);
-      ctx.stroke();
+      for (let g = -40; g <= 40; g += 20) {
+        ctx.beginPath();
+        ctx.moveTo(g, -center);
+        ctx.lineTo(g, center);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-center, g);
+        ctx.lineTo(center, g);
+        ctx.stroke();
+      }
 
-      ctx.beginPath();
-      ctx.arc(center, center, (center - 3) * 0.35, 0, Math.PI * 2);
-      ctx.stroke();
+      // Draw simplified map structures (Firing Range & Killhouse walls) relative to player
+      const drawStructure = (wx: number, wz: number, w: number, d: number, color: string) => {
+        const rx = (wx - playerX) * scale;
+        const rz = (wz - playerZ) * scale;
+        ctx.fillStyle = color;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+        ctx.lineWidth = 1;
+        ctx.fillRect(rx - (w * scale) / 2, rz - (d * scale) / 2, w * scale, d * scale);
+        ctx.strokeRect(rx - (w * scale) / 2, rz - (d * scale) / 2, w * scale, d * scale);
+      };
 
-      // Crosshair lines
-      ctx.strokeStyle = '#1e293b';
-      ctx.beginPath();
-      ctx.moveTo(center, 5);
-      ctx.lineTo(center, size - 5);
-      ctx.moveTo(5, center);
-      ctx.lineTo(size - 5, center);
-      ctx.stroke();
+      // Range booth & Killhouse blocks for realistic COD minimap feel
+      drawStructure(-6, 0, 8, 18, '#25313d');
+      drawStructure(8, -10, 12, 16, '#2c3a47');
+      drawStructure(0, -18, 22, 6, '#1f2933');
 
-      // Cardinal direction letters
-      ctx.font = 'bold 8px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#06b6d4';
-      ctx.fillText('N', center, 10);
-      ctx.fillStyle = '#64748b';
-      ctx.fillText('E', size - 8, center);
-      ctx.fillText('S', center, size - 8);
-      ctx.fillText('W', 8, center);
-
-      // Wall Armory marker (-3.2, 0.0)
+      // Wall Armory crate icon (-3.2, 0.0)
       const armRelX = (-3.2 - playerX) * scale;
       const armRelZ = (0.0 - playerZ) * scale;
       const armDist = Math.hypot(armRelX, armRelZ);
@@ -83,16 +79,14 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
         armX = Math.cos(ang) * maxRange;
         armZ = Math.sin(ang) * maxRange;
       }
-      ctx.fillStyle = '#0284c7';
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 1;
-      ctx.fillRect(center + armX - 3, center + armZ - 3, 6, 6);
-      ctx.strokeRect(center + armX - 3, center + armZ - 3, 6, 6);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(armX - 2.5, armZ - 2.5, 5, 5);
 
-      // Target pings
+      // Target pings (Red enemy dots like COD Mobile)
       if (targets && targets.length > 0) {
         for (let i = 0; i < targets.length; i++) {
           const t = targets[i];
+          if (t.isDown) continue;
           const relX = (t.x - playerX) * scale;
           const relZ = (t.z - playerZ) * scale;
           const dist = Math.hypot(relX, relZ);
@@ -104,55 +98,49 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
             tz = Math.sin(ang) * maxRange;
           }
 
-          const isKillhouse = t.sector === 'KILLHOUSE';
           ctx.beginPath();
-          ctx.arc(center + tx, center + tz, t.isDown ? 2 : 3, 0, Math.PI * 2);
-          ctx.fillStyle = t.isDown ? '#475569' : isKillhouse ? '#ef4444' : '#eab308';
+          ctx.arc(tx, tz, 3.2, 0, Math.PI * 2);
+          ctx.fillStyle = '#ef4444';
           ctx.fill();
-          if (!t.isDown) {
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 0.6;
-            ctx.stroke();
-          }
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
         }
       }
 
-      // Center Player Icon with orientation cone
-      ctx.save();
-      ctx.translate(center, center);
+      // Rotate for player vision cone & yellow teardrop marker (exact COD Mobile style)
       ctx.rotate(-playerYaw);
 
-      // Vision cone
+      // Bright white/amber FOV cone
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.lineTo(-14, -22);
-      ctx.arc(0, 0, 26, -Math.PI / 2 - 0.5, -Math.PI / 2 + 0.5);
+      ctx.lineTo(-18, -32);
+      ctx.arc(0, 0, 36, -Math.PI / 2 - 0.52, -Math.PI / 2 + 0.52);
       ctx.closePath();
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.22)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
       ctx.fill();
 
-      // Player Arrow
+      // Yellow/Gold Player Teardrop Pointer with white border
       ctx.beginPath();
-      ctx.moveTo(0, -7);
-      ctx.lineTo(5, 5);
-      ctx.lineTo(0, 2);
-      ctx.lineTo(-5, 5);
+      ctx.moveTo(0, -8);
+      ctx.bezierCurveTo(6, -1, 6, 6, 0, 6);
+      ctx.bezierCurveTo(-6, 6, -6, -1, 0, -8);
       ctx.closePath();
-      ctx.fillStyle = '#38bdf8';
+      ctx.fillStyle = '#facc15';
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 0.8;
+      ctx.lineWidth = 1.5;
       ctx.stroke();
 
       ctx.restore();
     }, [playerX, playerZ, playerYaw, targets]);
 
     return (
-      <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-[#06090e] border-2 border-slate-700/80 shadow-xl overflow-hidden shrink-0 pointer-events-auto">
+      <div className="relative w-24 h-24 sm:w-28 sm:h-28 bg-[#141c24]/90 border border-white/30 shadow-lg overflow-hidden shrink-0 pointer-events-none">
         <canvas
           ref={canvasRef}
-          width={96}
-          height={96}
+          width={104}
+          height={104}
           className="w-full h-full block"
         />
       </div>

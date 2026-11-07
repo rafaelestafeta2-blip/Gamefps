@@ -74,7 +74,7 @@ export interface HudState {
   isHoldingBreath: boolean;
   isAds: boolean;
   adsAlpha: number; // 0..1 smooth interpolation
-  stance: 'STAND' | 'CROUCH' | 'SPRINT' | 'SLIDE';
+  stance: 'STAND' | 'CROUCH' | 'PRONE' | 'SPRINT' | 'SLIDE';
   leanDirection: -1 | 0 | 1; // -1 Left (Q), 0 Center, 1 Right (E)
   playerPos: { x: number; z: number };
   playerYaw: number;
@@ -103,17 +103,32 @@ export interface HudState {
   hitMarkerIsCrit: boolean;
   damageFlashAlpha: number;
 
+  // Warface Rank Progression System
+  playerXp: number;
+  rankLevel: number;
+  rankTitle: string;
+  rankBadge: string;
+  rankBadgeColor: string;
+  nextRankXp: number;
+  lastXpGained: number;
+  rankUpNotification: string | null;
+
   // Audio, UI & Mobile Hardware Features
   muted: boolean;
   dockCollapsed: boolean;
   touchControlsVisible: boolean;
   isCrouchingToggled: boolean;
+  isProneToggled: boolean;
   qualityPreset: QualityPreset;
   dynamicResolutionEnabled: boolean;
   liveFps: number;
   renderScalePercent: number;
   gyroMode: GyroMode;
   gyroSensitivity: number;
+  lookSensitivity: number;
+  adsSensitivity: number;
   hapticsEnabled: boolean;
   isFullscreen: boolean;
+  graphicQuality: 'HIGH' | 'LOW';
+  fpsLimit: number;
 }
