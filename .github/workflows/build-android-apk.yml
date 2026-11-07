@@ -27,6 +27,8 @@ jobs:
 
       - name: 4. Configurar Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: 5. Instalar Dependências e Compilar Web App (Vite Production Build)
         run: |
