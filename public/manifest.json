@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "KINETIC — Tactical FPS",
+  "short_name": "KINETIC",
+  "description": "Simulador FPS tático 3D em primeira pessoa com balística 5.56mm, recarga em estágios e controles mobile multi-touch + giroscópio.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#090b0e",
+  "theme_color": "#090b0e",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "KINETIC // Pre-Production Tactical FPS",
+  "description": "Simulador FPS tático em primeira pessoa com balística realista, sistema avançado de recarga em estágios, mira óptica de precisão (ADS) e killhouse de pré-produção.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

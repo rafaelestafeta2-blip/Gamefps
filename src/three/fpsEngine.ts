@@ -1,0 +1,2647 @@
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { soundEngine } from '../audio/soundEngine';
+import { mobileHardware } from '../mobile/nativeHardware';
+import {
+  BallisticShotTelemetry,
+  DrillMode,
+  FireMode,
+  GameScreenState,
+  GyroMode,
+  HudState,
+  OpticType,
+  QualityPreset,
+  WeaponId,
+} from '../types/game';
+import { BallisticsFXPool } from './ballisticsPool';
+import {
+  buildPreProductionLevel,
+  ColliderBox,
+  TacticalTargetEntity,
+} from './levelBuilder';
+import { createProceduralTextures, ProceduralTextures } from './textures';
+import {
+  buildTacticalWeaponRig,
+  getOpticAdsTransform,
+  TacticalWeaponRig,
+} from './weaponBuilder';
+
+// Pre-allocated math helpers outside the frame loop (Zero GC)
+const _forward = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
+const _moveVec = new THREE.Vector3();
+const _rayOrigin = new THREE.Vector3();
+const _rayDir = new THREE.Vector3();
+const _worldPos = new THREE.Vector3();
+const _worldPos2 = new THREE.Vector3();
+const _hitNormal = new THREE.Vector3();
+const _targetToPlayer = new THREE.Vector3();
+
+export class TacticalFPSEngine {
+  private container: HTMLElement;
+  private onHudUpdate: (state: HudState) => void;
+
+  public readonly isSoftwareGl: boolean;
+  private renderer: THREE.WebGLRenderer;
+  private scene: THREE.Scene;
+  private camera: THREE.PerspectiveCamera;
+  private pitchObject: THREE.Object3D;
+  private yawObject: THREE.Object3D;
+
+  private textures: ProceduralTextures;
+  private weaponRig: TacticalWeaponRig;
+  private colliders: ColliderBox[] = [];
+  private targets: TacticalTargetEntity[] = [];
+  private shootableMeshes: THREE.Mesh[] = [];
+  private wallStandPositions: THREE.Vector3[] = [];
+  private fxPool: BallisticsFXPool;
+  private raycaster = new THREE.Raycaster();
+  private laserDotMesh: THREE.Mesh;
+  private keyLight!: THREE.DirectionalLight;
+
+  // Loop, Timing & Dynamic Resolution Governor (DRS)
+  private frameId = 0;
+  private disposed = false;
+  private lastTime = performance.now();
+  private elapsedTime = 0;
+  private hitstopTimer = 0;
+  private hudSyncTimer = 0;
+  private drsAccumTime = 0;
+  private drsFrameCount = 0;
+  private currentRenderScale = 1.0;
+
+  // Input State (Separated Held vs Edge-Triggered + Mobile Touch Analog State)
+  private keysHeld = new Set<string>();
+  private mouseButtonsHeld = new Set<number>();
+  private jumpBufferTimer = 0;
+  private coyoteTimer = 0;
+  private lastRKeyPressTime = 0;
+  private touchMoveX = 0; // -1 (Left) to +1 (Right)
+  private touchMoveY = 0; // -1 (Backward) to +1 (Forward)
+  private touchSprinting = false;
+  private touchFireHeld = false;
+  private touchHoldBreath = false;
+  private touchLeanToggle: -1 | 0 | 1 = 0;
+  private canvasTouchLookId: number | null = null;
+  private canvasTouchLastX = 0;
+  private canvasTouchLastY = 0;
+
+  // Player Physics & Kinematics
+  private playerPos = new THREE.Vector3(-6.8, 0, 3.2);
+  private playerVel = new THREE.Vector3();
+  private isGrounded = true;
+  private yaw = 0;
+  private pitch = 0;
+  private currentEyeHeight = 1.68;
+  private slideTimer = 0;
+  private slideDir = new THREE.Vector3();
+  private leanTarget: -1 | 0 | 1 = 0;
+  private leanCurrent = 0;
+  private walkBobPhase = 0;
+  private walkBobAmp = 0;
+  private landingDip = 0;
+  private landingDipVel = 0;
+
+  // Weapon & Recoil Spring Kinematics
+  private swayPos = new THREE.Vector2();
+  private swayVel = new THREE.Vector2();
+  private recoilKickZ = 0;
+  private recoilPitch = 0;
+  private recoilYaw = 0;
+  private cameraShake = 0;
+  private boltCycleOffset = 0;
+  private muzzleFlashTimer = 0;
+  private fireCooldown = 0;
+  private burstRemaining = 0;
+  private triggerPulledThisPress = false;
+  private sniperChamberTimer = 0;
+
+  // Reload State Machine
+  private reloadTimer = 0;
+  private reloadDuration = 1.9;
+  private isSpeedReload = false;
+  private needsBoltReleaseStage = false;
+  private stageSoundFlags = {
+    magOut: false,
+    magIn: false,
+    boltSlap: false,
+  };
+  private magCheckTimer = 0;
+
+  private primaryWeapon: WeaponId = 'M4_CARBINE';
+  private secondaryWeapon: WeaponId = 'P50_PISTOL';
+  private cachedRadarTargets: Array<{
+    id: string;
+    sector: 'RANGE' | 'KILLHOUSE';
+    x: number;
+    z: number;
+    isDown: boolean;
+  }> = [];
+
+  // Public HUD state mirror (All players start with M4_CARBINE as primary and P50_PISTOL as secondary)
+  public state: HudState = {
+    screen: 'INTRO',
+    pointerLocked: false,
+    activeWeapon: 'M4_CARBINE',
+    primaryWeapon: 'M4_CARBINE',
+    secondaryWeapon: 'P50_PISTOL',
+    nearWallStand: false,
+    focusedWallWeapon: null,
+    chambered: 1,
+    currentMagRounds: 30,
+    magCapacity: 30,
+    magazines: [30, 30, 30, 30],
+    boltLockedBack: false,
+    fireMode: 'AUTO',
+    optic: 'iron',
+    lpvoZoom: 2.0,
+    cantedActive: false,
+    suppressorAttached: false,
+    laserActive: true,
+    reloadPhase: 'IDLE',
+    reloadProgress: 0,
+    reloadTypeLabel: '',
+    magCheckVisible: false,
+    wallTuckAmount: 0,
+
+    health: 100,
+    maxHealth: 100,
+    stamina: 100,
+    isHoldingBreath: false,
+    isAds: false,
+    adsAlpha: 0,
+    stance: 'STAND',
+    leanDirection: 0,
+    playerPos: { x: -6.8, z: 3.2 },
+    playerYaw: 0,
+    radarTargets: [],
+
+    drillMode: 'FREE_RANGE',
+    score: 0,
+    hits: 0,
+    shotsFired: 0,
+    headshots: 0,
+    targetsRemaining: 6,
+    totalTargetsInDrill: 6,
+    courseTimerSec: 0,
+    bestCourseTimeSec: null,
+    lastHitZone: null,
+    lastShotTelemetry: null,
+    shotHistory: [],
+    hitMarkerAlpha: 0,
+    hitMarkerIsCrit: false,
+    damageFlashAlpha: 0,
+
+    muted: false,
+    dockCollapsed: true,
+    touchControlsVisible: true,
+    isCrouchingToggled: false,
+    qualityPreset: 'BALANCED_60',
+    dynamicResolutionEnabled: true,
+    liveFps: 60,
+    renderScalePercent: 100,
+    gyroMode: 'ADS_ONLY',
+    gyroSensitivity: 1.2,
+    hapticsEnabled: true,
+    isFullscreen: false,
+  };
+
+  constructor(container: HTMLElement, onHudUpdate: (state: HudState) => void) {
+    this.container = container;
+    this.onHudUpdate = onHudUpdate;
+
+    // 1. Mandatory Software-WebGL Guard
+    this.isSoftwareGl = (() => {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      if (!gl) return true;
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
+      const gpu = String(gl.getParameter(param));
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
+    })();
+
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: !this.isSoftwareGl,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.12;
+    this.currentRenderScale = this.isSoftwareGl
+      ? 1.0
+      : Math.min(window.devicePixelRatio || 1, 1.35);
+    this.renderer.setPixelRatio(this.currentRenderScale);
+    this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer.shadowMap.enabled = !this.isSoftwareGl;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(this.renderer.domElement);
+
+    // 2. Scene, Studio IBL Environment (`RoomEnvironment`) & Horizon Fog
+    this.scene = new THREE.Scene();
+    const skyColor = new THREE.Color(0x0d121a);
+    this.scene.background = skyColor;
+    this.scene.fog = new THREE.FogExp2(0x0d121a, 0.014);
+
+    const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmremGenerator.fromScene(
+      new RoomEnvironment(),
+      0.04
+    ).texture;
+    pmremGenerator.dispose();
+
+    // 3. Balanced 3-Point Warm/Cool Lighting Rig
+    const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x1e293b, 0.75);
+    hemiLight.position.set(0, 30, 0);
+    this.scene.add(hemiLight);
+
+    const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.85);
+    this.keyLight = keyLight;
+    keyLight.position.set(22, 36, 18);
+    keyLight.castShadow = !this.isSoftwareGl;
+    if (!this.isSoftwareGl) {
+      keyLight.shadow.mapSize.width = 1024;
+      keyLight.shadow.mapSize.height = 1024;
+      const d = 42;
+      keyLight.shadow.camera.left = -d;
+      keyLight.shadow.camera.right = d;
+      keyLight.shadow.camera.top = d;
+      keyLight.shadow.camera.bottom = -d;
+      keyLight.shadow.camera.near = 1;
+      keyLight.shadow.camera.far = 110;
+      keyLight.shadow.bias = -0.0005;
+      keyLight.shadow.normalBias = 0.02;
+    }
+    this.scene.add(keyLight);
+
+    const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.55);
+    rimLight.position.set(-25, 18, -35);
+    this.scene.add(rimLight);
+
+    // 4. First-Person Camera Hierarchy (Yaw -> Pitch -> Camera -> WeaponRig)
+    this.camera = new THREE.PerspectiveCamera(
+      72,
+      container.clientWidth / container.clientHeight,
+      0.03,
+      160
+    );
+    this.pitchObject = new THREE.Object3D();
+    this.pitchObject.add(this.camera);
+
+    this.yawObject = new THREE.Object3D();
+    this.yawObject.position.set(this.playerPos.x, this.currentEyeHeight, this.playerPos.z);
+    this.yawObject.add(this.pitchObject);
+    this.scene.add(this.yawObject);
+
+    // 5. Procedural Textures, Weapon Rig, Level & Ballistics Pool
+    this.textures = createProceduralTextures(this.renderer);
+    this.weaponRig = buildTacticalWeaponRig(this.textures, this.isSoftwareGl);
+    this.camera.add(this.weaponRig.root);
+
+    const levelData = buildPreProductionLevel(this.textures, this.isSoftwareGl);
+    this.scene.add(levelData.levelGroup);
+    this.colliders = levelData.colliders;
+    this.targets = levelData.targets;
+    this.shootableMeshes = levelData.shootableMeshes;
+    this.wallStandPositions = levelData.wallStandPositions;
+
+    // Start with built-in Iron Sights on the default P50 Heavy Pistol
+    this.weaponRig.holoSightGroup.visible = false;
+    this.weaponRig.lpvoScopeGroup.visible = false;
+    this.weaponRig.ironSightsGroup.visible = true;
+
+    this.fxPool = new BallisticsFXPool(this.scene);
+
+    // World-space green laser impact dot
+    this.laserDotMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.016, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0x10b981 })
+    );
+    this.scene.add(this.laserDotMesh);
+
+    // Pre-warm shaders on GPU
+    if (!this.isSoftwareGl) {
+      this.renderer.compile(this.scene, this.camera);
+    }
+
+    this.bindEvents();
+    this.startLoop();
+  }
+
+  // =========================================================================
+  // PUBLIC CONTROLS FOR UI OVERLAYS & KEYBOARD
+  // =========================================================================
+  public startGame(mode?: DrillMode): void {
+    if (mode) {
+      this.state.drillMode = mode;
+    }
+    this.resetScenario(this.state.drillMode);
+    this.state.screen = 'PLAYING';
+    if (this.state.gyroMode !== 'OFF') {
+      void this.enableGyroSensor();
+    }
+    this.requestPointerLock();
+    this.emitHud();
+  }
+
+  public resumeGame(): void {
+    this.state.screen = 'PLAYING';
+    this.requestPointerLock();
+    this.emitHud();
+  }
+
+  public pauseGame(): void {
+    if (this.state.screen === 'PLAYING') {
+      this.state.screen = 'PAUSED';
+      if (document.pointerLockElement) {
+        document.exitPointerLock();
+      }
+      this.emitHud();
+    }
+  }
+
+  public returnToMainMenu(): void {
+    this.state.screen = 'MAIN_MENU';
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+    this.emitHud();
+  }
+
+  public setScreenState(screen: GameScreenState): void {
+    this.state.screen = screen;
+    if (screen !== 'PLAYING' && document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+    this.emitHud();
+  }
+
+  public setDrillMode(mode: DrillMode): void {
+    this.state.drillMode = mode;
+    this.resetScenario(mode);
+    this.emitHud();
+  }
+
+  public setOptic(optic: OpticType): void {
+    this.state.optic = optic;
+    this.weaponRig.holoSightGroup.visible = optic === 'holo';
+    this.weaponRig.lpvoScopeGroup.visible = optic === 'lpvo';
+    this.weaponRig.ironSightsGroup.visible = optic === 'iron';
+    soundEngine.playMechanicalSwitch(1.1);
+    this.emitHud();
+  }
+
+  public toggleCantedSight(): void {
+    this.state.cantedActive = !this.state.cantedActive;
+    soundEngine.playMechanicalSwitch(1.25);
+    this.emitHud();
+  }
+
+  public toggleSuppressor(): void {
+    this.state.suppressorAttached = !this.state.suppressorAttached;
+    this.weaponRig.suppressorGroup.visible = this.state.suppressorAttached;
+    soundEngine.playMechanicalSwitch(0.8);
+    this.emitHud();
+  }
+
+  public toggleLaser(): void {
+    this.state.laserActive = !this.state.laserActive;
+    this.weaponRig.peqLaserBeam.visible = this.state.laserActive;
+    this.laserDotMesh.visible = this.state.laserActive;
+    soundEngine.playMechanicalSwitch(1.35);
+    this.emitHud();
+  }
+
+  public cycleFireMode(): void {
+    const order: FireMode[] = ['SEMI', 'BURST', 'AUTO'];
+    const idx = (order.indexOf(this.state.fireMode) + 1) % order.length;
+    this.state.fireMode = order[idx];
+    soundEngine.playMechanicalSwitch(1.15);
+    this.emitHud();
+  }
+
+  public toggleWeaponSlot(): void {
+    if (this.state.activeWeapon === 'P50_PISTOL') {
+      this.selectWeapon(this.primaryWeapon);
+    } else {
+      this.selectWeapon('P50_PISTOL');
+    }
+  }
+
+  public selectWeapon(weaponId: WeaponId): void {
+    if (weaponId === 'P50_PISTOL') {
+      this.secondaryWeapon = 'P50_PISTOL';
+    } else {
+      this.primaryWeapon = weaponId;
+    }
+    this.state.primaryWeapon = this.primaryWeapon;
+    this.state.secondaryWeapon = 'P50_PISTOL';
+    this.state.activeWeapon = weaponId;
+    this.weaponRig.setActiveWeapon(weaponId);
+    this.state.reloadPhase = 'IDLE';
+    this.state.reloadProgress = 0;
+    this.state.boltLockedBack = false;
+    this.state.chambered = 1;
+    this.sniperChamberTimer = 0;
+    this.weaponRig.root.visible = true;
+
+    switch (weaponId) {
+      case 'P50_PISTOL':
+        this.state.magCapacity = 12;
+        this.state.currentMagRounds = 12;
+        this.state.magazines = [12, 12, 12, 12];
+        this.state.fireMode = 'SEMI';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: MARK 23 PISTOL (.45 ACP)';
+        break;
+      case 'SMG_45':
+        this.state.magCapacity = 32;
+        this.state.currentMagRounds = 32;
+        this.state.magazines = [32, 32, 32, 32];
+        this.state.fireMode = 'AUTO';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: SMG .45 TÁTICA (.45 ACP)';
+        break;
+      case 'M4_CARBINE':
+        this.state.magCapacity = 30;
+        this.state.currentMagRounds = 30;
+        this.state.magazines = [30, 30, 30, 30];
+        this.state.fireMode = 'AUTO';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: M4A1 SOPMOD (5.56MM)';
+        break;
+      case 'CARBINE_AR':
+        this.state.magCapacity = 30;
+        this.state.currentMagRounds = 30;
+        this.state.magazines = [30, 30, 30, 30];
+        this.state.fireMode = 'AUTO';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: CARABINA TÁTICA (5.56MM)';
+        break;
+      case 'AK47_RIFLE':
+        this.state.magCapacity = 30;
+        this.state.currentMagRounds = 30;
+        this.state.magazines = [30, 30, 30, 30];
+        this.state.fireMode = 'AUTO';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: AK-47 COMANDO (7.62MM)';
+        break;
+      case 'L49_LMG':
+        this.state.magCapacity = 100;
+        this.state.currentMagRounds = 100;
+        this.state.magazines = [100, 100, 100];
+        this.state.fireMode = 'AUTO';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: LMG PESADA (5.56MM)';
+        break;
+      case 'SNIPER_BOLT':
+        this.state.magCapacity = 5;
+        this.state.currentMagRounds = 5;
+        this.state.magazines = [5, 5, 5, 5];
+        this.state.fireMode = 'SEMI';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: SNIPER BOLT-ACTION (.338 LAPUA)';
+        break;
+      case 'SNIPER_TACTICAL':
+        this.state.magCapacity = 10;
+        this.state.currentMagRounds = 10;
+        this.state.magazines = [10, 10, 10, 10];
+        this.state.fireMode = 'SEMI';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: SNIPER TÁTICA (.308 WIN)';
+        break;
+    }
+
+    this.magCheckTimer = 1.8;
+    soundEngine.playReloadStage('CHARGING_HANDLE');
+    this.emitHud();
+  }
+
+  public triggerWeaponInspect(): void {
+    if (this.state.reloadPhase !== 'IDLE') return;
+    this.weaponRig.triggerInspectAnimation();
+    const names: Record<WeaponId, string> = {
+      P50_PISTOL: 'INSPECIONANDO MARK 23 PISTOL (.45 ACP)',
+      SMG_45: 'INSPECIONANDO SMG .45 TÁTICA (.45 ACP)',
+      M4_CARBINE: 'INSPECIONANDO M4A1 SOPMOD (5.56MM)',
+      CARBINE_AR: 'INSPECIONANDO CARABINA TÁTICA (5.56MM)',
+      AK47_RIFLE: 'INSPECIONANDO AK-47 COMANDO (7.62MM)',
+      L49_LMG: 'INSPECIONANDO LMG PESADA (5.56MM)',
+      SNIPER_BOLT: 'INSPECIONANDO SNIPER BOLT-ACTION (.338 LAPUA)',
+      SNIPER_TACTICAL: 'INSPECIONANDO SNIPER TÁTICA (.308 WIN)',
+    };
+    this.state.reloadTypeLabel = names[this.state.activeWeapon];
+    this.magCheckTimer = 2.4;
+    soundEngine.playMechanicalSwitch(0.95);
+    this.emitHud();
+  }
+
+  public resupplyAmmo(): void {
+    const cap = this.state.magCapacity;
+    this.state.magazines =
+      this.state.activeWeapon === 'L49_LMG'
+        ? [cap, cap, cap]
+        : [cap, cap, cap, cap];
+    this.state.currentMagRounds = cap;
+    this.state.chambered = 1;
+    this.state.boltLockedBack = false;
+    this.state.reloadPhase = 'IDLE';
+    this.state.reloadTypeLabel = `MUNIÇÃO REABASTECIDA (${cap} TIROS)`;
+    this.magCheckTimer = 1.6;
+    soundEngine.playReloadStage('MAG_IN');
+    this.emitHud();
+  }
+
+  public toggleMute(): void {
+    this.state.muted = !this.state.muted;
+    soundEngine.muted = this.state.muted;
+    this.emitHud();
+  }
+
+  public toggleDockCollapsed(): void {
+    this.state.dockCollapsed = !this.state.dockCollapsed;
+    this.emitHud();
+  }
+
+  public toggleTouchControlsVisible(): void {
+    this.state.touchControlsVisible = !this.state.touchControlsVisible;
+    this.emitHud();
+  }
+
+  public setTouchMovement(moveX: number, moveY: number, sprinting: boolean): void {
+    this.touchMoveX = THREE.MathUtils.clamp(moveX, -1, 1);
+    this.touchMoveY = THREE.MathUtils.clamp(moveY, -1, 1);
+    this.touchSprinting = sprinting;
+  }
+
+  public applyTouchLookDelta(dx: number, dy: number): void {
+    if (this.state.screen !== 'PLAYING') return;
+
+    const zoomSensFactor =
+      this.state.isAds && this.state.optic === 'lpvo' && !this.state.cantedActive
+        ? 0.48 / Math.sqrt(this.state.lpvoZoom)
+        : this.state.isAds
+          ? 0.68
+          : 1.0;
+
+    const sens = 0.0042 * zoomSensFactor;
+    this.yaw -= dx * sens;
+    this.pitch = THREE.MathUtils.clamp(
+      this.pitch - dy * sens,
+      -Math.PI * 0.46,
+      Math.PI * 0.46
+    );
+
+    this.swayVel.x -= dx * 0.00075;
+    this.swayVel.y += dy * 0.00075;
+  }
+
+  public setTouchFireHeld(held: boolean): void {
+    if (this.state.screen !== 'PLAYING') {
+      this.touchFireHeld = false;
+      return;
+    }
+    const wasHeld = this.touchFireHeld;
+    this.touchFireHeld = held;
+    if (held && !wasHeld) {
+      this.triggerPulledThisPress = false;
+      this.attemptFireWeapon();
+    } else if (!held) {
+      this.triggerPulledThisPress = false;
+    }
+  }
+
+  public toggleAds(): void {
+    if (this.state.screen !== 'PLAYING') return;
+    this.state.isAds = !this.state.isAds;
+    if (this.state.isAds) {
+      this.state.isCrouchingToggled = this.state.isCrouchingToggled;
+    } else {
+      this.touchHoldBreath = false;
+    }
+    soundEngine.playMechanicalSwitch(1.05);
+    this.emitHud();
+  }
+
+  public triggerJump(): void {
+    if (this.state.screen !== 'PLAYING') return;
+    this.state.isCrouchingToggled = false;
+    this.slideTimer = 0;
+    this.jumpBufferTimer = 0.18;
+    this.emitHud();
+  }
+
+  public toggleCrouchOrSlide(): void {
+    if (this.state.screen !== 'PLAYING') return;
+    const isMovingForwardFast =
+      (this.touchSprinting ||
+        (this.keysHeld.has('ShiftLeft') && this.keysHeld.has('KeyW')) ||
+        this.touchMoveY > 0.75) &&
+      this.isGrounded &&
+      this.slideTimer <= 0;
+
+    if (isMovingForwardFast && !this.state.isCrouchingToggled) {
+      this.slideTimer = 0.68;
+      this.camera.getWorldDirection(_forward);
+      _forward.y = 0;
+      _forward.normalize();
+      this.slideDir.copy(_forward);
+      this.state.isCrouchingToggled = true;
+      soundEngine.playMechanicalSwitch(0.65);
+    } else {
+      this.state.isCrouchingToggled = !this.state.isCrouchingToggled;
+      soundEngine.playMechanicalSwitch(0.8);
+    }
+    this.emitHud();
+  }
+
+  public toggleLean(dir: -1 | 1): void {
+    if (this.state.screen !== 'PLAYING') return;
+    this.touchLeanToggle = this.touchLeanToggle === dir ? 0 : dir;
+    soundEngine.playMechanicalSwitch(0.95);
+    this.emitHud();
+  }
+
+  public setHoldBreath(held: boolean): void {
+    this.touchHoldBreath = held;
+  }
+
+  public cycleLpvoZoom(): void {
+    if (this.state.optic !== 'lpvo') {
+      this.setOptic('lpvo');
+    } else {
+      this.state.lpvoZoom =
+        this.state.lpvoZoom >= 3.5 ? 1.0 : this.state.lpvoZoom + 1.0;
+      soundEngine.playMechanicalSwitch(1.2);
+      this.emitHud();
+    }
+  }
+
+  // =========================================================================
+  // MOBILE GPU QUALITY PRESETS, DRS, GYROSCOPE, HAPTICS & FULLSCREEN
+  // =========================================================================
+  public setQualityPreset(preset: QualityPreset): void {
+    this.state.qualityPreset = preset;
+    if (!this.isSoftwareGl) {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
+      if (preset === 'COMPETITIVE_120') {
+        this.renderer.shadowMap.enabled = false;
+        this.keyLight.castShadow = false;
+        this.currentRenderScale = Math.min(dpr, 1.0);
+      } else if (preset === 'BALANCED_60') {
+        this.renderer.shadowMap.enabled = true;
+        this.keyLight.castShadow = true;
+        this.currentRenderScale = Math.min(dpr, 1.35);
+      } else {
+        this.renderer.shadowMap.enabled = true;
+        this.keyLight.castShadow = true;
+        this.currentRenderScale = dpr;
+      }
+      this.renderer.setPixelRatio(this.currentRenderScale);
+      this.state.renderScalePercent = Math.round(
+        (this.currentRenderScale / dpr) * 100
+      );
+    }
+    soundEngine.playMechanicalSwitch(1.1);
+    this.emitHud();
+  }
+
+  public toggleDynamicResolution(): void {
+    this.state.dynamicResolutionEnabled = !this.state.dynamicResolutionEnabled;
+    soundEngine.playMechanicalSwitch(1.0);
+    this.emitHud();
+  }
+
+  public async setGyroMode(mode: GyroMode): Promise<void> {
+    this.state.gyroMode = mode;
+    if (mode === 'OFF') {
+      mobileHardware.disableGyroscope();
+    } else {
+      await this.enableGyroSensor();
+    }
+    soundEngine.playMechanicalSwitch(1.15);
+    this.emitHud();
+  }
+
+  private async enableGyroSensor(): Promise<void> {
+    await mobileHardware.enableGyroscope((dx, dy) => {
+      if (this.state.screen !== 'PLAYING') return;
+      if (this.state.gyroMode === 'OFF') return;
+      if (this.state.gyroMode === 'ADS_ONLY' && !this.state.isAds) return;
+      const sens = this.state.gyroSensitivity;
+      this.applyTouchLookDelta(dx * sens, dy * sens);
+    });
+  }
+
+  public setGyroSensitivity(sens: number): void {
+    this.state.gyroSensitivity = THREE.MathUtils.clamp(sens, 0.2, 3.0);
+    this.emitHud();
+  }
+
+  public recalibrateGyro(): void {
+    mobileHardware.recalibrateGyroCenter();
+    soundEngine.playMechanicalSwitch(1.3);
+  }
+
+  public toggleHaptics(): void {
+    this.state.hapticsEnabled = !this.state.hapticsEnabled;
+    mobileHardware.hapticsEnabled = this.state.hapticsEnabled;
+    if (this.state.hapticsEnabled) {
+      mobileHardware.vibrateHitConfirm(false);
+    }
+    this.emitHud();
+  }
+
+  public async enterFullscreenLandscape(): Promise<void> {
+    const active = await mobileHardware.enterFullscreenLandscape();
+    this.state.isFullscreen = active;
+    this.onResize();
+    this.emitHud();
+  }
+
+  public async toggleFullscreenLandscape(): Promise<void> {
+    const active = await mobileHardware.toggleFullscreenLandscape();
+    this.state.isFullscreen = active;
+    this.onResize();
+    this.emitHud();
+  }
+
+  private updateDynamicResolutionGovernor(rawDt: number): void {
+    this.drsAccumTime += rawDt;
+    this.drsFrameCount += 1;
+
+    if (this.drsAccumTime < 0.48) return;
+
+    const avgFps = this.drsFrameCount / this.drsAccumTime;
+    this.state.liveFps = Math.min(120, Math.round(avgFps));
+    this.drsAccumTime = 0;
+    this.drsFrameCount = 0;
+
+    if (this.isSoftwareGl || !this.state.dynamicResolutionEnabled) return;
+
+    const maxDpr = Math.min(window.devicePixelRatio || 1, 2.0);
+    const targetCeiling =
+      this.state.qualityPreset === 'COMPETITIVE_120'
+        ? Math.min(maxDpr, 1.05)
+        : this.state.qualityPreset === 'BALANCED_60'
+          ? Math.min(maxDpr, 1.4)
+          : maxDpr;
+
+    let changed = false;
+    if (avgFps < 50 && this.currentRenderScale > 0.65) {
+      // Immediately step down internal resolution to keep 60 FPS butter-smooth
+      this.currentRenderScale = Math.max(0.65, this.currentRenderScale - 0.12);
+      changed = true;
+    } else if (avgFps >= 57 && this.currentRenderScale < targetCeiling - 0.04) {
+      this.currentRenderScale = Math.min(
+        targetCeiling,
+        this.currentRenderScale + 0.06
+      );
+      changed = true;
+    }
+
+    if (changed) {
+      this.renderer.setPixelRatio(this.currentRenderScale);
+      this.state.renderScalePercent = Math.round(
+        (this.currentRenderScale / maxDpr) * 100
+      );
+    }
+  }
+
+  public resetScenario(mode: DrillMode): void {
+    this.state.drillMode = mode;
+    this.state.health = 100;
+    this.state.stamina = 100;
+    this.state.score = 0;
+    this.state.hits = 0;
+    this.state.shotsFired = 0;
+    this.state.headshots = 0;
+    this.state.courseTimerSec = 0;
+    this.state.damageFlashAlpha = 0;
+    this.state.chambered = 1;
+    // All players start with the default P50_Heavy_Pistol.glb on scenario reset
+    this.state.activeWeapon = 'P50_PISTOL';
+    this.weaponRig.setActiveWeapon('P50_PISTOL');
+    this.state.magCapacity = 12;
+    this.state.currentMagRounds = 12;
+    this.state.magazines = [12, 12, 12, 12];
+    this.state.fireMode = 'SEMI';
+    this.setOptic('iron');
+    this.state.boltLockedBack = false;
+    this.state.reloadPhase = 'IDLE';
+
+    // Position player according to drill sector
+    if (mode === 'FREE_RANGE') {
+      this.playerPos.set(-6.8, 0, 2.8);
+      this.yaw = 0;
+      this.pitch = 0;
+    } else {
+      // Spawn at Killhouse Breach Entry
+      this.playerPos.set(12.2, 0, 4.5);
+      this.yaw = 0;
+      this.pitch = 0;
+    }
+    this.playerVel.set(0, 0, 0);
+
+    // Reset all targets
+    let activeCount = 0;
+    this.targets.forEach((t) => {
+      t.isDown = false;
+      t.downTimer = 0;
+      t.health = t.maxHealth;
+      t.armorHealth = t.armorMesh ? 60 : 0;
+      if (t.armorMesh) t.armorMesh.visible = true;
+      t.pivotGroup.rotation.x = 0;
+      t.hitTiltAngle = 0;
+      t.hitTiltVelocity = 0;
+      t.windupTimer = 0;
+      t.cooldownTimer = 1.5 + Math.random() * 2.0;
+      t.isTelegraphing = false;
+      if (t.laserLine) t.laserLine.visible = false;
+
+      if (mode === 'KILLHOUSE_BLITZ' || mode === 'TACTICAL_WAVE') {
+        if (t.sector === 'KILLHOUSE') activeCount++;
+      } else {
+        if (t.type !== 'STEEL_GONG') activeCount++;
+      }
+    });
+
+    this.state.targetsRemaining = activeCount;
+    this.state.totalTargetsInDrill = activeCount;
+  }
+
+  public requestPointerLock(): void {
+    if (this.state.touchControlsVisible) return;
+    try {
+      this.renderer.domElement.requestPointerLock?.();
+    } catch {
+      // Ignore sandbox lock errors
+    }
+  }
+
+  // =========================================================================
+  // INPUT & EVENT HANDLERS
+  // =========================================================================
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (e.repeat) return;
+    this.keysHeld.add(e.code);
+
+    if (this.state.screen === 'TITLE') {
+      if (e.code === 'Enter' || e.code === 'Space') {
+        e.preventDefault();
+        this.startGame();
+      }
+      return;
+    }
+
+    if (e.code === 'Escape') {
+      if (this.state.screen === 'PLAYING') {
+        this.pauseGame();
+      } else if (this.state.screen === 'PAUSED') {
+        this.resumeGame();
+      }
+      return;
+    }
+
+    if (this.state.screen !== 'PLAYING') return;
+
+    switch (e.code) {
+      case 'Space':
+        e.preventDefault();
+        this.jumpBufferTimer = 0.15;
+        break;
+      case 'KeyR': {
+        const now = performance.now();
+        const isDoubleTap = now - this.lastRKeyPressTime < 280;
+        this.lastRKeyPressTime = now;
+        this.triggerReload(isDoubleTap);
+        break;
+      }
+      case 'KeyT':
+        this.triggerMagCheck();
+        break;
+      case 'KeyG':
+        this.triggerManualBoltRack();
+        break;
+      case 'KeyB':
+        this.cycleFireMode();
+        break;
+      case 'KeyV':
+        this.toggleCantedSight();
+        break;
+      case 'KeyX':
+        this.toggleSuppressor();
+        break;
+      case 'KeyL':
+        this.toggleLaser();
+        break;
+      case 'KeyU':
+        this.resupplyAmmo();
+        break;
+      case 'KeyM':
+        this.toggleMute();
+        break;
+      case 'KeyH':
+        this.toggleDockCollapsed();
+        break;
+      case 'KeyF':
+        if (this.state.focusedWallWeapon) {
+          this.selectWeapon(this.state.focusedWallWeapon);
+        } else {
+          this.triggerWeaponInspect();
+        }
+      case 'Tab':
+        e.preventDefault();
+        this.toggleWeaponSlot();
+        break;
+      case 'Digit1':
+        this.selectWeapon(this.primaryWeapon);
+        break;
+      case 'Digit2':
+        this.selectWeapon('P50_PISTOL');
+        break;
+      case 'Digit3':
+        this.selectWeapon('M4_CARBINE');
+        break;
+      case 'Digit4':
+        this.selectWeapon('CARBINE_AR');
+        break;
+      case 'Digit5':
+        this.selectWeapon('AK47_RIFLE');
+        break;
+      case 'Digit6':
+        this.selectWeapon('L49_LMG');
+        break;
+      case 'Digit7':
+        this.selectWeapon('SNIPER_BOLT');
+        break;
+      case 'Digit8':
+        this.selectWeapon('SNIPER_TACTICAL');
+        break;
+      case 'Digit9': {
+        const nextOptic: OpticType =
+          this.state.optic === 'iron'
+            ? 'holo'
+            : this.state.optic === 'holo'
+              ? 'lpvo'
+              : 'iron';
+        this.setOptic(nextOptic);
+        break;
+      }
+      case 'KeyZ':
+        if (this.state.optic === 'lpvo') {
+          this.state.lpvoZoom = this.state.lpvoZoom >= 3.5 ? 1.25 : this.state.lpvoZoom + 1.0;
+          soundEngine.playMechanicalSwitch(1.2);
+          this.emitHud();
+        }
+        break;
+      case 'KeyC':
+      case 'ControlLeft':
+        // If sprinting forward, trigger tactical slide!
+        if (
+          this.keysHeld.has('ShiftLeft') &&
+          this.keysHeld.has('KeyW') &&
+          this.isGrounded &&
+          this.slideTimer <= 0
+        ) {
+          this.slideTimer = 0.68;
+          this.camera.getWorldDirection(_forward);
+          _forward.y = 0;
+          _forward.normalize();
+          this.slideDir.copy(_forward);
+          soundEngine.playMechanicalSwitch(0.65);
+        }
+        break;
+    }
+  };
+
+  private onKeyUp = (e: KeyboardEvent) => {
+    this.keysHeld.delete(e.code);
+  };
+
+  private onMouseDown = (e: MouseEvent) => {
+    if (this.state.screen !== 'PLAYING') return;
+
+    // Ignore clicks on DOM UI controls (like the bottom dock)
+    if (e.target !== this.renderer.domElement) return;
+
+    if (!this.state.pointerLocked) {
+      this.requestPointerLock();
+    }
+
+    this.mouseButtonsHeld.add(e.button);
+
+    if (e.button === 0) {
+      this.triggerPulledThisPress = false;
+      this.attemptFireWeapon();
+    } else if (e.button === 2) {
+      this.state.isAds = true;
+      soundEngine.playMechanicalSwitch(1.05);
+    }
+  };
+
+  private onMouseUp = (e: MouseEvent) => {
+    this.mouseButtonsHeld.delete(e.button);
+    if (e.button === 0) {
+      this.triggerPulledThisPress = false;
+    } else if (e.button === 2) {
+      this.state.isAds = false;
+    }
+  };
+
+  private onMouseMove = (e: MouseEvent) => {
+    if (this.state.screen !== 'PLAYING') return;
+    if (!this.state.pointerLocked && !this.mouseButtonsHeld.has(0) && !this.mouseButtonsHeld.has(2)) {
+      return;
+    }
+
+    const zoomSensFactor =
+      this.state.isAds && this.state.optic === 'lpvo' && !this.state.cantedActive
+        ? 0.45 / Math.sqrt(this.state.lpvoZoom)
+        : this.state.isAds
+          ? 0.65
+          : 1.0;
+
+    const sens = 0.0021 * zoomSensFactor;
+    const dx = e.movementX || 0;
+    const dy = e.movementY || 0;
+
+    this.yaw -= dx * sens;
+    this.pitch = THREE.MathUtils.clamp(
+      this.pitch - dy * sens,
+      -Math.PI * 0.46,
+      Math.PI * 0.46
+    );
+
+    // Feed mouse angular velocity into weapon inertia spring
+    this.swayVel.x -= dx * 0.00055;
+    this.swayVel.y += dy * 0.00055;
+  };
+
+  private onWheel = (e: WheelEvent) => {
+    if (this.state.screen !== 'PLAYING') return;
+    if (this.state.optic === 'lpvo' && !this.state.cantedActive) {
+      const delta = e.deltaY < 0 ? 0.5 : -0.5;
+      this.state.lpvoZoom = THREE.MathUtils.clamp(
+        this.state.lpvoZoom + delta,
+        1.0,
+        4.0
+      );
+      soundEngine.playMechanicalSwitch(1.25);
+      this.emitHud();
+    }
+  };
+
+  private onPointerLockChange = () => {
+    const locked = document.pointerLockElement === this.renderer.domElement;
+    this.state.pointerLocked = locked;
+    this.emitHud();
+  };
+
+  private onWindowBlur = () => {
+    this.keysHeld.clear();
+    this.mouseButtonsHeld.clear();
+    this.touchMoveX = 0;
+    this.touchMoveY = 0;
+    this.touchSprinting = false;
+    this.touchFireHeld = false;
+    this.touchHoldBreath = false;
+    this.canvasTouchLookId = null;
+    this.emitHud();
+  };
+
+  private onCanvasTouchStart = (e: TouchEvent) => {
+    if (this.state.screen !== 'PLAYING') return;
+    if (this.canvasTouchLookId !== null) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
+    this.canvasTouchLookId = t.identifier;
+    this.canvasTouchLastX = t.clientX;
+    this.canvasTouchLastY = t.clientY;
+  };
+
+  private onCanvasTouchMove = (e: TouchEvent) => {
+    if (this.state.screen !== 'PLAYING' || this.canvasTouchLookId === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      if (t.identifier === this.canvasTouchLookId) {
+        const dx = t.clientX - this.canvasTouchLastX;
+        const dy = t.clientY - this.canvasTouchLastY;
+        this.canvasTouchLastX = t.clientX;
+        this.canvasTouchLastY = t.clientY;
+        this.applyTouchLookDelta(dx, dy);
+        break;
+      }
+    }
+  };
+
+  private onCanvasTouchEnd = (e: TouchEvent) => {
+    if (this.canvasTouchLookId === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === this.canvasTouchLookId) {
+        this.canvasTouchLookId = null;
+        break;
+      }
+    }
+  };
+
+  private onContextMenu = (e: MouseEvent) => {
+    e.preventDefault();
+  };
+
+  private onResize = () => {
+    if (!this.container) return;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h);
+  };
+
+  private bindEvents(): void {
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('mousedown', this.onMouseDown);
+    window.addEventListener('mouseup', this.onMouseUp);
+    window.addEventListener('mousemove', this.onMouseMove);
+    window.addEventListener('wheel', this.onWheel, { passive: true });
+    window.addEventListener('blur', this.onWindowBlur);
+    window.addEventListener('contextmenu', this.onContextMenu);
+    window.addEventListener('resize', this.onResize);
+    document.addEventListener('pointerlockchange', this.onPointerLockChange);
+    this.renderer.domElement.addEventListener('touchstart', this.onCanvasTouchStart, {
+      passive: true,
+    });
+    this.renderer.domElement.addEventListener('touchmove', this.onCanvasTouchMove, {
+      passive: true,
+    });
+    this.renderer.domElement.addEventListener('touchend', this.onCanvasTouchEnd, {
+      passive: true,
+    });
+    this.renderer.domElement.addEventListener('touchcancel', this.onCanvasTouchEnd, {
+      passive: true,
+    });
+  }
+
+  // =========================================================================
+  // ADVANCED RELOAD, MAG CHECK & BOLT MECHANICS
+  // =========================================================================
+  public triggerReload(isDoubleTapSpeedReload = false): void {
+    // If already in a reload, upgrade to speed reload if double-tapped early!
+    if (this.state.reloadPhase !== 'IDLE') {
+      if (isDoubleTapSpeedReload && !this.isSpeedReload && this.state.reloadPhase === 'MAG_OUT') {
+        this.isSpeedReload = true;
+        this.reloadDuration *= 0.68;
+        this.state.reloadTypeLabel = 'RECARGA RÁPIDA (DROP)';
+        // Drop current mag on floor
+        this.weaponRig.magazineGroup.getWorldPosition(_worldPos);
+        this.camera.getWorldDirection(_forward);
+        this.fxPool.spawnDroppedMagazine(_worldPos, _forward);
+        this.state.currentMagRounds = 0;
+      }
+      return;
+    }
+
+    // Do not allow reload if current magazine is already 100% full and a round is chambered
+    if (
+      this.state.currentMagRounds === this.state.magCapacity &&
+      this.state.chambered === 1
+    ) {
+      soundEngine.playMechanicalSwitch(0.85);
+      this.state.reloadTypeLabel = 'CARREGADOR JÁ ESTÁ CHEIO';
+      this.magCheckTimer = 1.4;
+      this.emitHud();
+      return;
+    }
+
+    // Check if we have any magazine with rounds in our chest rig
+    let bestMagIdx = this.findFullestMagazineIndex();
+    if (bestMagIdx === -1 || this.state.magazines[bestMagIdx] <= 0) {
+      // Auto-replenish spare magazines so player can always reload during combat/movement
+      const cap = this.state.magCapacity;
+      this.state.magazines = [cap, cap, cap, cap];
+      bestMagIdx = 0;
+    }
+
+    // Allow reload at any time (even if mag is full, performs a tactical magazine swap so reload animation always plays on demand)
+    const dryReload = this.state.chambered === 0 || this.state.boltLockedBack;
+    this.isSpeedReload = isDoubleTapSpeedReload || this.state.currentMagRounds === 0;
+    this.needsBoltReleaseStage = dryReload;
+
+    if (this.isSpeedReload) {
+      this.reloadDuration = dryReload ? 1.65 : 1.25;
+      this.state.reloadTypeLabel = dryReload
+        ? 'RECARGA EMERGENCIAL + LIBERAÇÃO DO FERROLHO'
+        : 'RECARGA RÁPIDA (DROP DE CARREGADOR)';
+    } else {
+      this.reloadDuration = dryReload ? 2.25 : 1.78;
+      this.state.reloadTypeLabel = dryReload
+        ? 'RECARGA SECA + MANEJO DE FERROLHO'
+        : 'RECARGA TÁTICA (RETENÇÃO DE CARREGADOR)';
+    }
+
+    if (this.state.activeWeapon === 'P50_PISTOL') {
+      this.reloadDuration = 2.25;
+      soundEngine.playPistolFullReload();
+    } else if (
+      this.state.activeWeapon === 'M4_CARBINE' ||
+      this.state.activeWeapon === 'CARBINE_AR'
+    ) {
+      this.reloadDuration = 2.75;
+      soundEngine.playM4a1FullReload();
+    }
+
+    this.reloadTimer = 0;
+    this.state.reloadPhase = 'MAG_OUT';
+    this.state.reloadProgress = 0;
+    this.stageSoundFlags = { magOut: false, magIn: false, boltSlap: false };
+    this.weaponRig.triggerReloadAnimation(this.reloadDuration);
+    this.emitHud();
+  }
+
+  public triggerMagCheck(): void {
+    if (this.state.reloadPhase !== 'IDLE') return;
+    this.state.reloadPhase = 'MAG_CHECK';
+    this.state.magCheckVisible = true;
+    this.state.reloadTypeLabel = `INSPEÇÃO: ${this.state.currentMagRounds}/30 NO CARREGADOR ${
+      this.state.chambered ? '+ 1 NA CÂMARA' : '(CÂMARA VAZIA)'
+    }`;
+    this.magCheckTimer = 1.85;
+    soundEngine.playMechanicalSwitch(0.9);
+    this.emitHud();
+  }
+
+  public triggerManualBoltRack(): void {
+    if (this.state.reloadPhase !== 'IDLE') return;
+    this.state.reloadPhase = 'CHARGING_PULL';
+    this.reloadTimer = 0;
+    this.reloadDuration = 0.65;
+    this.state.reloadTypeLabel = this.state.boltLockedBack
+      ? 'LIBERANDO FERROLHO [G]'
+      : 'MANobrando ALAVANCA DE MANEJO [G]';
+    soundEngine.playReloadStage('CHARGING_HANDLE');
+    this.weaponRig.triggerBoltAnimation();
+
+    // If a live round was chambered, eject it!
+    if (this.state.chambered === 1) {
+      this.weaponRig.ejectionPortWorldPos.getWorldPosition(_worldPos);
+      this.camera.getWorldDirection(_forward);
+      _right.crossVectors(_forward, _up).normalize();
+      this.fxPool.spawnBrassCasing(_worldPos, _right, _up);
+      this.state.chambered = 0;
+    }
+
+    // Chamber a round from current magazine if available
+    if (this.state.currentMagRounds > 0) {
+      this.state.currentMagRounds -= 1;
+      this.state.chambered = 1;
+      this.state.boltLockedBack = false;
+    } else {
+      this.state.boltLockedBack = false;
+    }
+    this.emitHud();
+  }
+
+  private findFullestMagazineIndex(): number {
+    let bestIdx = -1;
+    let maxRounds = 0;
+    for (let i = 0; i < this.state.magazines.length; i++) {
+      if (this.state.magazines[i] > maxRounds) {
+        maxRounds = this.state.magazines[i];
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }
+
+  private completeMagazineSwap(): void {
+    const bestIdx = this.findFullestMagazineIndex();
+    if (bestIdx === -1) return;
+
+    const incomingRounds = this.state.magazines[bestIdx];
+    const outgoingRounds = this.state.currentMagRounds;
+
+    if (this.isSpeedReload) {
+      // Dropped on floor! Remove the used mag from chest rig or set to 0
+      this.state.magazines.splice(bestIdx, 1);
+    } else {
+      // Tactical retention: stow partially spent mag back in chest rig slot
+      if (outgoingRounds > 0) {
+        this.state.magazines[bestIdx] = outgoingRounds;
+      } else {
+        this.state.magazines.splice(bestIdx, 1);
+      }
+    }
+
+    this.state.currentMagRounds = incomingRounds;
+  }
+
+  // =========================================================================
+  // BALLISTICS & WEAPON FIRING
+  // =========================================================================
+  private attemptFireWeapon(): void {
+    if (this.state.reloadPhase !== 'IDLE' && this.state.reloadPhase !== 'MAG_CHECK') {
+      return;
+    }
+    if (this.fireCooldown > 0) return;
+
+    // Prevent firing if barrel is heavily tucked against a wall
+    if (this.state.wallTuckAmount > 0.78) {
+      soundEngine.playMechanicalSwitch(0.7);
+      return;
+    }
+
+    if (this.state.chambered === 0) {
+      if (!this.triggerPulledThisPress) {
+        soundEngine.playDryFire();
+        this.triggerPulledThisPress = true;
+        // If magazine has rounds but chamber is empty, prompt bolt rack
+        if (this.state.currentMagRounds > 0) {
+          this.state.reloadTypeLabel = 'CÂMARA VAZIA — PRESSIONE [G] OU [R] PARA ENGATILHAR';
+          this.magCheckTimer = 1.5;
+          this.emitHud();
+        }
+      }
+      return;
+    }
+
+    if (this.state.fireMode === 'SEMI' && this.triggerPulledThisPress) {
+      return;
+    }
+
+    this.triggerPulledThisPress = true;
+    if (this.state.fireMode === 'BURST' && this.burstRemaining === 0) {
+      this.burstRemaining = 3;
+    }
+
+    this.executeSingleShot();
+  }
+
+  private executeSingleShot(): void {
+    if (this.state.activeWeapon === 'SNIPER_BOLT') {
+      this.fireCooldown = 1.48;
+      this.sniperChamberTimer = 1.15;
+      this.state.reloadTypeLabel = 'CICLANDO FERROLHO (.338)';
+      this.magCheckTimer = 1.48;
+      soundEngine.playBoltActionCycle();
+    } else {
+      this.fireCooldown =
+        this.state.activeWeapon === 'SNIPER_TACTICAL'
+          ? 0.75
+          : this.state.activeWeapon === 'SMG_45'
+            ? 0.066
+            : this.state.activeWeapon === 'AK47_RIFLE'
+              ? 0.095
+              : 0.078;
+    }
+    this.state.shotsFired += 1;
+
+    // Consume chambered round and cycle bolt carrier
+    this.state.chambered = 0;
+    if (this.state.activeWeapon !== 'SNIPER_BOLT') {
+      if (this.state.currentMagRounds > 0) {
+        this.state.currentMagRounds -= 1;
+        this.state.chambered = 1;
+        this.state.boltLockedBack = false;
+      } else {
+        // Last round fired! Lock Bolt Carrier Group back!
+        this.state.boltLockedBack = true;
+      }
+    }
+
+    // Play weapon-specific gunshot audio (Desert Eagle .WAV for P50 Pistol) + Mobile Haptic Vibration
+    soundEngine.playGunshot(
+      this.state.suppressorAttached,
+      this.state.boltLockedBack,
+      this.state.activeWeapon
+    );
+    mobileHardware.vibrateGunshot(
+      this.state.suppressorAttached,
+      this.state.boltLockedBack
+    );
+
+    // Muzzle flash, GLB embedded fire animation (Fire / Fire_ADS) & bolt carrier kick
+    this.weaponRig.triggerFireAnimation(this.state.isAds);
+    this.boltCycleOffset = 0.052;
+    this.muzzleFlashTimer = this.state.suppressorAttached ? 0.018 : 0.042;
+    this.weaponRig.muzzleFlashGroup.rotation.z = Math.random() * Math.PI * 2;
+
+    // Eject spinning 5.56mm brass casing from ejection port
+    this.weaponRig.ejectionPortWorldPos.getWorldPosition(_worldPos);
+    this.camera.getWorldDirection(_forward);
+    _right.crossVectors(_forward, _up).normalize();
+    this.fxPool.spawnBrassCasing(_worldPos, _right, _up);
+
+    // Perform Ballistic Raycast FIRST (aligned with exact current Sight/Crosshair vector before recoil kick!)
+    this.yawObject.rotation.y = this.yaw;
+    this.pitchObject.rotation.x = this.pitch;
+    this.camera.updateMatrixWorld(true);
+
+    this.camera.getWorldPosition(_rayOrigin);
+    this.camera.getWorldDirection(_rayDir);
+
+    // Tight, predictable dispersion when hip-firing or moving fast; 100% pinpoint accuracy when ADS
+    const speed = Math.hypot(this.playerVel.x, this.playerVel.z);
+    const hipSpread =
+      this.state.adsAlpha > 0.85
+        ? 0
+        : (1 - this.state.adsAlpha) * 0.0028 + speed * 0.001;
+    if (hipSpread > 0.0002) {
+      _rayDir.x += (Math.random() - 0.5) * hipSpread;
+      _rayDir.y += (Math.random() - 0.5) * hipSpread;
+      _rayDir.z += (Math.random() - 0.5) * hipSpread;
+      _rayDir.normalize();
+    }
+
+    this.raycaster.set(_rayOrigin, _rayDir);
+    this.raycaster.far = 140;
+
+    const hits = this.raycaster.intersectObjects(this.shootableMeshes, false);
+    this.weaponRig.muzzleWorldPos.getWorldPosition(_worldPos2);
+
+    // Physical Recoil Impulse applied AFTER raycast (so shot lands where player aimed)
+    const stanceMult = this.state.stance === 'CROUCH' ? 0.72 : 1.0;
+    const suppMult = this.state.suppressorAttached ? 0.82 : 1.0;
+    const adsMult = this.state.isAds ? 0.55 : 1.0;
+    const totalMult = stanceMult * suppMult * adsMult;
+
+    this.recoilKickZ = Math.min(this.recoilKickZ + 0.032 * totalMult, 0.075);
+    this.recoilPitch += (0.012 + Math.random() * 0.004) * totalMult;
+    this.recoilYaw += (Math.random() - 0.5) * 0.004 * totalMult;
+    this.cameraShake = Math.min(this.cameraShake + 0.004 * totalMult, 0.012);
+
+    this.pitch = THREE.MathUtils.clamp(
+      this.pitch + 0.006 * totalMult,
+      -Math.PI * 0.46,
+      Math.PI * 0.46
+    );
+
+    if (hits.length > 0) {
+      const hit = hits[0];
+      const hitMesh = hit.object as THREE.Mesh;
+      const dist = hit.distance;
+
+      // Spawn supersonic tracer streak from muzzle to impact point
+      this.fxPool.spawnTracer(_worldPos2, hit.point);
+
+      if (hit.face) {
+        _hitNormal
+          .copy(hit.face.normal)
+          .transformDirection(hitMesh.matrixWorld)
+          .normalize();
+      } else {
+        _hitNormal.set(0, 1, 0);
+      }
+
+      const wallWeaponId = hitMesh.userData.wallWeaponId as
+        | WeaponId
+        | undefined;
+      if (wallWeaponId) {
+        // Shooting a weapon slot on the 3D Wall Weapon Stand selects & equips that weapon!
+        this.selectWeapon(wallWeaponId);
+        return;
+      }
+
+      const targetId = hitMesh.userData.targetId as string | undefined;
+      const hitZone = hitMesh.userData.hitZone as
+        | 'HEAD'
+        | 'TORSO_A'
+        | 'ARMOR'
+        | 'STEEL_GONG'
+        | undefined;
+
+      if (targetId && hitZone) {
+        this.handleTargetHit(targetId, hitZone, dist, hit.point, _hitNormal);
+      } else {
+        // Environment concrete/plywood impact
+        this.fxPool.spawnImpactFX(hit.point, _hitNormal, false, false);
+        soundEngine.playImpact('CONCRETE');
+      }
+    } else {
+      // Tracer into the distance
+      _worldPos.copy(_rayOrigin).addScaledVector(_rayDir, 80);
+      this.fxPool.spawnTracer(_worldPos2, _worldPos);
+    }
+
+    if (this.burstRemaining > 0) {
+      this.burstRemaining -= 1;
+    }
+
+    this.emitHud();
+  }
+
+  private handleTargetHit(
+    targetId: string,
+    hitZone: 'HEAD' | 'TORSO_A' | 'ARMOR' | 'STEEL_GONG',
+    distanceMeters: number,
+    hitPoint: THREE.Vector3,
+    hitNormal: THREE.Vector3
+  ): void {
+    const target = this.targets.find((t) => t.id === targetId);
+    if (!target || target.isDown) return;
+
+    this.state.hits += 1;
+    const velocityMs = Math.round(
+      Math.max(420, (this.state.suppressorAttached ? 915 : 890) - distanceMeters * 2.4)
+    );
+
+    if (hitZone === 'STEEL_GONG') {
+      // Steel Gong Harmonics & Reactive Swing
+      soundEngine.playImpact('STEEL_GONG');
+      this.fxPool.spawnImpactFX(hitPoint, hitNormal, true, false);
+      target.hitTiltVelocity = -12.5;
+      this.state.score += 75;
+      this.state.hitMarkerAlpha = 1.0;
+      this.state.hitMarkerIsCrit = false;
+      this.state.lastHitZone = 'TORSO';
+      this.recordShotTelemetry(distanceMeters, 'STEEL_GONG', 75, velocityMs);
+      return;
+    }
+
+    if (hitZone === 'ARMOR' && target.armorHealth > 0) {
+      target.armorHealth -= 34;
+      target.hitTiltVelocity = -5.5;
+      this.fxPool.spawnImpactFX(hitPoint, hitNormal, true, false);
+      this.state.hitMarkerAlpha = 1.0;
+      this.state.hitMarkerIsCrit = false;
+      this.state.lastHitZone = 'ARMOR';
+
+      if (target.armorHealth <= 0 && target.armorMesh) {
+        target.armorMesh.visible = false;
+        soundEngine.playImpact('ARMOR_BREAK');
+        this.hitstopTimer = 0.038; // Crisp 38ms hitstop on armor shatter
+      } else {
+        soundEngine.playImpact('TORSO');
+      }
+      this.recordShotTelemetry(distanceMeters, 'ARMOR', 25, velocityMs);
+      return;
+    }
+
+    const isHead = hitZone === 'HEAD';
+    const damage = isHead ? 110 : 42;
+    target.health -= damage;
+    target.hitTiltVelocity = isHead ? -14.0 : -7.5;
+
+    this.fxPool.spawnImpactFX(hitPoint, hitNormal, isHead, isHead);
+    this.state.hitMarkerAlpha = 1.0;
+    this.state.hitMarkerIsCrit = isHead;
+
+    if (isHead) {
+      this.state.headshots += 1;
+      soundEngine.playImpact('HEADSHOT');
+      mobileHardware.vibrateHitConfirm(true);
+      this.hitstopTimer = 0.042; // Weight-scaled 42ms simulation hitstop on headshot
+    } else {
+      soundEngine.playImpact('TORSO');
+      mobileHardware.vibrateHitConfirm(false);
+    }
+
+    this.recordShotTelemetry(
+      distanceMeters,
+      isHead ? 'HEAD' : 'TORSO_A',
+      damage,
+      velocityMs
+    );
+
+    if (target.health <= 0) {
+      target.isDown = true;
+      target.downTimer = this.state.drillMode === 'FREE_RANGE' ? 2.6 : 9999;
+      target.isTelegraphing = false;
+      if (target.laserLine) target.laserLine.visible = false;
+      this.state.score += isHead ? 150 : 100;
+      this.state.lastHitZone = 'KILL';
+
+      // Update remaining drill targets
+      if (
+        this.state.drillMode === 'KILLHOUSE_BLITZ' ||
+        this.state.drillMode === 'TACTICAL_WAVE'
+      ) {
+        const remaining = this.targets.filter(
+          (t) => t.sector === 'KILLHOUSE' && !t.isDown
+        ).length;
+        this.state.targetsRemaining = remaining;
+
+        if (remaining === 0) {
+          if (
+            this.state.bestCourseTimeSec === null ||
+            this.state.courseTimerSec < this.state.bestCourseTimeSec
+          ) {
+            this.state.bestCourseTimeSec = Number(
+              this.state.courseTimerSec.toFixed(2)
+            );
+          }
+          this.state.screen = 'VICTORY';
+          if (document.pointerLockElement) {
+            document.exitPointerLock();
+          }
+        }
+      }
+    } else {
+      this.state.score += 35;
+      this.state.lastHitZone = isHead ? 'HEAD' : 'TORSO';
+    }
+  }
+
+  private recordShotTelemetry(
+    distanceMeters: number,
+    zone: BallisticShotTelemetry['zone'],
+    damage: number,
+    velocityMs: number
+  ): void {
+    const entry: BallisticShotTelemetry = {
+      id: this.state.shotsFired,
+      distanceMeters: Number(distanceMeters.toFixed(1)),
+      zone,
+      damage,
+      velocityMs,
+      reactionMs: Math.round(185 + Math.random() * 90),
+      timestamp: performance.now(),
+    };
+    this.state.lastShotTelemetry = entry;
+    this.state.shotHistory = [entry, ...this.state.shotHistory.slice(0, 4)];
+  }
+
+  // =========================================================================
+  // MAIN SIMULATION LOOP (60FPS + SOFTWARE WEBGL FENCE SYNC)
+  private tick = () => {
+    if (this.disposed) return;
+
+    const now = performance.now();
+    const rawDt = (now - this.lastTime) / 1000;
+    this.lastTime = now;
+    // Clamp delta time to prevent physics tunneling on tab switch
+    const dt = Math.min(Math.max(rawDt, 0.001), 0.05);
+    this.elapsedTime += dt;
+
+    this.updateDynamicResolutionGovernor(rawDt);
+
+    if (
+      this.state.screen === 'TITLE' ||
+      this.state.screen === 'MAIN_MENU' ||
+      this.state.screen === 'INTRO' ||
+      this.state.screen === 'LOADING'
+    ) {
+      this.updateTitleScreenShowroom(dt);
+    } else if (this.state.screen === 'PLAYING') {
+      if (this.hitstopTimer > 0) {
+        this.hitstopTimer -= dt;
+      } else {
+        this.updatePlayingSimulation(dt);
+      }
+    }
+
+    this.renderer.render(this.scene, this.camera);
+    this.frameId = requestAnimationFrame(this.tick);
+  };
+
+  private startLoop(): void {
+    this.lastTime = performance.now();
+    this.tick();
+  }
+
+  // =========================================================================
+  // TITLE SCREEN LIVE 3D SHOWROOM CAMERA & WEAPON PRESENTATION
+  // =========================================================================
+  private updateTitleScreenShowroom(dt: number): void {
+    // Gentle atmospheric camera pan overlooking the firing line & 3D rifle centerpiece
+    this.yaw = Math.sin(this.elapsedTime * 0.35) * 0.22 - 0.15;
+    this.pitch = Math.cos(this.elapsedTime * 0.28) * 0.04 - 0.03;
+
+    this.yawObject.position.set(-5.8, 1.68, 2.6);
+    this.yawObject.rotation.y = this.yaw;
+    this.pitchObject.rotation.x = this.pitch;
+
+    // Position the 3D Tactical Weapon & Two-Handed Arms Rig in an angled hero pose
+    this.weaponRig.root.position.set(
+      0.055 + Math.sin(this.elapsedTime * 0.9) * 0.006,
+      -0.035 + Math.cos(this.elapsedTime * 1.1) * 0.005,
+      -0.35
+    );
+    this.weaponRig.root.rotation.set(
+      0.08,
+      0.32 + Math.sin(this.elapsedTime * 0.6) * 0.06,
+      -0.12
+    );
+    this.weaponRig.updateGlbAnimations(dt, false, false, 'IDLE', 0);
+  }
+
+  // =========================================================================
+  // ACTIVE FIRST-PERSON COMBAT & RANGE SIMULATION
+  // =========================================================================
+  private updatePlayingSimulation(dt: number): void {
+    // 1. Course Timer & Decay Timers
+    if (
+      this.state.drillMode === 'KILLHOUSE_BLITZ' ||
+      this.state.drillMode === 'TACTICAL_WAVE'
+    ) {
+      this.state.courseTimerSec += dt;
+    }
+
+    if (this.state.hitMarkerAlpha > 0) {
+      this.state.hitMarkerAlpha = Math.max(0, this.state.hitMarkerAlpha - dt * 3.8);
+    }
+    if (this.state.damageFlashAlpha > 0) {
+      this.state.damageFlashAlpha = Math.max(0, this.state.damageFlashAlpha - dt * 2.5);
+    }
+    if (this.magCheckTimer > 0) {
+      this.magCheckTimer -= dt;
+      if (this.magCheckTimer <= 0) {
+        this.state.magCheckVisible = false;
+        if (this.state.reloadPhase === 'MAG_CHECK') {
+          this.state.reloadPhase = 'IDLE';
+          this.state.reloadTypeLabel = '';
+        }
+      }
+    }
+
+    // Sniper Bolt-Action Chambering Timer (Cycles fresh round into battery)
+    if (this.sniperChamberTimer > 0) {
+      this.sniperChamberTimer -= dt;
+      if (this.sniperChamberTimer <= 0) {
+        this.sniperChamberTimer = 0;
+        if (this.state.activeWeapon === 'SNIPER_BOLT') {
+          if (this.state.currentMagRounds > 0) {
+            this.state.currentMagRounds -= 1;
+            this.state.chambered = 1;
+            this.state.boltLockedBack = false;
+            this.state.reloadTypeLabel = '';
+          } else {
+            this.state.chambered = 0;
+            this.state.boltLockedBack = true;
+            this.state.reloadTypeLabel = 'FERROLHO ABERTO — SEM MUNIÇÃO';
+          }
+          this.emitHud();
+        }
+      }
+    }
+
+    // 2. Continuous Fire / Burst Fire Handling
+    if (this.fireCooldown > 0) {
+      this.fireCooldown -= dt;
+    }
+    if (this.fireCooldown <= 0) {
+      if (this.burstRemaining > 0) {
+        this.executeSingleShot();
+      } else if (
+        this.state.fireMode === 'AUTO' &&
+        (this.mouseButtonsHeld.has(0) || this.touchFireHeld) &&
+        this.state.reloadPhase === 'IDLE'
+      ) {
+        this.executeSingleShot();
+      }
+    }
+
+    // 3. Update Multi-Stage Reload State Machine & Hand Kinematics
+    this.updateReloadStateMachine(dt);
+
+    // 4. Player Movement, Stance (Stand/Crouch/Sprint/Slide) & Q/E Leaning
+    this.updatePlayerMovementAndCollision(dt);
+
+    // 5. Weapon ADS Alignment, Respiratory Breath Hold, Recoil & Wall-Tuck
+    this.updateWeaponKinematicsAndOptics(dt);
+
+    // 6. Reactive Targets & Killhouse Combat Bot AI
+    this.updateTargetsAndCombatAI(dt);
+
+    // 7. Update Pooled Brass Casings, Dropped Magazines, Sparks & Tracers
+    this.fxPool.update(dt);
+
+    // 8. Throttled HUD Sync (11Hz smooth telemetry without React main-thread saturation)
+    this.hudSyncTimer += dt;
+    if (this.hudSyncTimer >= 0.09) {
+      this.hudSyncTimer = 0;
+      this.emitHud();
+    }
+  }
+
+  private updateReloadStateMachine(dt: number): void {
+    const phase = this.state.reloadPhase;
+
+    // Update top brass cartridges visibility inside PMAG feed lips
+    const hasRoundsInMag = this.state.currentMagRounds > 0;
+    this.weaponRig.topCartridges.forEach((c, idx) => {
+      c.visible = this.state.currentMagRounds > idx;
+    });
+
+    if (phase === 'IDLE' || phase === 'MAG_CHECK') {
+      // Smoothly return M4 magazine & charging handle to default position
+      this.weaponRig.magazineGroup.position.set(0, -0.125, -0.014);
+      this.weaponRig.magazineGroup.rotation.set(-0.11, 0, 0);
+      this.weaponRig.chargingHandle.position.z = 0.14;
+      return;
+    }
+
+    if (phase === 'CHARGING_PULL') {
+      this.reloadTimer += dt;
+      const p = Math.min(1, this.reloadTimer / this.reloadDuration);
+      this.state.reloadProgress = p;
+
+      // Animate M4 charging handle pulled back and released (hands driven by updateGlbAnimations)
+      const pullCurve = p < 0.6 ? p / 0.6 : Math.max(0, 1 - (p - 0.6) / 0.2);
+      this.weaponRig.chargingHandle.position.z = 0.14 + pullCurve * 0.068;
+
+      if (p >= 1) {
+        this.state.reloadPhase = 'IDLE';
+        this.state.reloadProgress = 0;
+        this.state.reloadTypeLabel = '';
+      }
+      return;
+    }
+
+    // Standard Tactical / Speed / Dry Staged Reload
+    this.reloadTimer += dt;
+    const p = Math.min(1, this.reloadTimer / this.reloadDuration);
+    this.state.reloadProgress = p;
+
+    const magOutEnd = this.needsBoltReleaseStage ? 0.36 : 0.46;
+    const magInEnd = this.needsBoltReleaseStage ? 0.76 : 1.0;
+
+    const hasCustomReloadSound =
+      this.state.activeWeapon === 'P50_PISTOL' ||
+      this.state.activeWeapon === 'M4_CARBINE' ||
+      this.state.activeWeapon === 'CARBINE_AR';
+
+    if (p < magOutEnd) {
+      // STAGE 1: MAG_OUT
+      this.state.reloadPhase = 'MAG_OUT';
+
+      if (!this.stageSoundFlags.magOut) {
+        this.stageSoundFlags.magOut = true;
+        if (!hasCustomReloadSound) {
+          soundEngine.playReloadStage('MAG_OUT');
+        }
+        mobileHardware.vibrateReloadStage('MAG_OUT');
+        if (this.isSpeedReload) {
+          this.weaponRig.magazineGroup.getWorldPosition(_worldPos);
+          this.camera.getWorldDirection(_forward);
+          this.fxPool.spawnDroppedMagazine(_worldPos, _forward);
+        }
+      }
+      const localP = p / magOutEnd;
+      this.weaponRig.magazineGroup.position.set(
+        -0.02 * localP,
+        -0.125 - localP * 0.24,
+        -0.014 + localP * 0.04
+      );
+      this.weaponRig.magazineGroup.rotation.z = localP * 0.35;
+    } else if (p < magInEnd) {
+      // STAGE 2: MAG_IN
+      if (this.state.reloadPhase !== 'MAG_IN') {
+        this.state.reloadPhase = 'MAG_IN';
+        this.completeMagazineSwap();
+      }
+      const localP = (p - magOutEnd) / (magInEnd - magOutEnd);
+      if (localP > 0.68 && !this.stageSoundFlags.magIn) {
+        this.stageSoundFlags.magIn = true;
+        if (!hasCustomReloadSound) {
+          soundEngine.playReloadStage('MAG_IN');
+        }
+        mobileHardware.vibrateReloadStage('MAG_IN');
+        // Upward physical seating impulse
+        this.recoilPitch += 0.012;
+      }
+      const slideOffset = Math.max(0, 1 - localP * 1.25);
+      this.weaponRig.magazineGroup.position.set(
+        -0.01 * slideOffset,
+        -0.125 - slideOffset * 0.24,
+        -0.014
+      );
+      this.weaponRig.magazineGroup.rotation.z = slideOffset * 0.2;
+    } else {
+      // STAGE 3: BOLT_SLAP / CHAMBERING ROUND
+      this.state.reloadPhase = 'BOLT_SLAP';
+      const localP = (p - magInEnd) / (1 - magInEnd);
+      this.weaponRig.magazineGroup.position.set(0, -0.125, -0.014);
+      this.weaponRig.magazineGroup.rotation.set(-0.11, 0, 0);
+
+      if (localP > 0.38 && !this.stageSoundFlags.boltSlap) {
+        this.stageSoundFlags.boltSlap = true;
+        if (!hasCustomReloadSound) {
+          soundEngine.playReloadStage('BOLT_SLAP');
+        }
+        mobileHardware.vibrateReloadStage('BOLT_SLAP');
+        if (this.state.currentMagRounds > 0 && this.state.chambered === 0) {
+          this.state.currentMagRounds -= 1;
+          this.state.chambered = 1;
+        }
+        this.state.boltLockedBack = false;
+        this.recoilKickZ += 0.018;
+      }
+    }
+
+    if (p >= 1) {
+      if (this.state.chambered === 0 && this.state.currentMagRounds > 0) {
+        this.state.currentMagRounds -= 1;
+        this.state.chambered = 1;
+      }
+      this.state.boltLockedBack = false;
+      this.state.reloadPhase = 'IDLE';
+      this.state.reloadProgress = 0;
+      this.state.reloadTypeLabel = '';
+    }
+
+    void hasRoundsInMag;
+  }
+
+  private updatePlayerMovementAndCollision(dt: number): void {
+    // 1. Stance & Breath Stamina (Keyboard + Mobile Touch Controls)
+    const crouchHeld =
+      this.keysHeld.has('KeyC') ||
+      this.keysHeld.has('ControlLeft') ||
+      this.state.isCrouchingToggled;
+    const sprintHeld =
+      ((this.keysHeld.has('ShiftLeft') && this.keysHeld.has('KeyW')) ||
+        this.touchSprinting) &&
+      !this.state.isAds &&
+      !crouchHeld &&
+      this.state.reloadPhase === 'IDLE' &&
+      this.state.stamina > 8;
+
+    // Breath holding when ShiftLeft or Mobile Breath Button is held during ADS
+    const holdBreath =
+      (this.keysHeld.has('ShiftLeft') || this.touchHoldBreath) &&
+      this.state.isAds &&
+      this.state.stamina > 5;
+    this.state.isHoldingBreath = holdBreath;
+
+    if (holdBreath) {
+      const prevStamina = this.state.stamina;
+      this.state.stamina = Math.max(0, this.state.stamina - 22 * dt);
+      if (prevStamina > 25 && this.state.stamina <= 25) {
+        soundEngine.playHeartbeat();
+      }
+    } else if (sprintHeld) {
+      this.state.stamina = Math.max(0, this.state.stamina - 14 * dt);
+    } else {
+      this.state.stamina = Math.min(100, this.state.stamina + 18 * dt);
+    }
+
+    if (this.slideTimer > 0) {
+      this.slideTimer -= dt;
+      this.state.stance = 'SLIDE';
+    } else if (crouchHeld) {
+      this.state.stance = 'CROUCH';
+    } else if (sprintHeld) {
+      this.state.stance = 'SPRINT';
+    } else {
+      this.state.stance = 'STAND';
+    }
+
+    // 2. Q / E Tactical Corner Leaning (Keyboard + Mobile Touch Toggle)
+    if (this.keysHeld.has('KeyQ') && !this.keysHeld.has('KeyE')) {
+      this.leanTarget = -1;
+    } else if (this.keysHeld.has('KeyE') && !this.keysHeld.has('KeyQ')) {
+      this.leanTarget = 1;
+    } else {
+      this.leanTarget = this.touchLeanToggle;
+    }
+    this.state.leanDirection = this.leanTarget;
+    this.leanCurrent = THREE.MathUtils.damp(
+      this.leanCurrent,
+      this.leanTarget,
+      14,
+      dt
+    );
+
+    // 3. Horizontal Velocity & Acceleration (Keyboard WASD + Mobile Analog Joystick)
+    const kbForward =
+      (this.keysHeld.has('KeyW') || this.keysHeld.has('ArrowUp') ? 1 : 0) -
+      (this.keysHeld.has('KeyS') || this.keysHeld.has('ArrowDown') ? 1 : 0);
+    const kbRight =
+      (this.keysHeld.has('KeyD') || this.keysHeld.has('ArrowRight') ? 1 : 0) -
+      (this.keysHeld.has('KeyA') || this.keysHeld.has('ArrowLeft') ? 1 : 0);
+
+    const forwardInput = THREE.MathUtils.clamp(
+      kbForward + this.touchMoveY,
+      -1,
+      1
+    );
+    const rightInput = THREE.MathUtils.clamp(
+      kbRight + this.touchMoveX,
+      -1,
+      1
+    );
+
+    _forward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+    _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
+
+    if (this.slideTimer > 0) {
+      const slideSpeed = 7.8 * (0.4 + 0.6 * (this.slideTimer / 0.68));
+      this.playerVel.x = this.slideDir.x * slideSpeed;
+      this.playerVel.z = this.slideDir.z * slideSpeed;
+    } else {
+      _moveVec
+        .set(0, 0, 0)
+        .addScaledVector(_forward, forwardInput)
+        .addScaledVector(_right, rightInput);
+      if (_moveVec.lengthSq() > 1) _moveVec.normalize();
+
+      let maxSpeed = 4.6;
+      if (this.state.stance === 'SPRINT') maxSpeed = 6.8;
+      else if (this.state.stance === 'CROUCH') maxSpeed = 2.65;
+      if (this.state.isAds) maxSpeed *= 0.68;
+
+      this.playerVel.x = THREE.MathUtils.damp(
+        this.playerVel.x,
+        _moveVec.x * maxSpeed,
+        12,
+        dt
+      );
+      this.playerVel.z = THREE.MathUtils.damp(
+        this.playerVel.z,
+        _moveVec.z * maxSpeed,
+        12,
+        dt
+      );
+    }
+
+    // 4. Jump with Coyote Time & Input Buffering
+    if (this.isGrounded) {
+      this.coyoteTimer = 0.12;
+    } else {
+      this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
+    }
+    if (this.jumpBufferTimer > 0) {
+      this.jumpBufferTimer = Math.max(0, this.jumpBufferTimer - dt);
+    }
+
+    if (this.jumpBufferTimer > 0 && this.coyoteTimer > 0) {
+      this.playerVel.y = 5.4;
+      this.isGrounded = false;
+      this.coyoteTimer = 0;
+      this.jumpBufferTimer = 0;
+    }
+
+    // Gravity
+    this.playerVel.y -= 15.5 * dt;
+
+    // 5. Move & Resolve AABB Colliders (X, then Z, then Y)
+    const radius = 0.36;
+    const nextX = this.playerPos.x + this.playerVel.x * dt;
+    if (!this.checkHorizontalCollision(nextX, this.playerPos.z, this.playerPos.y, radius)) {
+      this.playerPos.x = nextX;
+    } else {
+      this.playerVel.x = 0;
+    }
+
+    const nextZ = this.playerPos.z + this.playerVel.z * dt;
+    if (!this.checkHorizontalCollision(this.playerPos.x, nextZ, this.playerPos.y, radius)) {
+      this.playerPos.z = nextZ;
+    } else {
+      this.playerVel.z = 0;
+    }
+
+    const wasGrounded = this.isGrounded;
+    this.playerPos.y += this.playerVel.y * dt;
+    if (this.playerPos.y <= 0) {
+      if (!wasGrounded && this.playerVel.y < -2.0) {
+        this.landingDipVel = Math.max(this.playerVel.y * 0.03, -0.12);
+        soundEngine.playMechanicalSwitch(0.55);
+      }
+      this.playerPos.y = 0;
+      this.playerVel.y = 0;
+      this.isGrounded = true;
+    }
+
+    // Landing spring dip (critically damped physics)
+    const clampedDt = Math.min(dt, 0.033);
+    this.landingDip += this.landingDipVel * clampedDt;
+    this.landingDipVel += -this.landingDip * 130 * clampedDt;
+    this.landingDipVel *= Math.exp(-18 * clampedDt);
+    this.landingDip = THREE.MathUtils.clamp(this.landingDip, -0.06, 0.03);
+    if (Math.abs(this.landingDip) < 0.0002 && Math.abs(this.landingDipVel) < 0.001) {
+      this.landingDip = 0;
+      this.landingDipVel = 0;
+    }
+
+    // Eye height interpolation (Stand: 1.68m, Crouch: 1.08m, Slide: 0.86m)
+    const targetEye =
+      this.state.stance === 'SLIDE'
+        ? 0.86
+        : this.state.stance === 'CROUCH'
+          ? 1.08
+          : 1.68;
+    this.currentEyeHeight = THREE.MathUtils.damp(
+      this.currentEyeHeight,
+      targetEye,
+      14,
+      dt
+    );
+
+    // Apply Yaw, Pitch, Lean Offset & Camera Roll
+    const leanOffsetDist = this.leanCurrent * 0.42;
+    const leanWorldX = this.playerPos.x + _right.x * leanOffsetDist;
+    const leanWorldZ = this.playerPos.z + _right.z * leanOffsetDist;
+
+    // Smooth harmonic camera trauma shake (no random white noise)
+    const shakePitch = this.cameraShake > 0.0001 ? Math.sin(this.elapsedTime * 42) * this.cameraShake : 0;
+    const shakeYaw = this.cameraShake > 0.0001 ? Math.cos(this.elapsedTime * 34) * this.cameraShake * 0.5 : 0;
+
+    this.yawObject.position.set(
+      leanWorldX,
+      this.playerPos.y + this.currentEyeHeight + this.landingDip,
+      leanWorldZ
+    );
+    this.yawObject.rotation.y = this.yaw + shakeYaw;
+    this.pitchObject.rotation.x = this.pitch + shakePitch;
+
+    const slideRoll = this.slideTimer > 0 ? -0.08 : 0;
+    this.camera.rotation.z = -this.leanCurrent * 0.24 + slideRoll;
+    this.cameraShake = THREE.MathUtils.damp(this.cameraShake, 0, 24, dt);
+  }
+
+  private checkHorizontalCollision(
+    x: number,
+    z: number,
+    yBottom: number,
+    r: number
+  ): boolean {
+    const playerTop = yBottom + 1.7;
+    for (let i = 0; i < this.colliders.length; i++) {
+      const c = this.colliders[i];
+      if (playerTop <= c.minY || yBottom >= c.maxY) continue;
+      if (
+        x + r > c.minX &&
+        x - r < c.maxX &&
+        z + r > c.minZ &&
+        z - r < c.maxZ
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private updateWeaponKinematicsAndOptics(dt: number): void {
+    // 1. ADS Interpolation & Field of View (FOV) Zoom
+    const canAds =
+      this.state.isAds &&
+      this.state.reloadPhase === 'IDLE' &&
+      this.state.stance !== 'SPRINT' &&
+      this.state.wallTuckAmount < 0.55;
+
+    this.state.adsAlpha = THREE.MathUtils.damp(
+      this.state.adsAlpha,
+      canAds ? 1 : 0,
+      18,
+      dt
+    );
+
+    let targetFov = 72;
+    if (this.state.stance === 'SPRINT') {
+      targetFov = 78;
+    } else if (canAds) {
+      if (this.state.cantedActive) {
+        targetFov = 60;
+      } else if (this.state.activeWeapon === 'SNIPER_BOLT') {
+        targetFov = 14;
+      } else if (this.state.activeWeapon === 'SNIPER_TACTICAL') {
+        targetFov = 18;
+      } else if (this.state.optic === 'lpvo') {
+        targetFov = 64 / Math.pow(this.state.lpvoZoom, 0.72);
+      } else {
+        targetFov = 58;
+      }
+    }
+
+    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 16, dt);
+      this.camera.updateProjectionMatrix();
+    }
+
+    // Consolidated Single Forward Camera Raycast for Wall Avoidance, Aim Focus & Green PEQ Laser
+    this.camera.getWorldPosition(_rayOrigin);
+    this.camera.getWorldDirection(_rayDir);
+    this.raycaster.set(_rayOrigin, _rayDir);
+    this.raycaster.far = 65.0;
+    const aimHits = this.raycaster.intersectObjects(this.shootableMeshes, false);
+
+    // 1. Wall avoidance tuck
+    const firstWall = aimHits.find(
+      (h) => h.distance <= 0.85 && h.object.userData.isEnvironment
+    );
+    const targetTuck = firstWall ? Math.max(0, 1 - firstWall.distance / 0.85) : 0;
+    this.state.wallTuckAmount = THREE.MathUtils.damp(
+      this.state.wallTuckAmount,
+      targetTuck,
+      14,
+      dt
+    );
+
+    // 2. Focused Wall Weapon pickup prompt
+    if (
+      aimHits.length > 0 &&
+      aimHits[0].distance <= 7.5 &&
+      aimHits[0].object.userData.wallWeaponId
+    ) {
+      this.state.focusedWallWeapon = aimHits[0].object.userData
+        .wallWeaponId as WeaponId;
+    } else {
+      this.state.focusedWallWeapon = null;
+    }
+
+    // 3. Green Laser Beam & World Impact Dot
+    if (this.state.laserActive) {
+      const laserDist = aimHits.length > 0 ? aimHits[0].distance : 45.0;
+      this.weaponRig.peqLaserBeam.scale.set(1, 1, Math.max(0.2, laserDist));
+      if (aimHits.length > 0) {
+        this.laserDotMesh.position
+          .copy(aimHits[0].point)
+          .addScaledVector(_rayDir, -0.02);
+        this.laserDotMesh.visible = true;
+      } else {
+        this.laserDotMesh.visible = false;
+      }
+    } else {
+      this.laserDotMesh.visible = false;
+    }
+
+    // 4. Second-Order Sway, Walk Bob & Respiratory Figure-8 Curve
+    const horizSpeed = Math.hypot(this.playerVel.x, this.playerVel.z);
+    const bobFreq =
+      this.state.stance === 'SPRINT'
+        ? 12.5
+        : this.state.stance === 'CROUCH'
+          ? 6.5
+          : 9.2;
+    if (this.isGrounded && horizSpeed > 0.25 && this.slideTimer <= 0) {
+      this.walkBobPhase += dt * bobFreq;
+      this.walkBobAmp = THREE.MathUtils.damp(
+        this.walkBobAmp,
+        Math.min(1, horizSpeed / 5.0),
+        10,
+        dt
+      );
+    } else {
+      this.walkBobAmp = THREE.MathUtils.damp(this.walkBobAmp, 0, 10, dt);
+    }
+
+    // Spring-damper mouse look sway
+    const clampedDt = Math.min(dt, 0.033);
+    this.swayPos.x += this.swayVel.x * clampedDt;
+    this.swayPos.y += this.swayVel.y * clampedDt;
+    this.swayVel.x += -this.swayPos.x * 120 * clampedDt;
+    this.swayVel.y += -this.swayPos.y * 120 * clampedDt;
+    this.swayVel.multiplyScalar(Math.exp(-16 * clampedDt));
+    this.swayPos.clampScalar(-0.025, 0.025);
+    if (this.swayPos.lengthSq() < 0.000005 && this.swayVel.lengthSq() < 0.00005) {
+      this.swayPos.set(0, 0);
+      this.swayVel.set(0, 0);
+    }
+
+    // Respiratory breathing Lissajous figure-8
+    const breathScale = this.state.isHoldingBreath
+      ? 0.08
+      : this.state.adsAlpha > 0.5
+        ? 0.38
+        : 1.0;
+    const breathX = Math.sin(this.elapsedTime * 1.45) * 0.0028 * breathScale;
+    const breathY = Math.cos(this.elapsedTime * 2.9) * 0.0022 * breathScale;
+
+    // Counter-Strike 2 (CS2) Viewmodel Framing (matches CS2 Desert Eagle bottom-right framing) vs Precision ADS Target Pose
+    const hipPos =
+      this.state.activeWeapon === 'P50_PISTOL'
+        ? new THREE.Vector3(0.115, -0.062, -0.27)
+        : new THREE.Vector3(0.105, -0.068, -0.3);
+    const adsTransform = getOpticAdsTransform(
+      this.state.optic,
+      this.state.cantedActive,
+      this.state.activeWeapon
+    );
+
+    const basePosX = THREE.MathUtils.lerp(
+      hipPos.x,
+      adsTransform.pos.x,
+      this.state.adsAlpha
+    );
+    const basePosY = THREE.MathUtils.lerp(
+      hipPos.y,
+      adsTransform.pos.y,
+      this.state.adsAlpha
+    );
+    const basePosZ = THREE.MathUtils.lerp(
+      hipPos.z,
+      adsTransform.pos.z,
+      this.state.adsAlpha
+    );
+
+    const bobScale = THREE.MathUtils.lerp(1.0, 0.14, this.state.adsAlpha);
+    const bobX = Math.cos(this.walkBobPhase) * 0.011 * this.walkBobAmp * bobScale;
+    const bobY =
+      Math.abs(Math.sin(this.walkBobPhase)) * -0.012 * this.walkBobAmp * bobScale;
+
+    // Recoil decay
+    this.recoilKickZ = THREE.MathUtils.damp(this.recoilKickZ, 0, 22, dt);
+    this.recoilPitch = THREE.MathUtils.damp(this.recoilPitch, 0, 18, dt);
+    this.recoilYaw = THREE.MathUtils.damp(this.recoilYaw, 0, 18, dt);
+
+    // Sprint / Mag Check / Wall-Tuck / CS2 Hip-Angle Pose Modifiers
+    const isSprinting = this.state.stance === 'SPRINT' && this.state.adsAlpha < 0.2;
+    const sprintRotX = isSprinting ? -0.26 : 0;
+    const sprintRotY = isSprinting ? 0.48 : 0;
+    const sprintRotZ = isSprinting ? -0.24 : 0;
+
+    // CS2 inward barrel angle in hipfire (smoothly zeroes out in ADS)
+    const cs2HipRotY = (1 - this.state.adsAlpha) * 0.055;
+    const cs2HipRotX = (1 - this.state.adsAlpha) * 0.015;
+
+    const magCheckAlpha = this.state.reloadPhase === 'MAG_CHECK' ? 1 : 0;
+    const tuck = this.state.wallTuckAmount;
+
+    this.weaponRig.root.position.set(
+      basePosX + bobX + this.swayPos.x * bobScale + breathX + magCheckAlpha * 0.025,
+      basePosY +
+        bobY +
+        this.swayPos.y * bobScale +
+        breathY +
+        this.landingDip * 0.35 +
+        magCheckAlpha * 0.032 -
+        tuck * 0.06,
+      basePosZ + this.recoilKickZ + tuck * 0.14
+    );
+
+    const targetRotZ = THREE.MathUtils.lerp(
+      sprintRotZ - this.swayPos.x * 1.8,
+      adsTransform.rotZ,
+      this.state.adsAlpha
+    );
+
+    this.weaponRig.root.rotation.set(
+      cs2HipRotX + this.recoilPitch + sprintRotX + tuck * 0.65 + magCheckAlpha * 0.24,
+      cs2HipRotY + this.recoilYaw + sprintRotY - this.swayPos.x * 1.2 - magCheckAlpha * 0.18,
+      targetRotZ - magCheckAlpha * 0.42
+    );
+
+    // Hide 3D weapon viewmodel when looking through high-magnification sniper scope
+    const isSniperScoped =
+      (this.state.activeWeapon === 'SNIPER_BOLT' ||
+        this.state.activeWeapon === 'SNIPER_TACTICAL' ||
+        this.state.optic === 'lpvo') &&
+      !this.state.cantedActive &&
+      this.state.adsAlpha > 0.82;
+    this.weaponRig.root.visible = !isSniperScoped;
+
+    // 5. Mechanical Sub-Component Animations (Bolt Carrier, Selector, Reticle Parallax)
+    if (this.state.boltLockedBack) {
+      this.weaponRig.boltCarrier.position.z = 0.052;
+    } else {
+      this.boltCycleOffset = THREE.MathUtils.damp(this.boltCycleOffset, 0, 35, dt);
+      this.weaponRig.boltCarrier.position.z = 0.005 + this.boltCycleOffset;
+    }
+
+    // Fire Selector Lever Angle
+    const selTargetX =
+      this.state.fireMode === 'SEMI'
+        ? 0
+        : this.state.fireMode === 'BURST'
+          ? Math.PI / 4
+          : Math.PI / 2;
+    this.weaponRig.fireSelector.rotation.x = THREE.MathUtils.damp(
+      this.weaponRig.fireSelector.rotation.x,
+      selTargetX,
+      20,
+      dt
+    );
+
+    // Trigger Shoe & Articulated GLB Index Finger Squeeze Animation
+    const triggerPressed =
+      this.mouseButtonsHeld.has(0) || this.touchFireHeld || this.fireCooldown > 0.04;
+    const targetTriggerRot = triggerPressed ? 0.52 : 0.22;
+    this.weaponRig.triggerMesh.rotation.x = THREE.MathUtils.damp(
+      this.weaponRig.triggerMesh.rotation.x,
+      targetTriggerRot,
+      28,
+      dt
+    );
+    const pullAlpha = (this.weaponRig.triggerMesh.rotation.x - 0.22) / 0.3;
+    this.weaponRig.setTriggerPull(THREE.MathUtils.clamp(pullAlpha, 0, 1));
+
+    const isMoving = this.isGrounded && horizSpeed > 0.35;
+    this.weaponRig.updateGlbAnimations(
+      dt,
+      isMoving,
+      canAds,
+      this.state.reloadPhase,
+      this.state.reloadProgress
+    );
+
+    // Proximity to 3D Wall Weapon Stands
+    let nearStand = false;
+    for (let i = 0; i < this.wallStandPositions.length; i++) {
+      const standPos = this.wallStandPositions[i];
+      const dx = this.playerPos.x - standPos.x;
+      const dz = this.playerPos.z - standPos.z;
+      if (dx * dx + dz * dz < 64.0) {
+        nearStand = true;
+        break;
+      }
+    }
+    this.state.nearWallStand = nearStand;
+
+    // LPVO Throw Lever Angle & Reticle Scale
+    this.weaponRig.lpvoThrowLever.rotation.z =
+      0.8 - ((this.state.lpvoZoom - 1) / 3) * 1.2;
+
+    // Optical Parallax Projection on Holographic & Red Dot Reticles
+    const parallaxX = THREE.MathUtils.clamp(-this.swayPos.x * 0.18, -0.006, 0.006);
+    const parallaxY = THREE.MathUtils.clamp(-this.swayPos.y * 0.18, -0.006, 0.006);
+    this.weaponRig.holoReticleMesh.position.x = parallaxX;
+    this.weaponRig.holoReticleMesh.position.y = 0.03 + parallaxY;
+
+    // Muzzle Flash Visibility & Light Decay
+    if (this.muzzleFlashTimer > 0) {
+      this.muzzleFlashTimer -= dt;
+      this.weaponRig.muzzleFlashGroup.visible = !this.state.suppressorAttached;
+      this.weaponRig.muzzleLight.intensity = this.state.suppressorAttached
+        ? 1.2
+        : 6.5;
+    } else {
+      this.weaponRig.muzzleFlashGroup.visible = false;
+      this.weaponRig.muzzleLight.intensity = 0;
+    }
+  }
+
+  private updateTargetsAndCombatAI(dt: number): void {
+    this.camera.getWorldPosition(_worldPos);
+
+    for (let i = 0; i < this.targets.length; i++) {
+      const t = this.targets[i];
+
+      // 1. Patrol Motion on Active Targets
+      if (!t.isDown && t.patrolAxis !== 'NONE' && t.patrolSpeed > 0) {
+        const offset =
+          Math.sin(this.elapsedTime * t.patrolSpeed + t.patrolOffset) *
+          t.patrolRange;
+        if (t.patrolAxis === 'X') {
+          t.root.position.x = t.basePosition.x + offset;
+        } else {
+          t.root.position.z = t.basePosition.z + offset;
+        }
+      }
+
+      // 2. Pop-Up Recovery in Free Range Mode
+      if (t.isDown) {
+        t.pivotGroup.rotation.x = THREE.MathUtils.damp(
+          t.pivotGroup.rotation.x,
+          -Math.PI / 2,
+          14,
+          dt
+        );
+        if (this.state.drillMode === 'FREE_RANGE') {
+          t.downTimer -= dt;
+          if (t.downTimer <= 0) {
+            t.isDown = false;
+            t.health = t.maxHealth;
+            t.armorHealth = t.armorMesh ? 60 : 0;
+            if (t.armorMesh) t.armorMesh.visible = true;
+            soundEngine.playMechanicalSwitch(0.85);
+          }
+        }
+        continue;
+      }
+
+      // Spring-damper reactive impact wobble when standing
+      t.hitTiltAngle += t.hitTiltVelocity * dt;
+      t.hitTiltVelocity += -t.hitTiltAngle * 145 * dt;
+      t.hitTiltVelocity *= Math.exp(-9 * dt);
+      t.pivotGroup.rotation.x = t.hitTiltAngle;
+
+      // 3. Autonomous Combat Bot Telegraph & Return Fire (in TACTICAL_WAVE or KILLHOUSE_BLITZ)
+      if (
+        t.canShootBack &&
+        (this.state.drillMode === 'TACTICAL_WAVE' ||
+          this.state.drillMode === 'KILLHOUSE_BLITZ')
+      ) {
+        const distToPlayer = t.root.position.distanceTo(_worldPos);
+        if (distToPlayer < 26) {
+          // Check line of sight from bot head to player eye position
+          _rayOrigin.set(
+            t.root.position.x,
+            t.root.position.y + 1.65,
+            t.root.position.z
+          );
+          _targetToPlayer.subVectors(_worldPos, _rayOrigin).normalize();
+          this.raycaster.set(_rayOrigin, _targetToPlayer);
+          this.raycaster.far = distToPlayer;
+          const envHits = this.raycaster.intersectObjects(
+            this.shootableMeshes,
+            false
+          );
+          const blockedByCover =
+            envHits.length > 0 &&
+            envHits[0].object.userData.isEnvironment &&
+            envHits[0].distance < distToPlayer - 0.5;
+
+          if (!blockedByCover) {
+            // Rotate bot gently toward player
+            const desiredYaw = Math.atan2(
+              _worldPos.x - t.root.position.x,
+              _worldPos.z - t.root.position.z
+            );
+            t.root.rotation.y = THREE.MathUtils.damp(
+              t.root.rotation.y,
+              desiredYaw,
+              6,
+              dt
+            );
+
+            if (!t.isTelegraphing) {
+              t.cooldownTimer -= dt;
+              if (t.cooldownTimer <= 0) {
+                t.isTelegraphing = true;
+                t.windupTimer = 1.15; // Clear 1.15s visual + audio windup telegraph
+                if (t.laserLine) t.laserLine.visible = true;
+                soundEngine.playEnemyTelegraph();
+              }
+            } else {
+              t.windupTimer -= dt;
+              if (t.windupTimer <= 0) {
+                t.isTelegraphing = false;
+                t.cooldownTimer = 2.1 + Math.random() * 1.4;
+                if (t.laserLine) t.laserLine.visible = false;
+
+                // Bot fires tracer at player!
+                this.fxPool.spawnTracer(_rayOrigin, _worldPos, 0xef4444);
+                soundEngine.playImpact('TORSO');
+                mobileHardware.vibrateDamage();
+                const dmg = this.state.drillMode === 'TACTICAL_WAVE' ? 16 : 9;
+                this.state.health = Math.max(0, this.state.health - dmg);
+                this.state.damageFlashAlpha = 0.75;
+                this.cameraShake = 0.012;
+
+                if (this.state.health <= 0) {
+                  this.state.screen = 'GAME_OVER';
+                  if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                  }
+                }
+                this.emitHud();
+              }
+            }
+          } else {
+            t.isTelegraphing = false;
+            if (t.laserLine) t.laserLine.visible = false;
+          }
+        }
+      }
+    }
+  }
+
+  private emitHud(): void {
+    if (this.cachedRadarTargets.length !== this.targets.length) {
+      this.cachedRadarTargets = this.targets.map((t) => ({
+        id: t.id,
+        sector: t.sector,
+        x: t.root.position.x,
+        z: t.root.position.z,
+        isDown: t.isDown,
+      }));
+    } else {
+      for (let i = 0; i < this.targets.length; i++) {
+        const t = this.targets[i];
+        const c = this.cachedRadarTargets[i];
+        c.x = t.root.position.x;
+        c.z = t.root.position.z;
+        c.isDown = t.isDown;
+      }
+    }
+
+    this.state.playerPos.x = this.playerPos.x;
+    this.state.playerPos.z = this.playerPos.z;
+    this.state.playerYaw = this.yaw;
+
+    this.onHudUpdate({
+      ...this.state,
+      primaryWeapon: this.primaryWeapon,
+      secondaryWeapon: 'P50_PISTOL',
+      playerPos: { x: this.playerPos.x, z: this.playerPos.z },
+      playerYaw: this.yaw,
+      radarTargets: this.cachedRadarTargets,
+      magazines: [...this.state.magazines],
+      shotHistory: [...this.state.shotHistory],
+    });
+  }
+
+  public dispose(): void {
+    this.disposed = true;
+    cancelAnimationFrame(this.frameId);
+    clearTimeout(this.frameId);
+
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('mousedown', this.onMouseDown);
+    window.removeEventListener('mouseup', this.onMouseUp);
+    window.removeEventListener('mousemove', this.onMouseMove);
+    window.removeEventListener('wheel', this.onWheel);
+    window.removeEventListener('blur', this.onWindowBlur);
+    window.removeEventListener('contextmenu', this.onContextMenu);
+    window.removeEventListener('resize', this.onResize);
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+
+    this.renderer.dispose();
+    if (this.renderer.domElement.parentNode) {
+      this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
+    }
+  }
+}

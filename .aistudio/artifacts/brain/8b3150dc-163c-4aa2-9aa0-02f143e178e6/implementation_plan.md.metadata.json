@@ -1,0 +1,6 @@
+{
+  "summary": "Plano de arquitetura para transformar o KINETIC em um jogo mobile nativo Android (APK via Capacitor + GitHub Actions), com motor gráfico dotado de Escala Dinâmica de Resolução (DRS), Presets de Qualidade (60/120 FPS), Mira por Giroscópio, Vibração Tátil (Haptics) e Tela Cheia Horizontal.",
+  "updatedAt": "2026-11-06T21:52:17.468409744Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
