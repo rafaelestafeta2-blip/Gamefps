@@ -31,6 +31,50 @@ export const DRY_FIRE_WAV_LOCAL_URL =
 export const DRY_FIRE_WAV_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/7b2263cf0ce87b89429eb95de4ec622053dd3663/725402__serutonin-deprivd__a-rifle-being-dry-fired-once.wav';
 
+export const GRENADE_PIN_PULL_LOCAL_URL =
+  '/sounds/grenade_pin_pull.wav';
+export const GRENADE_PIN_PULL_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/Granada/Grenade_thrown_with__%232-1794122888691.wav';
+
+export const GRENADE_THROW_LOCAL_URL =
+  '/sounds/grenade_throw.wav';
+export const GRENADE_THROW_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/Granada/Areme%C3%A7ar_objeto_%231-1794123019934.wav';
+
+export const GRENADE_EXPLOSION_LOCAL_URL =
+  '/sounds/grenade_explosion.flac';
+export const GRENADE_EXPLOSION_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/Granada/609587__unfa__grenade-explosion-sfx-medium-sized-meaty-realistic.flac';
+
+export const SMOKE_GRENADE_GAS_LOCAL_URL =
+  '/sounds/smoke_grenade_gas.mp3';
+export const SMOKE_GRENADE_GAS_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/Granada/freesound_community-gas-grenade-95255.mp3';
+
+export const WEAPON_SWAP_LOCAL_URL = '/audio/weapon_swap.mp3';
+export const WEAPON_SWAP_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/159450__twisterman__weaponswap-custom-sound-effect.mp3';
+
+export const PLAYER_JUMP_LOCAL_URL = '/audio/player_jump.wav';
+export const PLAYER_JUMP_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/542082__vinrax__player_jump.wav';
+
+export const PLAYER_SLIDE_LOCAL_URL = '/audio/player_slide.wav';
+export const PLAYER_SLIDE_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/488508__03thib__slide.wav';
+
+export const FOOTSTEP_RUN_LOCAL_URL = '/audio/footstep_run.wav';
+export const FOOTSTEP_RUN_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/563476__nicholasdaryl__footstep_run_hardsurface_9.wav';
+
+export const SNIPER_SHOT_WAV_LOCAL_URL = '/sounds/sniper_shot.wav';
+export const SNIPER_SHOT_WAV_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/daeab41ffa080f475b5f4359eebeb34f02ea5a44/Sound/Sniper/514228__superphat__sniper-rifle.wav';
+
+export const SNIPER_BOLT_WAV_LOCAL_URL = '/sounds/sniper_bolt.wav';
+export const SNIPER_BOLT_WAV_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/daeab41ffa080f475b5f4359eebeb34f02ea5a44/Sound/Sniper/Sharp%2C_dry_mechanica_%231-1794123918265.wav';
+
 class TacticalSoundEngine {
   private ctx: AudioContext | null = null;
   private noiseBuffer: AudioBuffer | null = null;
@@ -68,6 +112,69 @@ class TacticalSoundEngine {
   private dryFireAudioPool: HTMLAudioElement[] = [];
   private dryFirePoolIdx = 0;
 
+  // Real Sniper Rifle Shot & Bolt-Action Cycle Audio Samples
+  private sniperShotRawData: ArrayBuffer | null = null;
+  private sniperShotBuffer: AudioBuffer | null = null;
+  private sniperShotDecoding = false;
+  private sniperShotAudioPool: HTMLAudioElement[] = [];
+  private sniperShotPoolIdx = 0;
+
+  private sniperBoltRawData: ArrayBuffer | null = null;
+  private sniperBoltBuffer: AudioBuffer | null = null;
+  private sniperBoltDecoding = false;
+  private sniperBoltAudioPool: HTMLAudioElement[] = [];
+  private sniperBoltPoolIdx = 0;
+
+  // Real Grenade Audio Samples (Pin Pull, Throw, Explosion, Smoke Gas)
+  private grenadePinRawData: ArrayBuffer | null = null;
+  private grenadePinBuffer: AudioBuffer | null = null;
+  private grenadePinDecoding = false;
+  private grenadePinPool: HTMLAudioElement[] = [];
+  private grenadePinPoolIdx = 0;
+
+  private grenadeThrowRawData: ArrayBuffer | null = null;
+  private grenadeThrowBuffer: AudioBuffer | null = null;
+  private grenadeThrowDecoding = false;
+  private grenadeThrowPool: HTMLAudioElement[] = [];
+  private grenadeThrowPoolIdx = 0;
+
+  private grenadeExplosionRawData: ArrayBuffer | null = null;
+  private grenadeExplosionBuffer: AudioBuffer | null = null;
+  private grenadeExplosionDecoding = false;
+  private grenadeExplosionPool: HTMLAudioElement[] = [];
+  private grenadeExplosionPoolIdx = 0;
+
+  private smokeGasRawData: ArrayBuffer | null = null;
+  private smokeGasBuffer: AudioBuffer | null = null;
+  private smokeGasDecoding = false;
+  private smokeGasPool: HTMLAudioElement[] = [];
+  private smokeGasPoolIdx = 0;
+
+  // Real Character Movement & Weapon Swap Audio Samples (Swap, Jump, Slide, Footsteps)
+  private weaponSwapRawData: ArrayBuffer | null = null;
+  private weaponSwapBuffer: AudioBuffer | null = null;
+  private weaponSwapDecoding = false;
+  private weaponSwapPool: HTMLAudioElement[] = [];
+  private weaponSwapPoolIdx = 0;
+
+  private playerJumpRawData: ArrayBuffer | null = null;
+  private playerJumpBuffer: AudioBuffer | null = null;
+  private playerJumpDecoding = false;
+  private playerJumpPool: HTMLAudioElement[] = [];
+  private playerJumpPoolIdx = 0;
+
+  private playerSlideRawData: ArrayBuffer | null = null;
+  private playerSlideBuffer: AudioBuffer | null = null;
+  private playerSlideDecoding = false;
+  private playerSlidePool: HTMLAudioElement[] = [];
+  private playerSlidePoolIdx = 0;
+
+  private footstepRunRawData: ArrayBuffer | null = null;
+  private footstepRunBuffer: AudioBuffer | null = null;
+  private footstepRunDecoding = false;
+  private footstepRunPool: HTMLAudioElement[] = [];
+  private footstepRunPoolIdx = 0;
+
   // Main Menu Background Music
   private menuMusicAudio: HTMLAudioElement | null = null;
   private isMenuMusicPlaying = false;
@@ -100,6 +207,9 @@ class TacticalSoundEngine {
     this.preloadM4a1ReloadSample();
     this.preloadM4a1ShotSample();
     this.preloadDryFireSample();
+    this.preloadSniperSamples();
+    this.preloadGrenadeSamples();
+    this.preloadMovementAndSwapSamples();
     if (this.ctx && this.ctx.state === 'suspended') {
       void this.ctx.resume();
     }
@@ -373,6 +483,11 @@ class TacticalSoundEngine {
     if (this.ctx && !this.m4a1ShotBuffer && this.m4a1ShotRawData) {
       this.tryDecodeM4a1Shot(this.ctx);
     }
+    if (this.ctx) {
+      this.tryDecodeSniperSamples(this.ctx);
+      this.tryDecodeGrenadeSamples(this.ctx);
+      this.tryDecodeMovementAndSwapSamples(this.ctx);
+    }
     if (!this.noiseBuffer && this.ctx) {
       const length = this.ctx.sampleRate * 1.5;
       this.noiseBuffer = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
@@ -382,6 +497,242 @@ class TacticalSoundEngine {
       }
     }
     return this.ctx;
+  }
+
+  private preloadSniperSamples(): void {
+    // 1. Sniper Rifle Shot WAV (514228__superphat__sniper-rifle.wav)
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(SNIPER_SHOT_WAV_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = SNIPER_SHOT_WAV_GITHUB_RAW_URL;
+      };
+      this.sniperShotAudioPool.push(audio);
+    }
+    fetch(SNIPER_SHOT_WAV_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local sniper shot WAV fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(SNIPER_SHOT_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.sniperShotRawData = buf;
+        if (this.ctx) this.tryDecodeSniperSamples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 2. Sniper Bolt-Action Mechanical Cycle WAV (Sharp,_dry_mechanica_#1-1794123918265.wav)
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(SNIPER_BOLT_WAV_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = SNIPER_BOLT_WAV_GITHUB_RAW_URL;
+      };
+      this.sniperBoltAudioPool.push(audio);
+    }
+    fetch(SNIPER_BOLT_WAV_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local sniper bolt WAV fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(SNIPER_BOLT_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.sniperBoltRawData = buf;
+        if (this.ctx) this.tryDecodeSniperSamples(this.ctx);
+      })
+      .catch(() => {});
+  }
+
+  private tryDecodeSniperSamples(ctx: AudioContext): void {
+    if (
+      !this.sniperShotBuffer &&
+      !this.sniperShotDecoding &&
+      this.sniperShotRawData
+    ) {
+      this.sniperShotDecoding = true;
+      ctx
+        .decodeAudioData(this.sniperShotRawData.slice(0))
+        .then((decoded) => {
+          this.sniperShotBuffer = decoded;
+          this.sniperShotDecoding = false;
+        })
+        .catch(() => {
+          this.sniperShotDecoding = false;
+        });
+    }
+
+    if (
+      !this.sniperBoltBuffer &&
+      !this.sniperBoltDecoding &&
+      this.sniperBoltRawData
+    ) {
+      this.sniperBoltDecoding = true;
+      ctx
+        .decodeAudioData(this.sniperBoltRawData.slice(0))
+        .then((decoded) => {
+          this.sniperBoltBuffer = decoded;
+          this.sniperBoltDecoding = false;
+        })
+        .catch(() => {
+          this.sniperBoltDecoding = false;
+        });
+    }
+  }
+
+  private preloadGrenadeSamples(): void {
+    // 1. Pin pull audio pool + raw buffer
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(GRENADE_PIN_PULL_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = GRENADE_PIN_PULL_GITHUB_RAW_URL;
+      };
+      this.grenadePinPool.push(audio);
+    }
+    fetch(GRENADE_PIN_PULL_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local grenade pin fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(GRENADE_PIN_PULL_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.grenadePinRawData = buf;
+        if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 2. Throw audio pool + raw buffer
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(GRENADE_THROW_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = GRENADE_THROW_GITHUB_RAW_URL;
+      };
+      this.grenadeThrowPool.push(audio);
+    }
+    fetch(GRENADE_THROW_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local grenade throw fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(GRENADE_THROW_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.grenadeThrowRawData = buf;
+        if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 3. Explosion audio pool + raw buffer
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(GRENADE_EXPLOSION_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = GRENADE_EXPLOSION_GITHUB_RAW_URL;
+      };
+      this.grenadeExplosionPool.push(audio);
+    }
+    fetch(GRENADE_EXPLOSION_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local grenade explosion fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(GRENADE_EXPLOSION_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.grenadeExplosionRawData = buf;
+        if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 4. Smoke gas hiss audio pool + raw buffer
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(SMOKE_GRENADE_GAS_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = SMOKE_GRENADE_GAS_GITHUB_RAW_URL;
+      };
+      this.smokeGasPool.push(audio);
+    }
+    fetch(SMOKE_GRENADE_GAS_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local smoke gas fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(SMOKE_GRENADE_GAS_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.smokeGasRawData = buf;
+        if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
+      })
+      .catch(() => {});
+  }
+
+  private tryDecodeGrenadeSamples(ctx: AudioContext): void {
+    if (!this.grenadePinBuffer && !this.grenadePinDecoding && this.grenadePinRawData) {
+      this.grenadePinDecoding = true;
+      ctx
+        .decodeAudioData(this.grenadePinRawData.slice(0))
+        .then((decoded) => {
+          this.grenadePinBuffer = decoded;
+          this.grenadePinDecoding = false;
+        })
+        .catch(() => {
+          this.grenadePinDecoding = false;
+        });
+    }
+
+    if (!this.grenadeThrowBuffer && !this.grenadeThrowDecoding && this.grenadeThrowRawData) {
+      this.grenadeThrowDecoding = true;
+      ctx
+        .decodeAudioData(this.grenadeThrowRawData.slice(0))
+        .then((decoded) => {
+          this.grenadeThrowBuffer = decoded;
+          this.grenadeThrowDecoding = false;
+        })
+        .catch(() => {
+          this.grenadeThrowDecoding = false;
+        });
+    }
+
+    if (
+      !this.grenadeExplosionBuffer &&
+      !this.grenadeExplosionDecoding &&
+      this.grenadeExplosionRawData
+    ) {
+      this.grenadeExplosionDecoding = true;
+      ctx
+        .decodeAudioData(this.grenadeExplosionRawData.slice(0))
+        .then((decoded) => {
+          this.grenadeExplosionBuffer = decoded;
+          this.grenadeExplosionDecoding = false;
+        })
+        .catch(() => {
+          this.grenadeExplosionDecoding = false;
+        });
+    }
+
+    if (!this.smokeGasBuffer && !this.smokeGasDecoding && this.smokeGasRawData) {
+      this.smokeGasDecoding = true;
+      ctx
+        .decodeAudioData(this.smokeGasRawData.slice(0))
+        .then((decoded) => {
+          this.smokeGasBuffer = decoded;
+          this.smokeGasDecoding = false;
+        })
+        .catch(() => {
+          this.smokeGasDecoding = false;
+        });
+    }
   }
 
   public playGunshot(
@@ -484,6 +835,42 @@ class TacticalSoundEngine {
         mechGain.connect(ctx.destination);
         mechOsc.start(now + 0.04);
         mechOsc.stop(now + 0.16);
+      }
+      return;
+    }
+
+    // 3. REAL SNIPER RIFLE (.338 LAPUA / .308 WIN) WAV SAMPLE FOR SNIPER_BOLT & SNIPER_TACTICAL
+    if (weaponId === 'SNIPER_BOLT' || weaponId === 'SNIPER_TACTICAL') {
+      if (this.sniperShotBuffer) {
+        const src = ctx.createBufferSource();
+        src.buffer = this.sniperShotBuffer;
+        src.playbackRate.setValueAtTime(
+          (weaponId === 'SNIPER_BOLT' ? 0.97 : 1.01) +
+            (Math.random() - 0.5) * 0.03,
+          now
+        );
+
+        const gain = ctx.createGain();
+        if (suppressed) {
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.setValueAtTime(1350, now);
+          gain.gain.setValueAtTime(0.65, now);
+          src.connect(lp);
+          lp.connect(gain);
+        } else {
+          gain.gain.setValueAtTime(1.0, now);
+          src.connect(gain);
+        }
+        gain.connect(ctx.destination);
+        src.start(now);
+      } else if (this.sniperShotAudioPool.length > 0) {
+        const el = this.sniperShotAudioPool[this.sniperShotPoolIdx];
+        this.sniperShotPoolIdx =
+          (this.sniperShotPoolIdx + 1) % this.sniperShotAudioPool.length;
+        el.currentTime = 0;
+        el.volume = suppressed ? 0.65 : 1.0;
+        el.play().catch(() => {});
       }
       return;
     }
@@ -822,11 +1209,39 @@ class TacticalSoundEngine {
   }
 
   public playBoltActionCycle(): void {
+    if (this.muted) return;
     const ctx = this.ensureContext();
+
+    if (ctx && this.sniperBoltBuffer) {
+      const now = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = this.sniperBoltBuffer;
+      src.playbackRate.setValueAtTime(0.98 + Math.random() * 0.04, now + 0.14);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.98, now + 0.14);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start(now + 0.14);
+      return;
+    }
+
+    if (this.sniperBoltAudioPool.length > 0) {
+      const el = this.sniperBoltAudioPool[this.sniperBoltPoolIdx];
+      this.sniperBoltPoolIdx =
+        (this.sniperBoltPoolIdx + 1) % this.sniperBoltAudioPool.length;
+      setTimeout(() => {
+        if (this.muted) return;
+        el.currentTime = 0;
+        el.volume = 0.98;
+        el.play().catch(() => {});
+      }, 140);
+      return;
+    }
+
     if (!ctx) return;
     const now = ctx.currentTime;
 
-    // 1. Bolt Handle Up & Pull Back (at t = 0.28s)
+    // Procedural fallback if WAV hasn't finished loading yet
     const unlockOsc = ctx.createOscillator();
     const unlockGain = ctx.createGain();
     unlockOsc.type = 'sawtooth';
@@ -838,45 +1253,6 @@ class TacticalSoundEngine {
     unlockGain.connect(ctx.destination);
     unlockOsc.start(now + 0.28);
     unlockOsc.stop(now + 0.46);
-
-    // 2. Brass ejection metallic ping (at t = 0.48s)
-    const ejectOsc = ctx.createOscillator();
-    const ejectGain = ctx.createGain();
-    ejectOsc.type = 'triangle';
-    ejectOsc.frequency.setValueAtTime(2200, now + 0.48);
-    ejectOsc.frequency.exponentialRampToValueAtTime(1200, now + 0.58);
-    ejectGain.gain.setValueAtTime(0.18, now + 0.48);
-    ejectGain.gain.exponentialRampToValueAtTime(0.001, now + 0.59);
-    ejectOsc.connect(ejectGain);
-    ejectGain.connect(ctx.destination);
-    ejectOsc.start(now + 0.48);
-    ejectOsc.stop(now + 0.6);
-
-    // 3. Bolt Push Forward & Chamber New Round (at t = 0.85s)
-    const chamberOsc = ctx.createOscillator();
-    const chamberGain = ctx.createGain();
-    chamberOsc.type = 'sawtooth';
-    chamberOsc.frequency.setValueAtTime(1380, now + 0.85);
-    chamberOsc.frequency.exponentialRampToValueAtTime(420, now + 0.98);
-    chamberGain.gain.setValueAtTime(0.28, now + 0.85);
-    chamberGain.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
-    chamberOsc.connect(chamberGain);
-    chamberGain.connect(ctx.destination);
-    chamberOsc.start(now + 0.85);
-    chamberOsc.stop(now + 1.02);
-
-    // 4. Bolt Handle Down Lock (at t = 1.05s)
-    const lockOsc = ctx.createOscillator();
-    const lockGain = ctx.createGain();
-    lockOsc.type = 'square';
-    lockOsc.frequency.setValueAtTime(1920, now + 1.05);
-    lockOsc.frequency.exponentialRampToValueAtTime(620, now + 1.15);
-    lockGain.gain.setValueAtTime(0.22, now + 1.05);
-    lockGain.gain.exponentialRampToValueAtTime(0.001, now + 1.16);
-    lockOsc.connect(lockGain);
-    lockGain.connect(ctx.destination);
-    lockOsc.start(now + 1.05);
-    lockOsc.stop(now + 1.18);
   }
 
   public playImpact(type: 'STEEL_GONG' | 'HEADSHOT' | 'TORSO' | 'ARMOR_BREAK' | 'CONCRETE'): void {
@@ -1126,6 +1502,496 @@ class TacticalSoundEngine {
     if (this.menuMusicAudio) {
       this.menuMusicAudio.pause();
       this.menuMusicAudio.currentTime = 0;
+    }
+  }
+
+  // =========================================================================
+  // TACTICAL GRENADE AUDIO (PIN PULL, THROW, BOUNCE, FRAG EXPLOSION, SMOKE)
+  // =========================================================================
+  public playGrenadePinPull(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.grenadePinBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.grenadePinBuffer;
+      src.playbackRate.setValueAtTime(0.98 + Math.random() * 0.04, ctx.currentTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.95, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.grenadePinPool.length > 0) {
+      const el = this.grenadePinPool[this.grenadePinPoolIdx];
+      this.grenadePinPoolIdx =
+        (this.grenadePinPoolIdx + 1) % this.grenadePinPool.length;
+      el.currentTime = 0;
+      el.volume = 0.95;
+      el.play().catch(() => {});
+      return;
+    }
+
+    // Procedural metallic pin ring fallback
+    if (ctx) {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(2800, now);
+      osc.frequency.exponentialRampToValueAtTime(1650, now + 0.14);
+      gain.gain.setValueAtTime(0.28, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.17);
+    }
+  }
+
+  public playGrenadeThrow(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.grenadeThrowBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.grenadeThrowBuffer;
+      src.playbackRate.setValueAtTime(0.97 + Math.random() * 0.06, ctx.currentTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.95, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.grenadeThrowPool.length > 0) {
+      const el = this.grenadeThrowPool[this.grenadeThrowPoolIdx];
+      this.grenadeThrowPoolIdx =
+        (this.grenadeThrowPoolIdx + 1) % this.grenadeThrowPool.length;
+      el.currentTime = 0;
+      el.volume = 0.95;
+      el.play().catch(() => {});
+      return;
+    }
+
+    // Procedural whoosh fallback
+    if (ctx && this.noiseBuffer) {
+      const now = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(520, now);
+      filter.frequency.exponentialRampToValueAtTime(180, now + 0.16);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.32, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      src.start(now);
+      src.stop(now + 0.19);
+    }
+  }
+
+  public playGrenadeBounce(intensity = 1.0): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const amp = Math.min(1, Math.max(0.15, intensity));
+
+    // Metallic clink + heavy body thud on concrete
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(1320 + Math.random() * 240, now);
+    osc.frequency.exponentialRampToValueAtTime(340, now + 0.055);
+    gain.gain.setValueAtTime(0.24 * amp, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.065);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.07);
+  }
+
+  public playGrenadeExplosion(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.grenadeExplosionBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.grenadeExplosionBuffer;
+      src.playbackRate.setValueAtTime(0.96 + Math.random() * 0.06, ctx.currentTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(1.0, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+    } else if (this.grenadeExplosionPool.length > 0) {
+      const el = this.grenadeExplosionPool[this.grenadeExplosionPoolIdx];
+      this.grenadeExplosionPoolIdx =
+        (this.grenadeExplosionPoolIdx + 1) % this.grenadeExplosionPool.length;
+      el.currentTime = 0;
+      el.volume = 1.0;
+      el.play().catch(() => {});
+    }
+
+    // Add deep chest sub-bass shockwave punch underneath
+    if (ctx) {
+      const now = ctx.currentTime;
+      const subOsc = ctx.createOscillator();
+      const subGain = ctx.createGain();
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(95, now);
+      subOsc.frequency.exponentialRampToValueAtTime(24, now + 0.65);
+      subGain.gain.setValueAtTime(0.75, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.72);
+      subOsc.connect(subGain);
+      subGain.connect(ctx.destination);
+      subOsc.start(now);
+      subOsc.stop(now + 0.75);
+    }
+  }
+
+  public playSmokeGrenadeGas(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.smokeGasBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.smokeGasBuffer;
+      src.playbackRate.setValueAtTime(0.98 + Math.random() * 0.04, ctx.currentTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.92, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.smokeGasPool.length > 0) {
+      const el = this.smokeGasPool[this.smokeGasPoolIdx];
+      this.smokeGasPoolIdx =
+        (this.smokeGasPoolIdx + 1) % this.smokeGasPool.length;
+      el.currentTime = 0;
+      el.volume = 0.92;
+      el.play().catch(() => {});
+      return;
+    }
+
+    // Procedural pressurized gas hiss fallback
+    if (ctx && this.noiseBuffer) {
+      const now = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuffer;
+      src.loop = true;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(2400, now);
+      filter.Q.value = 1.2;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.38, now + 0.25);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 4.5);
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      src.start(now);
+      src.stop(now + 4.6);
+    }
+  }
+
+  // =========================================================================
+  // REAL CHARACTER MOVEMENT & WEAPON SWAP AUDIO (SWAP, JUMP, SLIDE, FOOTSTEP)
+  // =========================================================================
+  private preloadMovementAndSwapSamples(): void {
+    // 1. Weapon Swap MP3
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(WEAPON_SWAP_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = WEAPON_SWAP_GITHUB_RAW_URL;
+      };
+      this.weaponSwapPool.push(audio);
+    }
+    fetch(WEAPON_SWAP_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local weapon swap fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(WEAPON_SWAP_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.weaponSwapRawData = buf;
+        if (this.ctx) this.tryDecodeMovementAndSwapSamples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 2. Player Jump WAV
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(PLAYER_JUMP_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = PLAYER_JUMP_GITHUB_RAW_URL;
+      };
+      this.playerJumpPool.push(audio);
+    }
+    fetch(PLAYER_JUMP_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local player jump fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(PLAYER_JUMP_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.playerJumpRawData = buf;
+        if (this.ctx) this.tryDecodeMovementAndSwapSamples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 3. Player Slide WAV
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(PLAYER_SLIDE_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = PLAYER_SLIDE_GITHUB_RAW_URL;
+      };
+      this.playerSlidePool.push(audio);
+    }
+    fetch(PLAYER_SLIDE_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local player slide fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(PLAYER_SLIDE_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.playerSlideRawData = buf;
+        if (this.ctx) this.tryDecodeMovementAndSwapSamples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 4. Footstep Run WAV
+    for (let i = 0; i < 5; i++) {
+      const audio = new Audio(FOOTSTEP_RUN_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = FOOTSTEP_RUN_GITHUB_RAW_URL;
+      };
+      this.footstepRunPool.push(audio);
+    }
+    fetch(FOOTSTEP_RUN_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local footstep fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(FOOTSTEP_RUN_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.footstepRunRawData = buf;
+        if (this.ctx) this.tryDecodeMovementAndSwapSamples(this.ctx);
+      })
+      .catch(() => {});
+  }
+
+  private tryDecodeMovementAndSwapSamples(ctx: AudioContext): void {
+    if (
+      !this.weaponSwapBuffer &&
+      !this.weaponSwapDecoding &&
+      this.weaponSwapRawData
+    ) {
+      this.weaponSwapDecoding = true;
+      ctx
+        .decodeAudioData(this.weaponSwapRawData.slice(0))
+        .then((decoded) => {
+          this.weaponSwapBuffer = decoded;
+          this.weaponSwapDecoding = false;
+        })
+        .catch(() => {
+          this.weaponSwapDecoding = false;
+        });
+    }
+
+    if (
+      !this.playerJumpBuffer &&
+      !this.playerJumpDecoding &&
+      this.playerJumpRawData
+    ) {
+      this.playerJumpDecoding = true;
+      ctx
+        .decodeAudioData(this.playerJumpRawData.slice(0))
+        .then((decoded) => {
+          this.playerJumpBuffer = decoded;
+          this.playerJumpDecoding = false;
+        })
+        .catch(() => {
+          this.playerJumpDecoding = false;
+        });
+    }
+
+    if (
+      !this.playerSlideBuffer &&
+      !this.playerSlideDecoding &&
+      this.playerSlideRawData
+    ) {
+      this.playerSlideDecoding = true;
+      ctx
+        .decodeAudioData(this.playerSlideRawData.slice(0))
+        .then((decoded) => {
+          this.playerSlideBuffer = decoded;
+          this.playerSlideDecoding = false;
+        })
+        .catch(() => {
+          this.playerSlideDecoding = false;
+        });
+    }
+
+    if (
+      !this.footstepRunBuffer &&
+      !this.footstepRunDecoding &&
+      this.footstepRunRawData
+    ) {
+      this.footstepRunDecoding = true;
+      ctx
+        .decodeAudioData(this.footstepRunRawData.slice(0))
+        .then((decoded) => {
+          this.footstepRunBuffer = decoded;
+          this.footstepRunDecoding = false;
+        })
+        .catch(() => {
+          this.footstepRunDecoding = false;
+        });
+    }
+  }
+
+  public playWeaponSwap(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.weaponSwapBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.weaponSwapBuffer;
+      src.playbackRate.setValueAtTime(
+        0.97 + Math.random() * 0.06,
+        ctx.currentTime
+      );
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.88, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.weaponSwapPool.length > 0) {
+      const el = this.weaponSwapPool[this.weaponSwapPoolIdx];
+      this.weaponSwapPoolIdx =
+        (this.weaponSwapPoolIdx + 1) % this.weaponSwapPool.length;
+      el.currentTime = 0;
+      el.volume = 0.88;
+      el.play().catch(() => {});
+      return;
+    }
+
+    this.playReloadStage('CHARGING_HANDLE');
+  }
+
+  public playPlayerJump(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.playerJumpBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.playerJumpBuffer;
+      src.playbackRate.setValueAtTime(
+        0.96 + Math.random() * 0.08,
+        ctx.currentTime
+      );
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.85, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.playerJumpPool.length > 0) {
+      const el = this.playerJumpPool[this.playerJumpPoolIdx];
+      this.playerJumpPoolIdx =
+        (this.playerJumpPoolIdx + 1) % this.playerJumpPool.length;
+      el.currentTime = 0;
+      el.volume = 0.85;
+      el.play().catch(() => {});
+    }
+  }
+
+  public playPlayerSlide(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.playerSlideBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.playerSlideBuffer;
+      src.playbackRate.setValueAtTime(
+        0.97 + Math.random() * 0.06,
+        ctx.currentTime
+      );
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.95, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.playerSlidePool.length > 0) {
+      const el = this.playerSlidePool[this.playerSlidePoolIdx];
+      this.playerSlidePoolIdx =
+        (this.playerSlidePoolIdx + 1) % this.playerSlidePool.length;
+      el.currentTime = 0;
+      el.volume = 0.95;
+      el.play().catch(() => {});
+    }
+  }
+
+  public playFootstep(isSprinting = false, isCrouching = false): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    const volume = isCrouching ? 0.25 : isSprinting ? 0.68 : 0.46;
+    const baseRate = isCrouching ? 0.86 : isSprinting ? 1.06 : 0.95;
+
+    if (ctx && this.footstepRunBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.footstepRunBuffer;
+      src.playbackRate.setValueAtTime(
+        baseRate + (Math.random() - 0.5) * 0.1,
+        ctx.currentTime
+      );
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(volume, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.footstepRunPool.length > 0) {
+      const el = this.footstepRunPool[this.footstepRunPoolIdx];
+      this.footstepRunPoolIdx =
+        (this.footstepRunPoolIdx + 1) % this.footstepRunPool.length;
+      el.currentTime = 0;
+      el.volume = volume;
+      el.playbackRate = baseRate;
+      el.play().catch(() => {});
     }
   }
 }

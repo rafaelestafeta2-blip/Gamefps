@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { HudState } from '../types/game';
+import { GrenadeType, HudState } from '../types/game';
 
 interface MobileTouchControlsProps {
   hud: HudState;
@@ -17,12 +17,20 @@ interface MobileTouchControlsProps {
   onToggleLean: (dir: -1 | 1) => void;
   onHoldBreath: (held: boolean) => void;
   onCycleZoom: () => void;
+  onThrowGrenade: (type: GrenadeType) => void;
 }
 
 interface CrouchProneButtonProps {
   stance: HudState['stance'];
   onCrouchOrSlide: () => void;
 }
+
+const bindTap = (action: () => void) => ({
+  onPointerDown: (e: React.PointerEvent) => {
+    e.stopPropagation();
+    action();
+  },
+});
 
 const CrouchProneButton: React.FC<CrouchProneButtonProps> = ({
   stance,
@@ -34,13 +42,10 @@ const CrouchProneButton: React.FC<CrouchProneButtonProps> = ({
   return (
     <button
       type="button"
-      onPointerDown={(e) => {
-        e.stopPropagation();
-        onCrouchOrSlide();
-      }}
+      {...bindTap(onCrouchOrSlide)}
       aria-label="Agachar e Deitar no Chão"
       title="Toque para agachar e deitar no chão (Posição Prone)"
-      className={`fixed bottom-5 right-5 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-10 active:scale-90 transition-transform ${
+      className={`fixed bottom-5 right-5 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-30 active:scale-90 transition-transform cursor-pointer ${
         isProne
           ? 'bg-amber-500 border-amber-300 text-black shadow-[0_0_18px_rgba(245,158,11,0.8)] font-bold'
           : isCrouchOrSlide
@@ -200,21 +205,10 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
     };
   }, []);
 
-  const safeCapturePointer = (el: Element, pointerId: number) => {
-    try {
-      if (typeof el.setPointerCapture === 'function') {
-        el.setPointerCapture(pointerId);
-      }
-    } catch {
-      // Handled by global window pointer listeners
-    }
-  };
-
   const handleJoyPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
     joyPointerIdRef.current = e.pointerId;
     setJoyActive(true);
-    safeCapturePointer(e.currentTarget, e.pointerId);
     updateJoystickFromPoint(e.clientX, e.clientY);
   };
 
@@ -223,21 +217,20 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
     // Always accept the latest camera look touch so fullscreen transitions never lock the pointerId
     lookPointerIdRef.current = e.pointerId;
     lookLastPosRef.current = { x: e.clientX, y: e.clientY };
-    safeCapturePointer(e.currentTarget, e.pointerId);
   };
 
   const handleFirePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     firePointerIdRef.current = e.pointerId;
     fireLastPosRef.current = { x: e.clientX, y: e.clientY };
-    safeCapturePointer(e.currentTarget, e.pointerId);
     setFirePressed(true);
     onFireHeld(true);
   };
 
   if (!hud.touchControlsVisible) return null;
 
-  const needsBoltAction = hud.boltLockedBack || hud.chambered === 0;
+  const needsBoltAction =
+    hud.reloadPhase === 'IDLE' && (hud.boltLockedBack || hud.chambered === 0);
 
   return (
     <div
@@ -250,7 +243,7 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
       {/* =================================================================== */}
       <div
         onPointerDown={handleLookPointerDown}
-        className="fixed inset-0 pointer-events-auto"
+        className="fixed inset-0 z-10 pointer-events-auto"
         style={{ touchAction: 'none' }}
         aria-label="Área livre da tela para movimentar a câmera e mirar"
       />
@@ -258,7 +251,7 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
       {/* =================================================================== */}
       {/* LEFT THUMB ZONE: CALL OF DUTY MOBILE VIRTUAL JOYSTICK (NO TEXT)     */}
       {/* =================================================================== */}
-      <div className="fixed bottom-12 left-7 sm:left-12 pointer-events-auto z-10">
+      <div className="fixed bottom-12 left-7 sm:left-12 pointer-events-auto z-30">
         <div
           ref={joyContainerRef}
           onPointerDown={handleJoyPointerDown}
@@ -311,8 +304,8 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
       {/* =================================================================== */}
       {/* RIGHT THUMB ZONE: CALL OF DUTY MOBILE ICON-ONLY BUTTON CLUSTER      */}
       {/* =================================================================== */}
-      {/* Contextual Icon Buttons (Hold Breath / Zoom / Bolt Rack) */}
-      <div className="fixed bottom-56 right-24 flex items-center gap-2 pointer-events-auto z-10">
+      {/* Contextual Icon Buttons (Hold Breath / Zoom / Bolt Rack) positioned cleanly to the left of ADS */}
+      <div className="fixed bottom-38 right-40 flex items-center gap-2 pointer-events-auto z-30">
         {hud.isAds && (
           <>
             <button
@@ -327,7 +320,7 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
               }}
               onPointerCancel={() => onHoldBreath(false)}
               aria-label="Segurar fôlego"
-              className={`w-10 h-10 rounded-full border flex items-center justify-center transition-colors ${
+              className={`w-10 h-10 rounded-full border flex items-center justify-center transition-colors cursor-pointer ${
                 hud.isHoldingBreath
                   ? 'bg-cyan-400/80 text-slate-950 border-white'
                   : 'bg-black/45 text-white/90 border-white/30'
@@ -347,12 +340,9 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
             {hud.optic === 'lpvo' && !hud.cantedActive && (
               <button
                 type="button"
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  onCycleZoom();
-                }}
+                {...bindTap(onCycleZoom)}
                 aria-label="Alternar zoom"
-                className="w-10 h-10 rounded-full bg-black/45 border border-white/30 text-amber-300 flex items-center justify-center active:scale-90 transition-transform"
+                className="w-10 h-10 rounded-full bg-black/45 border border-white/30 text-amber-300 flex items-center justify-center active:scale-90 transition-transform cursor-pointer"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                   <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
@@ -366,12 +356,9 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         {needsBoltAction && (
           <button
             type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onBoltRack();
-            }}
-            aria-label="Puxar ferrolho"
-            className="w-11 h-11 rounded-full bg-amber-500/80 border-2 border-white text-slate-950 flex items-center justify-center animate-pulse shadow-lg"
+            {...bindTap(onBoltRack)}
+            aria-label="Puxar ferrolho ou recarregar"
+            className="w-11 h-11 rounded-full bg-amber-500/80 border-2 border-white text-slate-950 flex items-center justify-center animate-pulse shadow-lg cursor-pointer"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path
@@ -389,12 +376,9 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
       {/* 1. ADS / AIM CROSSHAIR BUTTON (Upper-Right, matching COD Mobile screenshot) */}
       <button
         type="button"
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          onToggleAds();
-        }}
+        {...bindTap(onToggleAds)}
         aria-label="Mirar"
-        className={`fixed bottom-38 right-24 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-10 transition-transform active:scale-90 ${
+        className={`fixed bottom-38 right-24 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-30 transition-transform active:scale-90 cursor-pointer ${
           hud.isAds
             ? 'bg-white/35 border-amber-300 text-amber-300 scale-105 shadow-[0_0_15px_rgba(250,204,21,0.4)]'
             : 'bg-black/45 border-white/35 text-white/90'
@@ -413,12 +397,9 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
       {/* 2. JUMP BUTTON (Far-Right Middle, Jumping Soldier Silhouette) */}
       <button
         type="button"
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          onJump();
-        }}
+        {...bindTap(onJump)}
         aria-label="Pular"
-        className="fixed bottom-28 right-5 w-13 h-13 rounded-full bg-black/45 border border-white/35 text-white/95 flex items-center justify-center pointer-events-auto z-10 active:scale-90 transition-transform"
+        className="fixed bottom-28 right-5 w-13 h-13 rounded-full bg-black/45 border border-white/35 text-white/95 flex items-center justify-center pointer-events-auto z-30 active:scale-90 transition-transform cursor-pointer"
       >
         <svg width="25" height="25" viewBox="0 0 24 24" fill="none">
           <circle cx="13" cy="4.5" r="2.2" fill="currentColor" />
@@ -432,45 +413,113 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         </svg>
       </button>
 
-      {/* 3. PRIMARY FIRE BUTTON (Large Translucent Circle with Diagonal Bullet Icon) */}
+      {/* 3. PRIMARY FIRE / THROW GRENADE BUTTON (Large Translucent Circle) */}
       <button
         type="button"
         onPointerDown={handleFirePointerDown}
         style={{ touchAction: 'none' }}
-        aria-label="Atirar"
-        className={`fixed bottom-18 right-38 sm:right-44 w-21 h-21 rounded-full border-2 flex items-center justify-center pointer-events-auto z-10 transition-transform ${
-          firePressed
-            ? 'bg-white/35 border-amber-300 scale-95 shadow-[0_0_24px_rgba(255,255,255,0.45)]'
-            : 'bg-black/35 border-white/55 shadow-lg'
+        aria-label={
+          hud.equippedGrenade
+            ? 'Tirar o Pino e Jogar Granada'
+            : 'Atirar'
+        }
+        className={`fixed bottom-18 right-38 sm:right-44 w-21 h-21 rounded-full border-2 flex items-center justify-center pointer-events-auto z-30 transition-all cursor-pointer ${
+          hud.equippedGrenade === 'FRAG'
+            ? firePressed
+              ? 'bg-orange-500/55 border-orange-200 scale-95 shadow-[0_0_28px_rgba(249,115,22,0.75)]'
+              : 'bg-orange-500/30 border-orange-400 shadow-[0_0_20px_rgba(249,115,22,0.45)] animate-pulse'
+            : hud.equippedGrenade === 'SMOKE'
+              ? firePressed
+                ? 'bg-sky-500/55 border-sky-200 scale-95 shadow-[0_0_28px_rgba(56,189,248,0.75)]'
+                : 'bg-sky-500/30 border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.45)] animate-pulse'
+              : firePressed
+                ? 'bg-white/35 border-amber-300 scale-95 shadow-[0_0_24px_rgba(255,255,255,0.45)]'
+                : 'bg-black/35 border-white/55 shadow-lg'
         }`}
       >
-        <div className="w-17 h-17 rounded-full border border-white/25 flex items-center justify-center">
-          <svg
-            width="38"
-            height="38"
-            viewBox="0 0 24 24"
-            fill="none"
-            className="-rotate-45 text-white drop-shadow"
-          >
-            <path
-              d="M12 2C9.8 5 9 8 9 11.5H15C15 8 14.2 5 12 2Z"
-              fill="currentColor"
-            />
-            <rect x="9" y="12.5" width="6" height="7" rx="0.5" fill="currentColor" />
-            <rect x="8.5" y="20.2" width="7" height="1.8" rx="0.5" fill="currentColor" />
-          </svg>
+        <div className="w-17 h-17 rounded-full border border-white/25 flex flex-col items-center justify-center">
+          {hud.equippedGrenade ? (
+            <>
+              <svg
+                width="30"
+                height="30"
+                viewBox="0 0 24 24"
+                fill="none"
+                className="text-white drop-shadow"
+              >
+                <ellipse
+                  cx="12"
+                  cy="14"
+                  rx="5.5"
+                  ry="6.5"
+                  fill="currentColor"
+                  fillOpacity="0.35"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                />
+                <path
+                  d="M9.5 7.5H14.5V5H9.5V7.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+                <path
+                  d="M14.5 6H18L19 12"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle
+                  cx="7.5"
+                  cy="5.5"
+                  r="2"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+              </svg>
+              <span className="text-[8px] font-mono font-black tracking-tighter text-white uppercase leading-none mt-0.5">
+                JOGAR
+              </span>
+            </>
+          ) : (
+            <svg
+              width="38"
+              height="38"
+              viewBox="0 0 24 24"
+              fill="none"
+              className="-rotate-45 text-white drop-shadow"
+            >
+              <path
+                d="M12 2C9.8 5 9 8 9 11.5H15C15 8 14.2 5 12 2Z"
+                fill="currentColor"
+              />
+              <rect
+                x="9"
+                y="12.5"
+                width="6"
+                height="7"
+                rx="0.5"
+                fill="currentColor"
+              />
+              <rect
+                x="8.5"
+                y="20.2"
+                width="7"
+                height="1.8"
+                rx="0.5"
+                fill="currentColor"
+              />
+            </svg>
+          )}
         </div>
       </button>
 
       {/* 4. RELOAD BUTTON (Below-Right of Fire Button, 3 Bullets + Reload Arc Icon) */}
       <button
         type="button"
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          onReload(false);
-        }}
+        {...bindTap(() => onReload(false))}
         aria-label="Recarregar"
-        className={`fixed bottom-8 right-22 w-12 h-12 rounded-full border flex items-center justify-center pointer-events-auto z-10 active:scale-90 transition-transform ${
+        className={`fixed bottom-8 right-22 w-12 h-12 rounded-full border flex items-center justify-center pointer-events-auto z-30 active:scale-90 transition-transform cursor-pointer ${
           hud.reloadPhase !== 'IDLE'
             ? 'bg-amber-500/40 border-amber-300 text-amber-200'
             : 'bg-black/45 border-white/35 text-white/95'
@@ -501,18 +550,4 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
   );
 };
 
-export const MobileTouchControls = React.memo(
-  MobileTouchControlsBase,
-  (prev, next) =>
-    prev.hud.isAds === next.hud.isAds &&
-    prev.hud.isHoldingBreath === next.hud.isHoldingBreath &&
-    prev.hud.boltLockedBack === next.hud.boltLockedBack &&
-    prev.hud.chambered === next.hud.chambered &&
-    prev.hud.stance === next.hud.stance &&
-    prev.hud.reloadPhase === next.hud.reloadPhase &&
-    prev.hud.optic === next.hud.optic &&
-    prev.hud.cantedActive === next.hud.cantedActive &&
-    prev.hud.lpvoZoom === next.hud.lpvoZoom &&
-    prev.hud.touchControlsVisible === next.hud.touchControlsVisible &&
-    prev.hud.activeWeapon === next.hud.activeWeapon
-);
+export const MobileTouchControls = React.memo(MobileTouchControlsBase);

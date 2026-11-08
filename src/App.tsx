@@ -29,6 +29,10 @@ const INITIAL_HUD_STATE: HudState = {
   currentMagRounds: 30,
   magCapacity: 30,
   magazines: [30, 30, 30, 30],
+  fragGrenades: 3,
+  smokeGrenades: 3,
+  equippedGrenade: null,
+  isThrowingGrenade: false,
   boltLockedBack: false,
   fireMode: 'AUTO',
   optic: 'iron',
@@ -224,6 +228,7 @@ export default function App() {
             onToggleLean={(dir) => engineRef.current?.toggleLean(dir)}
             onHoldBreath={(held) => engineRef.current?.setHoldBreath(held)}
             onCycleZoom={() => engineRef.current?.cycleLpvoZoom()}
+            onThrowGrenade={(type) => engineRef.current?.throwGrenade(type)}
           />
 
           <TacticalHudOverlay
@@ -245,6 +250,7 @@ export default function App() {
             }
             onTriggerMagCheck={() => engineRef.current?.triggerMagCheck()}
             onResupply={() => engineRef.current?.resupplyAmmo()}
+            onThrowGrenade={(type) => engineRef.current?.throwGrenade(type)}
             onSelectDrill={(mode: DrillMode) =>
               engineRef.current?.setDrillMode(mode)
             }

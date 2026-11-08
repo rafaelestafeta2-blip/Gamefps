@@ -1,11 +1,13 @@
 import React from 'react';
 import { MinimapRadar } from './MinimapRadar';
+import { WarfaceRankIcon } from './WarfaceRankIcon';
 import {
   isAttachmentUnlockedAtXp,
   isOpticUnlockedAtXp,
 } from '../progression/ranks';
 import {
   DrillMode,
+  GrenadeType,
   GyroMode,
   HudState,
   OpticType,
@@ -26,6 +28,7 @@ interface TacticalHudOverlayProps {
   onTriggerReload: (speed: boolean) => void;
   onTriggerMagCheck: () => void;
   onResupply: () => void;
+  onThrowGrenade: (type: GrenadeType) => void;
   onSelectDrill: (mode: DrillMode) => void;
   onToggleMute: () => void;
   onToggleDock: () => void;
@@ -92,6 +95,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
   onToggleLaser,
   onCycleFireMode,
   onResupply,
+  onThrowGrenade,
   onToggleMute,
   onToggleDock,
   onToggleFullscreen,
@@ -126,6 +130,10 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
   ];
 
   const handlePrimarySlotClick = () => {
+    if (hud.equippedGrenade !== null) {
+      onSelectWeapon(hud.primaryWeapon);
+      return;
+    }
     if (!isPrimaryActive) {
       onToggleWeaponSlot();
     } else {
@@ -136,22 +144,36 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
     }
   };
 
+  /**
+   * Instant-tap binder for mobile multi-touch + desktop click:
+   * - Fires once on pointerdown (even while left thumb holds the joystick)
+   * - Does NOT bind onClick so React re-renders during touch never cause a second toggle on finger release
+   */
+  const bindTap = (action: () => void) => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      e.stopPropagation();
+      action();
+    },
+  });
+
   return (
-    <div className="fixed inset-0 pointer-events-none select-none z-30 overflow-hidden font-mono">
+    <div className="fixed inset-0 pointer-events-none select-none overflow-hidden font-mono">
       {/* Damage Vignette Flash */}
       {hud.damageFlashAlpha > 0.01 && (
         <div
-          className="fixed inset-0 pointer-events-none border-[16px] border-red-600/60"
+          className="fixed inset-0 pointer-events-none z-10 border-[16px] border-red-600/60"
           style={{ opacity: hud.damageFlashAlpha }}
         />
       )}
 
       {/* =================================================================== */}
       {/* PHOTOREALISTIC SNIPER SCOPE OPTICAL APERTURE (CLEAN, NO TEXT)       */}
+      {/* Rendered at z-10 so MobileTouchControls (z-20: Fire & Aim buttons)  */}
+      {/* and HUD bars (z-40) remain 100% visible on top of the scope mask!   */}
       {/* =================================================================== */}
       {isSniperScopeActive && (
         <div
-          className="fixed inset-0 pointer-events-none flex items-center justify-center z-25 overflow-hidden transition-opacity duration-100"
+          className="fixed inset-0 pointer-events-none flex items-center justify-center z-10 overflow-hidden transition-opacity duration-100"
           style={{ opacity: Math.min(1, Math.max(0, (hud.adsAlpha - 0.35) / 0.45)) }}
         >
           <div className="w-[min(92vmin,640px)] h-[min(92vmin,640px)] rounded-full relative border-[4px] border-[#0f172a] shadow-[0_0_0_9999px_#000000] flex items-center justify-center overflow-hidden">
@@ -187,7 +209,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
       )}
 
       {/* Dynamic Center Crosshair & Ballistic Hitmarker */}
-      <div className="fixed inset-0 flex items-center justify-center pointer-events-none">
+      <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-15">
         <svg
           width="44"
           height="44"
@@ -223,17 +245,8 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
       {/* =================================================================== */}
       {hud.rankUpNotification && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 pointer-events-none animate-in fade-in zoom-in-95 duration-200">
-          <div className="bg-[#0b0e14]/95 border-2 border-amber-400 rounded-2xl px-6 py-3 shadow-[0_0_30px_rgba(245,158,11,0.6)] flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-xl border-2 flex items-center justify-center font-black text-lg shadow-lg"
-              style={{
-                borderColor: hud.rankBadgeColor,
-                color: hud.rankBadgeColor,
-                backgroundColor: 'rgba(0,0,0,0.6)',
-              }}
-            >
-              {hud.rankBadge}
-            </div>
+          <div className="bg-[#0b0e14]/95 border-2 border-amber-400 rounded-2xl px-5 py-2.5 shadow-[0_0_30px_rgba(245,158,11,0.6)] flex items-center gap-3">
+            <WarfaceRankIcon level={hud.rankLevel} className="w-8 h-8" />
             <div>
               <div className="text-[10px] font-mono font-bold text-amber-400 tracking-widest uppercase">
                 ★ WARFACE CAREER PROMOTION ★
@@ -249,17 +262,10 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
       {/* =================================================================== */}
       {/* TOP-LEFT: WARFACE RANK BADGE + SCORE BAR                            */}
       {/* =================================================================== */}
-      <div className="fixed top-3 left-3 flex items-center z-20 pointer-events-none">
+      <div className="fixed top-2.5 left-2.5 flex items-center z-20 pointer-events-none">
         {/* Tactical Rank Badge Icon */}
-        <div
-          className="w-10 h-10 rounded-xl border-2 flex items-center justify-center font-black text-xs shadow-lg z-10"
-          style={{
-            borderColor: hud.rankBadgeColor,
-            color: hud.rankBadgeColor,
-            backgroundColor: 'rgba(6,9,14,0.85)',
-          }}
-        >
-          {hud.rankBadge}
+        <div className="w-8 h-8 rounded-lg bg-black/80 border border-amber-500/40 flex items-center justify-center shadow-lg z-10">
+          <WarfaceRankIcon level={hud.rankLevel} className="w-6 h-6" />
         </div>
 
         {/* Angled Score & Rank Progress Wing */}
@@ -287,15 +293,14 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
       {/* =================================================================== */}
       <div
         onPointerDown={(e) => e.stopPropagation()}
-        className="fixed top-2.5 right-2.5 flex items-start gap-2 z-30 pointer-events-auto"
+        className="fixed top-2.5 right-2.5 flex items-start gap-2 z-40 pointer-events-auto"
       >
         {/* Circular Utility Buttons to the left of Minimap (exact COD Mobile layout) */}
         <div className="flex items-start gap-1.5 pt-0.5">
           {/* Gunsmith / Optics Toggle Icon */}
           <button
             type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={onToggleDock}
+            {...bindTap(onToggleDock)}
             aria-label="Acessórios e Miras"
             title="Abrir/Fechar Miras e Acessórios"
             className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors active:scale-90 cursor-pointer ${
@@ -317,7 +322,10 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             <button
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={onPause}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPause();
+              }}
               aria-label="Configurações e Pausa"
               title="Configurações, Gráficos e Pausa"
               className="w-9 h-9 rounded-full bg-black/55 hover:bg-black/75 border border-white/30 text-white/90 flex items-center justify-center transition-colors active:scale-90 cursor-pointer"
@@ -335,8 +343,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             {/* Audio / Mute Speaker Icon */}
             <button
               type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={onToggleMute}
+              {...bindTap(onToggleMute)}
               aria-label="Alternar áudio"
               title={hud.muted ? 'Ativar Som' : 'Silenciar Som'}
               className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors active:scale-90 cursor-pointer ${
@@ -362,7 +369,10 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             <button
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={onToggleFullscreen}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleFullscreen();
+              }}
               aria-label="Tela cheia"
               title="Alternar Tela Cheia"
               className="w-9 h-9 rounded-full bg-black/55 hover:bg-black/75 border border-white/30 text-white/90 flex items-center justify-center transition-colors active:scale-90 cursor-pointer"
@@ -400,8 +410,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
           {/* Iron Sight Icon */}
           <button
             type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => onSelectOptic('iron')}
+            {...bindTap(() => onSelectOptic('iron'))}
             aria-label="Mira de ferro"
             title="Mira de Ferro Padrão"
             className={`w-10 h-10 rounded-xl border flex flex-col items-center justify-center cursor-pointer transition-transform active:scale-90 ${
@@ -421,8 +430,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             return (
               <button
                 type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => onSelectOptic('holo')}
+                {...bindTap(() => onSelectOptic('holo'))}
                 aria-label="Mira Holográfica"
                 title="Mira Holográfica EOTech"
                 className={`relative w-10 h-10 rounded-xl border flex items-center justify-center cursor-pointer transition-transform active:scale-90 ${
@@ -447,8 +455,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             return (
               <button
                 type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => onSelectOptic('lpvo')}
+                {...bindTap(() => onSelectOptic('lpvo'))}
                 aria-label="Luneta LPVO"
                 title="Luneta Tática LPVO 1-4x"
                 className={`relative w-10 h-10 rounded-xl border flex items-center justify-center cursor-pointer transition-transform active:scale-90 ${
@@ -473,8 +480,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             return (
               <button
                 type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={onToggleCanted}
+                {...bindTap(onToggleCanted)}
                 aria-label="Mira inclinada 45 graus"
                 title="Mira Inclinada 45°"
                 className={`relative w-10 h-10 rounded-xl border flex items-center justify-center cursor-pointer transition-transform active:scale-90 ${
@@ -498,8 +504,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             return (
               <button
                 type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={onToggleSuppressor}
+                {...bindTap(onToggleSuppressor)}
                 aria-label="Supressor"
                 title="Supressor Acústico Tático"
                 className={`relative w-10 h-10 rounded-xl border flex items-center justify-center cursor-pointer transition-transform active:scale-90 ${
@@ -525,8 +530,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             return (
               <button
                 type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={onToggleLaser}
+                {...bindTap(onToggleLaser)}
                 aria-label="Laser tático"
                 title="Laser Tático PEQ-15 Verde"
                 className={`relative w-10 h-10 rounded-xl border flex items-center justify-center cursor-pointer transition-transform active:scale-90 ${
@@ -557,8 +561,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
         >
           <button
             type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => onSelectWeapon(hud.focusedWallWeapon!)}
+            {...bindTap(() => onSelectWeapon(hud.focusedWallWeapon!))}
             aria-label="Pegar arma"
             className="w-16 h-14 rounded-2xl bg-black/75 border-2 border-amber-400 text-amber-300 shadow-[0_0_20px_rgba(250,204,21,0.35)] flex flex-col items-center justify-center gap-0.5 active:scale-90 transition-transform cursor-pointer"
           >
@@ -582,22 +585,21 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
       )}
 
       {/* =================================================================== */}
-      {/* BOTTOM-CENTER: CALL OF DUTY MOBILE WEAPON SLOTS + HP BAR            */}
+      {/* BOTTOM-CENTER: CALL OF DUTY MOBILE WEAPON + GRENADE SLOTS + HP BAR  */}
       {/* =================================================================== */}
       <div
         onPointerDown={(e) => e.stopPropagation()}
-        className="fixed bottom-1.5 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 z-30 pointer-events-auto"
+        className="fixed bottom-1.5 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 z-40 pointer-events-auto"
       >
-        {/* Weapon & Tactical Slots Row */}
+        {/* Weapon & Tactical Grenade Slots Row */}
         <div className="flex items-end gap-1">
           {/* Left Utility Box: Fire Mode Toggle Icon (Single / Burst / Auto) */}
           <button
             type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={onCycleFireMode}
+            {...bindTap(onCycleFireMode)}
             aria-label="Alternar modo de disparo"
             title={`Modo de Disparo: ${hud.fireMode}`}
-            className="w-10 h-11 bg-black/65 hover:bg-black/80 border border-white/30 text-white/90 flex flex-col items-center justify-center gap-0.5 active:scale-95 transition-transform cursor-pointer"
+            className="w-9 sm:w-10 h-11 bg-black/70 hover:bg-black/85 border border-white/30 text-white/90 flex flex-col items-center justify-center gap-0.5 active:scale-95 transition-transform cursor-pointer"
           >
             {hud.fireMode === 'AUTO' ? (
               <svg width="16" height="14" viewBox="0 0 24 24" fill="none">
@@ -623,11 +625,10 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
           {/* Left Utility Box 2: Inspect Weapon Icon */}
           <button
             type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={onInspectWeapon}
+            {...bindTap(onInspectWeapon)}
             aria-label="Inspecionar arma"
             title="Inspecionar Arma 3D"
-            className="w-10 h-11 bg-black/65 hover:bg-black/80 border border-white/30 text-white/90 flex items-center justify-center active:scale-95 transition-transform cursor-pointer"
+            className="w-9 sm:w-10 h-11 bg-black/70 hover:bg-black/85 border border-white/30 text-white/90 flex items-center justify-center active:scale-95 transition-transform cursor-pointer"
           >
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2" />
@@ -635,22 +636,21 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             </svg>
           </button>
 
-          {/* SLOT 1: PRIMARY RIFLE / SNIPER (Tap to equip or tap again to cycle primary weapons) */}
+          {/* SLOT 1: PRIMARY RIFLE / SNIPER */}
           <button
             type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={handlePrimarySlotClick}
+            {...bindTap(handlePrimarySlotClick)}
             aria-label="Arma principal"
             title="Equipar ou Alternar Arma Principal"
-            className={`relative w-28 sm:w-32 h-11 px-2 flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
-              isPrimaryActive
-                ? 'bg-gradient-to-t from-amber-500/30 to-black/75 border-2 border-amber-400/90 text-white shadow-[0_0_12px_rgba(250,204,21,0.25)]'
-                : 'bg-black/65 border border-white/25 text-white/60 hover:text-white/90'
+            className={`relative w-24 sm:w-28 h-11 px-2 flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
+              isPrimaryActive && hud.equippedGrenade === null
+                ? 'bg-gradient-to-t from-amber-500/30 to-black/80 border-2 border-amber-400/90 text-white shadow-[0_0_12px_rgba(250,204,21,0.25)]'
+                : 'bg-black/70 border border-white/25 text-white/60 hover:text-white/90'
             }`}
           >
             <WeaponSilhouette
               weaponId={hud.primaryWeapon}
-              className="w-18 h-7 -mt-1.5"
+              className="w-16 h-6 -mt-1.5"
             />
             {isPrimaryActive && (
               <span className="absolute bottom-0.5 right-1.5 font-mono tabular-nums text-[10px] font-bold text-white leading-none">
@@ -659,28 +659,29 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             )}
           </button>
 
-          {/* SLOT 2: SECONDARY PISTOL (Always carried) */}
+          {/* SLOT 2: SECONDARY PISTOL */}
           <button
             type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => {
-              if (isPrimaryActive) {
+            {...bindTap(() => {
+              if (hud.equippedGrenade !== null) {
+                onSelectWeapon('P50_PISTOL');
+              } else if (isPrimaryActive) {
                 onToggleWeaponSlot();
               } else {
                 onSelectWeapon('P50_PISTOL');
               }
-            }}
+            })}
             aria-label="Pistola secundária"
             title="Equipar Pistola Secundária Mark 23"
-            className={`relative w-24 sm:w-28 h-11 px-2 flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
-              !isPrimaryActive
-                ? 'bg-gradient-to-t from-amber-500/30 to-black/75 border-2 border-amber-400/90 text-white shadow-[0_0_12px_rgba(250,204,21,0.25)]'
-                : 'bg-black/65 border border-white/25 text-white/60 hover:text-white/90'
+            className={`relative w-20 sm:w-24 h-11 px-2 flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
+              !isPrimaryActive && hud.equippedGrenade === null
+                ? 'bg-gradient-to-t from-amber-500/30 to-black/80 border-2 border-amber-400/90 text-white shadow-[0_0_12px_rgba(250,204,21,0.25)]'
+                : 'bg-black/70 border border-white/25 text-white/60 hover:text-white/90'
             }`}
           >
             <WeaponSilhouette
               weaponId="P50_PISTOL"
-              className="w-14 h-6 -mt-1"
+              className="w-12 h-5 -mt-1"
             />
             {!isPrimaryActive && (
               <span className="absolute bottom-0.5 right-1.5 font-mono tabular-nums text-[10px] font-bold text-white leading-none">
@@ -689,14 +690,63 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             )}
           </button>
 
-          {/* Right Utility Box: Resupply Ammo Crate Icon */}
+          {/* SLOT 3: FRAG GRENADE [G] (1º toque equipa na mão, Botão de Tiro ou 2º toque puxa o pino e joga) */}
           <button
             type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={onResupply}
-            aria-label="Reabastecer munição"
-            title="Reabastecer Munição Completa"
-            className="w-10 h-11 bg-black/65 hover:bg-black/80 border border-white/30 text-amber-300 flex items-center justify-center active:scale-95 transition-transform cursor-pointer"
+            {...bindTap(() => onThrowGrenade('FRAG'))}
+            aria-label="Granada de Fragmentação"
+            title="Toque para segurar a Granada Frag na mão [G]"
+            className={`relative w-12 h-11 flex flex-col items-center justify-center transition-all active:scale-95 cursor-pointer ${
+              hud.equippedGrenade === 'FRAG'
+                ? 'bg-gradient-to-t from-orange-500/45 to-black/85 border-2 border-orange-400 text-orange-200 shadow-[0_0_14px_rgba(249,115,22,0.55)] scale-105'
+                : hud.fragGrenades > 0
+                  ? 'bg-black/70 hover:bg-black/85 border border-orange-400/70 text-orange-300'
+                  : 'bg-black/45 border border-white/15 text-white/30'
+            }`}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <ellipse cx="12" cy="14" rx="5.5" ry="6.5" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M9.5 7.5H14.5V5H9.5V7.5Z" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M14.5 6H18L19 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="8" cy="5.5" r="1.8" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+            <span className="text-[8px] font-bold leading-none mt-0.5">
+              {hud.equippedGrenade === 'FRAG' ? 'MÃO' : `x${hud.fragGrenades}`}
+            </span>
+          </button>
+
+          {/* SLOT 4: SMOKE GRENADE [J] (1º toque equipa na mão, Botão de Tiro ou 2º toque puxa o pino e joga) */}
+          <button
+            type="button"
+            {...bindTap(() => onThrowGrenade('SMOKE'))}
+            aria-label="Granada de Fumaça"
+            title="Toque para segurar a Granada de Fumaça na mão [J]"
+            className={`relative w-12 h-11 flex flex-col items-center justify-center transition-all active:scale-95 cursor-pointer ${
+              hud.equippedGrenade === 'SMOKE'
+                ? 'bg-gradient-to-t from-sky-500/45 to-black/85 border-2 border-sky-400 text-sky-200 shadow-[0_0_14px_rgba(56,189,248,0.55)] scale-105'
+                : hud.smokeGrenades > 0
+                  ? 'bg-black/70 hover:bg-black/85 border border-sky-400/70 text-sky-300'
+                  : 'bg-black/45 border border-white/15 text-white/30'
+            }`}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <rect x="8" y="8" width="8" height="12" rx="1.5" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.8" />
+              <line x1="8" y1="12.5" x2="16" y2="12.5" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M10 8V5.5H14V8" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M7 4.5C8.5 2.5 11 2.5 12 4C13.5 2.5 16 2.5 17.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            <span className="text-[8px] font-bold leading-none mt-0.5">
+              {hud.equippedGrenade === 'SMOKE' ? 'MÃO' : `x${hud.smokeGrenades}`}
+            </span>
+          </button>
+
+          {/* Right Utility Box: Resupply Ammo & Grenades Crate Icon */}
+          <button
+            type="button"
+            {...bindTap(onResupply)}
+            aria-label="Reabastecer munição e granadas"
+            title="Reabastecer Munição e Granadas [U]"
+            className="w-10 h-11 bg-black/70 hover:bg-black/85 border border-white/30 text-amber-300 flex items-center justify-center active:scale-95 transition-transform cursor-pointer"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />

@@ -809,30 +809,99 @@ export function buildTacticalWeaponRig(
 
   const muzzleFlashGroup = new THREE.Group();
   muzzleFlashGroup.position.set(0, 0.022, -0.23);
-  const flashMat = new THREE.MeshBasicMaterial({
-    color: 0xffb703,
+
+  const starFlashMat = new THREE.MeshBasicMaterial({
+    map: textures.muzzleFlashStar,
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.98,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  for (let i = 0; i < 3; i++) {
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), flashMat);
-    plane.rotation.z = (i * Math.PI) / 3;
-    muzzleFlashGroup.add(plane);
-  }
-  const flashCore = new THREE.Mesh(
-    new THREE.ConeGeometry(0.032, 0.16, 8),
-    flashMat
+
+  const outerStarMat = new THREE.MeshBasicMaterial({
+    map: textures.muzzleFlashStar,
+    color: 0xffaa00,
+    transparent: true,
+    opacity: 0.85,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+
+  const jetFlameMat = new THREE.MeshBasicMaterial({
+    map: textures.muzzleFlashJet,
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.95,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+
+  // 1. Primary & Secondary Front Starburst Coronas (No square edges)
+  const frontStarPrimary = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.19, 0.19),
+    starFlashMat
   );
-  flashCore.rotation.x = -Math.PI / 2;
-  flashCore.position.z = -0.06;
-  muzzleFlashGroup.add(flashCore);
+  frontStarPrimary.renderOrder = 18;
+  muzzleFlashGroup.add(frontStarPrimary);
+
+  const frontStarSecondary = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.26, 0.26),
+    outerStarMat
+  );
+  frontStarSecondary.rotation.z = Math.PI / 6;
+  frontStarSecondary.position.z = -0.012;
+  frontStarSecondary.renderOrder = 17;
+  muzzleFlashGroup.add(frontStarSecondary);
+
+  // 2. Axial Cross-Intersecting Supersonic Flame Plumes Shooting Forward (-Z)
+  const jetPlaneGeo = new THREE.PlaneGeometry(0.24, 0.11);
+  jetPlaneGeo.translate(0.11, 0, 0);
+  jetPlaneGeo.rotateY(Math.PI / 2);
+
+  for (let i = 0; i < 3; i++) {
+    const axialJet = new THREE.Mesh(jetPlaneGeo, jetFlameMat);
+    axialJet.rotation.z = (i * Math.PI) / 3;
+    axialJet.renderOrder = 18;
+    muzzleFlashGroup.add(axialJet);
+  }
+
+  // 3. Side Compensator Port Gas Vents (Left/Right/Top angled supersonic jets)
+  const portJetGeo = new THREE.PlaneGeometry(0.13, 0.065);
+  portJetGeo.translate(0.06, 0, 0);
+  const portAngles = [0, Math.PI, Math.PI / 2];
+  for (let p = 0; p < portAngles.length; p++) {
+    const portJet = new THREE.Mesh(portJetGeo, jetFlameMat);
+    portJet.rotation.z = portAngles[p];
+    portJet.rotation.y = -0.35;
+    portJet.position.z = -0.008;
+    portJet.renderOrder = 18;
+    muzzleFlashGroup.add(portJet);
+  }
+
+  // 4. Incandescent White-Hot Plasma Core Sphere at Barrel Crown
+  const plasmaCore = new THREE.Mesh(
+    new THREE.SphereGeometry(0.022, 10, 10),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.96,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  plasmaCore.scale.set(1, 1, 2.2);
+  plasmaCore.position.z = -0.025;
+  plasmaCore.renderOrder = 19;
+  muzzleFlashGroup.add(plasmaCore);
+
   muzzleFlashGroup.visible = false;
   weaponMotionAnchor.add(muzzleFlashGroup);
 
-  const muzzleLight = new THREE.PointLight(0xffaa33, 0, 9, 2);
+  const muzzleLight = new THREE.PointLight(0xffb733, 0, 12, 1.8);
   muzzleLight.position.set(0, 0.03, -0.26);
   weaponMotionAnchor.add(muzzleLight);
 
@@ -1355,17 +1424,16 @@ export function buildTacticalWeaponRig(
       },
     }),
 
-    // [5] AK-47 Comando (`fps_ak47.glb`)
+    // [5] AK-47 Comando (`fps_ak47.glb`) — Camera positioned close (Z = 0.485) and higher above the receiver (Y = -1.525)
     AK47_RIFLE: createAnimatedWeaponEntry({
       weaponId: 'AK47_RIFLE',
       localUrl: AK47_RIFLE_LOCAL_URL,
       githubUrl: AK47_RIFLE_GITHUB_RAW_URL,
       scale: 1.0,
       rotY: Math.PI,
-      pos: [-0.127, -1.485, 0.16],
+      pos: [-0.142, -1.525, 0.485],
       mainBoneName: 'SKEL_AK_47_Rifle',
       mainBoneScale: 0.01,
-      hideNodeNames: ['Object_26', 'SKM_Comando_M_Shirt_BlackCamo2_0'],
       clipAliases: {
         Draw: 'RIG_UE5_Comando_AK_Equip',
         Fire: 'RIG_UE5_Comando_AK_Fire',
@@ -1427,7 +1495,7 @@ export function buildTacticalWeaponRig(
       subclipWindows: {
         Draw: [5.8, 8.2],
         Reload: [10.8, 14.0],
-        Fire: [16.8, 18.0],
+        Fire: [16.0, 18.25],
         Reload_Empty: [20.8, 26.2],
         Holster: [5.8, 6.8],
       },
@@ -1494,14 +1562,14 @@ export function buildTacticalWeaponRig(
       leftBasePos.set(-0.025, -0.042, -0.18);
       leftBaseEuler.set(-1.42, 0.22, -0.26);
 
-      opticsContainer.position.set(0, 0.008, 0.01);
+      opticsContainer.position.set(-0.012, 0.042, 0.15);
       opticsContainer.scale.setScalar(0.92);
-      suppressorGroup.position.set(0, -0.002, -0.54);
-      muzzleWorldPos.position.set(0, -0.002, -0.52);
-      muzzleFlashGroup.position.set(0, -0.002, -0.51);
-      laserOriginWorldPos.position.set(0.026, 0.002, -0.32);
+      suppressorGroup.position.set(-0.012, 0.038, -0.38);
+      muzzleWorldPos.position.set(-0.012, 0.038, -0.36);
+      muzzleFlashGroup.position.set(-0.012, 0.038, -0.35);
+      laserOriginWorldPos.position.set(0.014, 0.035, -0.18);
       peqLaserBeam.position.copy(laserOriginWorldPos.position);
-      ejectionPortWorldPos.position.set(0.024, 0.006, 0.01);
+      ejectionPortWorldPos.position.set(0.018, 0.04, 0.16);
     } else if (weaponId === 'SNIPER_TACTICAL') {
       rightBasePos.set(0.024, -0.052, 0.084);
       rightBaseEuler.set(-1.62, -0.08, 0.1);
@@ -1588,11 +1656,10 @@ export function buildTacticalWeaponRig(
     const activeEntry = weaponPacks[weaponId];
     m4BodyGroup.visible = weaponId === 'M4_CARBINE' && !activeEntry.loaded;
 
-    // AK-47 and Sniper Tactical use universal rigged FPS arms (arms_rig.glb)
+    // Only Sniper Tactical (or unloaded fallback) uses universal rigged FPS arms (arms_rig.glb);
+    // AK-47 uses its own native rigged hands & sleeves baked into fps_ak47.glb
     const usesUniversalArms =
-      !activeEntry.loaded ||
-      weaponId === 'AK47_RIFLE' ||
-      weaponId === 'SNIPER_TACTICAL';
+      !activeEntry.loaded || weaponId === 'SNIPER_TACTICAL';
     armsRigContainer.visible = usesUniversalArms;
 
     weaponMotionAnchor.position.set(0, 0, 0);
@@ -1602,14 +1669,19 @@ export function buildTacticalWeaponRig(
     playWeaponPackAction(activeEntry, 'Draw', undefined, 1.15);
   };
 
+  let sniperBoltHandTimer = 0;
+
   const triggerFireAnimation = (_isAds = false) => {
     const activeEntry = weaponPacks[activeWeapon];
     const speed =
       activeWeapon === 'SNIPER_BOLT'
-        ? 1.35
+        ? 1.45
         : activeWeapon === 'SNIPER_TACTICAL'
-          ? 1.25
+          ? 1.85
           : 1.3;
+    if (activeWeapon === 'SNIPER_TACTICAL') {
+      sniperBoltHandTimer = 1.08;
+    }
     playWeaponPackAction(activeEntry, 'Fire', undefined, speed);
   };
 
@@ -1697,6 +1769,46 @@ export function buildTacticalWeaponRig(
     root.updateMatrixWorld(true);
 
     if (armsRigCtrl && armsRigContainer.visible) {
+      if (activeWeapon === 'SNIPER_TACTICAL' && sniperBoltHandTimer > 0) {
+        sniperBoltHandTimer = Math.max(0, sniperBoltHandTimer - dt);
+        const p = 1 - sniperBoltHandTimer / 1.08;
+        // Animate Right Hand reaching up to bolt handle, pulling back, pushing forward, and returning to grip
+        let dy = 0;
+        let dz = 0;
+        let dx = 0;
+        if (p > 0.12 && p < 0.88) {
+          const bp = (p - 0.12) / 0.76;
+          if (bp < 0.28) {
+            const a = bp / 0.28;
+            dy = 0.068 * a;
+            dz = -0.055 * a;
+            dx = 0.018 * a;
+          } else if (bp < 0.58) {
+            const a = (bp - 0.28) / 0.3;
+            dy = 0.068 + 0.012 * Math.sin(a * Math.PI);
+            dz = -0.055 + 0.095 * a;
+            dx = 0.018 + 0.012 * a;
+          } else if (bp < 0.82) {
+            const a = (bp - 0.58) / 0.24;
+            dy = 0.068 * (1 - a * 0.25);
+            dz = 0.04 - 0.095 * a;
+            dx = 0.03 * (1 - a * 0.4);
+          } else {
+            const a = (bp - 0.82) / 0.18;
+            dy = 0.051 * (1 - a);
+            dz = -0.055 * (1 - a);
+            dx = 0.018 * (1 - a);
+          }
+        }
+        rightHandGroup.position.set(
+          rightBasePos.x + dx,
+          rightBasePos.y + dy,
+          rightBasePos.z + dz
+        );
+      } else {
+        rightHandGroup.position.copy(rightBasePos);
+      }
+
       armsRigCtrl.solveAndPose(
         dt,
         rightHandGroup,
@@ -1796,7 +1908,7 @@ export function getOpticAdsTransform(
   }
   if (activeWeapon === 'AK47_RIFLE') {
     return {
-      pos: new THREE.Vector3(0.012, -0.052, -0.23),
+      pos: new THREE.Vector3(0.012, 0.001, -0.34),
       rotZ: 0,
     };
   }

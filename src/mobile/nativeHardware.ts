@@ -67,6 +67,19 @@ export class MobileHardwareManager {
     this.triggerVibrate([50, 35, 65]);
   }
 
+  public vibratePinPull(): void {
+    this.triggerVibrate([20, 30, 35]);
+  }
+
+  public vibrateExplosion(intensity = 1.0): void {
+    const scale = Math.max(0.35, Math.min(1.0, intensity));
+    const p1 = Math.round(180 * scale);
+    const p2 = Math.round(260 * scale);
+    const p3 = Math.round(150 * scale);
+    const p4 = Math.round(95 * scale);
+    this.triggerVibrate([p1, 35, p2, 40, p3, 35, p4]);
+  }
+
   public vibrateHeartbeat(): void {
     this.triggerVibrate([28, 90, 22]);
   }

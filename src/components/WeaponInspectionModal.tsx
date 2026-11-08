@@ -26,6 +26,7 @@ import {
   SNIPER_TACTICAL_LOCAL_URL,
 } from '../three/weaponBuilder';
 import { WeaponId } from '../types/game';
+import { WarfaceRankIcon } from './WarfaceRankIcon';
 
 interface WeaponInspectionModalProps {
   activeWeapon: WeaponId;
@@ -795,16 +796,7 @@ export const WeaponInspectionModal: React.FC<WeaponInspectionModalProps> = ({
 
         {/* Right: Player Warface Rank Badge */}
         <div className="hidden sm:flex items-center gap-2 bg-black/60 border border-amber-500/40 rounded-xl px-2.5 py-1 shrink-0">
-          <div
-            className="w-5 h-5 rounded border flex items-center justify-center font-black text-[10px] shadow"
-            style={{
-              borderColor: currentRank.badgeColor,
-              color: currentRank.badgeColor,
-              backgroundColor: 'rgba(0,0,0,0.6)',
-            }}
-          >
-            {currentRank.badge}
-          </div>
+          <WarfaceRankIcon level={currentRank.level} className="w-5 h-5" />
           <span className="text-[10px] font-mono font-bold text-amber-300">
             NÍV. {currentRank.level} · {currentRank.title.toUpperCase()}
           </span>

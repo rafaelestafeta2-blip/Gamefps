@@ -15,6 +15,8 @@ export interface ProceduralTextures {
   gloveCarbon: THREE.CanvasTexture;
   combatSleeve: THREE.CanvasTexture;
   tacticalWatchFace: THREE.CanvasTexture;
+  muzzleFlashStar: THREE.CanvasTexture;
+  muzzleFlashJet: THREE.CanvasTexture;
 }
 
 export function createProceduralTextures(renderer: THREE.WebGLRenderer): ProceduralTextures {
@@ -467,6 +469,101 @@ export function createProceduralTextures(renderer: THREE.WebGLRenderer): Procedu
   const tacticalWatchFace = new THREE.CanvasTexture(watchCanvas);
   tacticalWatchFace.colorSpace = THREE.SRGBColorSpace;
 
+  // 14. Premium Volumetric Starburst Muzzle Flash Corona Texture (6-Point Compensator Star + White-Hot Core)
+  const starCanvas = document.createElement('canvas');
+  starCanvas.width = 256;
+  starCanvas.height = 256;
+  const stCtx = starCanvas.getContext('2d')!;
+  stCtx.clearRect(0, 0, 256, 256);
+
+  // Soft outer orange-amber glow halo
+  const outerHalo = stCtx.createRadialGradient(128, 128, 4, 128, 128, 124);
+  outerHalo.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+  outerHalo.addColorStop(0.18, 'rgba(254, 243, 199, 0.96)');
+  outerHalo.addColorStop(0.38, 'rgba(251, 191, 36, 0.72)');
+  outerHalo.addColorStop(0.68, 'rgba(234, 88, 12, 0.28)');
+  outerHalo.addColorStop(1.0, 'rgba(154, 52, 18, 0.0)');
+  stCtx.fillStyle = outerHalo;
+  stCtx.beginPath();
+  stCtx.arc(128, 128, 124, 0, Math.PI * 2);
+  stCtx.fill();
+
+  // 6-point compensator gas spikes
+  for (let i = 0; i < 6; i++) {
+    const angle = (i * Math.PI) / 3 + (i % 2 === 0 ? 0.05 : -0.05);
+    const spikeLen = i % 2 === 0 ? 122 : 96;
+    const spikeWidth = i % 2 === 0 ? 22 : 16;
+    stCtx.save();
+    stCtx.translate(128, 128);
+    stCtx.rotate(angle);
+
+    const spikeGrad = stCtx.createLinearGradient(0, 0, spikeLen, 0);
+    spikeGrad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+    spikeGrad.addColorStop(0.3, 'rgba(253, 224, 71, 0.92)');
+    spikeGrad.addColorStop(0.68, 'rgba(249, 115, 22, 0.52)');
+    spikeGrad.addColorStop(1.0, 'rgba(234, 88, 12, 0.0)');
+    stCtx.fillStyle = spikeGrad;
+
+    stCtx.beginPath();
+    stCtx.moveTo(0, -spikeWidth);
+    stCtx.quadraticCurveTo(spikeLen * 0.55, -spikeWidth * 0.35, spikeLen, 0);
+    stCtx.quadraticCurveTo(spikeLen * 0.55, spikeWidth * 0.35, 0, spikeWidth);
+    stCtx.closePath();
+    stCtx.fill();
+    stCtx.restore();
+  }
+
+  // Incandescent white-hot plasma center
+  const coreGrad = stCtx.createRadialGradient(128, 128, 0, 128, 128, 42);
+  coreGrad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+  coreGrad.addColorStop(0.55, 'rgba(254, 249, 195, 0.95)');
+  coreGrad.addColorStop(1.0, 'rgba(251, 191, 36, 0.0)');
+  stCtx.fillStyle = coreGrad;
+  stCtx.beginPath();
+  stCtx.arc(128, 128, 42, 0, Math.PI * 2);
+  stCtx.fill();
+
+  const muzzleFlashStar = new THREE.CanvasTexture(starCanvas);
+  muzzleFlashStar.colorSpace = THREE.SRGBColorSpace;
+
+  // 15. Directional Supersonic Flame Plume Jet Texture (Mach-Diamond Barrel Blast)
+  const jetCanvas = document.createElement('canvas');
+  jetCanvas.width = 256;
+  jetCanvas.height = 128;
+  const jCtx = jetCanvas.getContext('2d')!;
+  jCtx.clearRect(0, 0, 256, 128);
+
+  const jetGrad = jCtx.createLinearGradient(12, 64, 248, 64);
+  jetGrad.addColorStop(0.0, 'rgba(255, 255, 255, 0.0)');
+  jetGrad.addColorStop(0.08, 'rgba(255, 255, 255, 1.0)');
+  jetGrad.addColorStop(0.28, 'rgba(254, 240, 138, 0.96)');
+  jetGrad.addColorStop(0.58, 'rgba(249, 115, 22, 0.78)');
+  jetGrad.addColorStop(0.85, 'rgba(220, 38, 38, 0.32)');
+  jetGrad.addColorStop(1.0, 'rgba(127, 29, 29, 0.0)');
+
+  jCtx.fillStyle = jetGrad;
+  jCtx.beginPath();
+  jCtx.moveTo(8, 64);
+  jCtx.quadraticCurveTo(58, 10, 150, 26);
+  jCtx.quadraticCurveTo(215, 40, 250, 64);
+  jCtx.quadraticCurveTo(215, 88, 150, 102);
+  jCtx.quadraticCurveTo(58, 118, 8, 64);
+  jCtx.closePath();
+  jCtx.fill();
+
+  // Inner white-hot mach diamond core inside the flame plume
+  const innerJetGrad = jCtx.createLinearGradient(16, 64, 145, 64);
+  innerJetGrad.addColorStop(0.0, 'rgba(255, 255, 255, 0.95)');
+  innerJetGrad.addColorStop(0.5, 'rgba(254, 249, 195, 0.9)');
+  innerJetGrad.addColorStop(1.0, 'rgba(251, 191, 36, 0.0)');
+  jCtx.fillStyle = innerJetGrad;
+  jCtx.beginPath();
+  jCtx.ellipse(72, 64, 58, 18, 0, 0, Math.PI * 2);
+  jCtx.fill();
+
+  const muzzleFlashJet = new THREE.CanvasTexture(jetCanvas);
+  muzzleFlashJet.colorSpace = THREE.SRGBColorSpace;
+
   return {
     floorGrid,
     wallGrid,
@@ -482,5 +579,7 @@ export function createProceduralTextures(renderer: THREE.WebGLRenderer): Procedu
     gloveCarbon,
     combatSleeve,
     tacticalWatchFace,
+    muzzleFlashStar,
+    muzzleFlashJet,
   };
 }

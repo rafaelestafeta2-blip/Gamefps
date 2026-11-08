@@ -7,6 +7,7 @@ import {
   DrillMode,
   FireMode,
   GameScreenState,
+  GrenadeType,
   GyroMode,
   HudState,
   OpticType,
@@ -20,6 +21,7 @@ import {
   savePlayerXp,
 } from '../progression/ranks';
 import { BallisticsFXPool } from './ballisticsPool';
+import { TacticalGrenadeSystem } from './grenadeSystem';
 import {
   buildPreProductionLevel,
   ColliderBox,
@@ -63,6 +65,7 @@ export class TacticalFPSEngine {
   private shootableMeshes: THREE.Mesh[] = [];
   private wallStandPositions: THREE.Vector3[] = [];
   private fxPool: BallisticsFXPool;
+  private grenadeSystem: TacticalGrenadeSystem;
   private raycaster = new THREE.Raycaster();
   private laserDotMesh: THREE.Mesh;
   private keyLight!: THREE.DirectionalLight;
@@ -123,6 +126,8 @@ export class TacticalFPSEngine {
   private burstRemaining = 0;
   private triggerPulledThisPress = false;
   private sniperChamberTimer = 0;
+  private sniperChamberDuration = 1.25;
+  private sniperReturnToScopeAfterBolt = false;
 
   // Reload State Machine
   private reloadTimer = 0;
@@ -159,6 +164,10 @@ export class TacticalFPSEngine {
     currentMagRounds: 30,
     magCapacity: 30,
     magazines: [30, 30, 30, 30],
+    fragGrenades: 3,
+    smokeGrenades: 3,
+    equippedGrenade: null,
+    isThrowingGrenade: false,
     boltLockedBack: false,
     fireMode: 'AUTO',
     optic: 'iron',
@@ -346,6 +355,21 @@ export class TacticalFPSEngine {
     this.weaponRig.ironSightsGroup.visible = true;
 
     this.fxPool = new BallisticsFXPool(this.scene);
+    this.grenadeSystem = new TacticalGrenadeSystem(
+      this.scene,
+      this.camera,
+      (blastCenter, blastRadius) =>
+        this.handleFragGrenadeDetonation(blastCenter, blastRadius),
+      (type) => {
+        if (type === 'FRAG') {
+          this.state.fragGrenades = Math.max(0, this.state.fragGrenades - 1);
+        } else {
+          this.state.smokeGrenades = Math.max(0, this.state.smokeGrenades - 1);
+        }
+        this.state.equippedGrenade = null;
+        this.emitHud();
+      }
+    );
 
     // World-space green laser impact dot
     this.laserDotMesh = new THREE.Mesh(
@@ -524,6 +548,12 @@ export class TacticalFPSEngine {
   }
 
   public toggleWeaponSlot(): void {
+    if (this.state.equippedGrenade !== null) {
+      this.grenadeSystem?.unequipFromHand();
+      this.state.equippedGrenade = null;
+      this.selectWeapon(this.state.activeWeapon);
+      return;
+    }
     if (this.state.activeWeapon === 'P50_PISTOL') {
       this.selectWeapon(this.primaryWeapon);
     } else {
@@ -532,6 +562,8 @@ export class TacticalFPSEngine {
   }
 
   public selectWeapon(weaponId: WeaponId): void {
+    this.grenadeSystem?.unequipFromHand();
+    this.state.equippedGrenade = null;
     if (weaponId === 'P50_PISTOL') {
       this.secondaryWeapon = 'P50_PISTOL';
     } else {
@@ -546,6 +578,7 @@ export class TacticalFPSEngine {
     this.state.boltLockedBack = false;
     this.state.chambered = 1;
     this.sniperChamberTimer = 0;
+    this.sniperReturnToScopeAfterBolt = false;
     this.weaponRig.root.visible = true;
 
     switch (weaponId) {
@@ -616,12 +649,23 @@ export class TacticalFPSEngine {
     }
 
     this.magCheckTimer = 1.8;
-    soundEngine.playReloadStage('CHARGING_HANDLE');
+    soundEngine.playWeaponSwap();
     this.emitHud();
   }
 
   public triggerWeaponInspect(): void {
-    if (this.state.reloadPhase !== 'IDLE') return;
+    if (this.state.equippedGrenade !== null) {
+      this.grenadeSystem?.unequipFromHand();
+      this.state.equippedGrenade = null;
+      this.weaponRig.root.visible = true;
+    }
+    if (
+      this.state.reloadPhase !== 'IDLE' &&
+      this.state.reloadPhase !== 'MAG_CHECK'
+    ) {
+      return;
+    }
+    this.state.reloadPhase = 'IDLE';
     this.weaponRig.triggerInspectAnimation();
     const names: Record<WeaponId, string> = {
       P50_PISTOL: 'INSPECIONANDO MARK 23 PISTOL (.45 ACP)',
@@ -647,11 +691,179 @@ export class TacticalFPSEngine {
         : [cap, cap, cap, cap];
     this.state.currentMagRounds = cap;
     this.state.chambered = 1;
+    this.state.fragGrenades = 3;
+    this.state.smokeGrenades = 3;
     this.state.boltLockedBack = false;
     this.state.reloadPhase = 'IDLE';
-    this.state.reloadTypeLabel = `MUNIÇÃO REABASTECIDA (${cap} TIROS)`;
+    this.state.reloadTypeLabel = `MUNIÇÃO + GRANADAS REABASTECIDAS (${cap} TIROS | 3 FRAG | 3 SMOKE)`;
     this.magCheckTimer = 1.6;
     soundEngine.playReloadStage('MAG_IN');
+    this.emitHud();
+  }
+
+  private lastGrenadeEquipTime = 0;
+
+  public throwGrenade(type: GrenadeType): void {
+    if (this.state.screen !== 'PLAYING') return;
+    if (this.grenadeSystem.isThrowing()) return;
+
+    // If this grenade type is ALREADY held in the player's hand, clicking it again triggers the pin-pull & throw!
+    if (this.state.equippedGrenade === type) {
+      this.useEquippedGrenade();
+      return;
+    }
+
+    // Step 1: Equip the grenade in the player's hand & show the 3D landing trajectory arc!
+    if (type === 'FRAG') {
+      if (this.state.fragGrenades <= 0) {
+        soundEngine.playMechanicalSwitch(0.75);
+        this.state.reloadTypeLabel =
+          'SEM GRANADAS DE FRAGMENTAÇÃO — REABASTEÇA NO BOTÃO [+]';
+        this.magCheckTimer = 1.5;
+        this.emitHud();
+        return;
+      }
+      this.state.reloadTypeLabel =
+        'GRANADA FRAG NA MÃO — MIRE ONDE JOGAR E APERTE ATIRAR PARA TIRAR O PINO!';
+    } else {
+      if (this.state.smokeGrenades <= 0) {
+        soundEngine.playMechanicalSwitch(0.75);
+        this.state.reloadTypeLabel =
+          'SEM GRANADAS DE FUMAÇA (SMOKE) — REABASTEÇA NO BOTÃO [+]';
+        this.magCheckTimer = 1.5;
+        this.emitHud();
+        return;
+      }
+      this.state.reloadTypeLabel =
+        'GRANADA SMOKE NA MÃO — MIRE ONDE JOGAR E APERTE ATIRAR PARA TIRAR O PINO!';
+    }
+
+    this.lastGrenadeEquipTime = performance.now();
+    this.state.isAds = false;
+    this.state.reloadPhase = 'IDLE';
+    this.state.equippedGrenade = type;
+    this.magCheckTimer = 3.5;
+    this.grenadeSystem.equipInHand(type);
+    this.emitHud();
+  }
+
+  public useEquippedGrenade(): void {
+    if (this.state.screen !== 'PLAYING') return;
+    if (!this.state.equippedGrenade || this.grenadeSystem.isThrowing()) return;
+    if (performance.now() - this.lastGrenadeEquipTime < 280) return;
+
+    const type = this.state.equippedGrenade;
+    if (this.grenadeSystem.triggerPinPullAndThrow()) {
+      this.state.isThrowingGrenade = true;
+      this.state.reloadTypeLabel =
+        type === 'FRAG'
+          ? 'TIRANDO O PINO E ARREMESSANDO GRANADA DE FRAGMENTAÇÃO!'
+          : 'TIRANDO O PINO E LANÇANDO GRANADA DE FUMAÇA (SMOKE)!';
+      this.magCheckTimer = 1.8;
+      this.emitHud();
+    }
+  }
+
+  private handleFragGrenadeDetonation(
+    blastCenter: THREE.Vector3,
+    blastRadius: number
+  ): void {
+    // Spawn extra metallic/fire spark burst at detonation point
+    _hitNormal.set(0, 1, 0);
+    this.fxPool.spawnImpactFX(blastCenter, _hitNormal, true, true);
+
+    // Camera trauma shake & strong physical phone vibration on Frag explosion
+    const playerDist = this.playerPos.distanceTo(blastCenter);
+    const shakeFactor =
+      playerDist < 28 ? Math.max(0.35, 1 - playerDist / 28) : 0.35;
+    this.cameraShake = Math.max(this.cameraShake, 0.038 * shakeFactor);
+    mobileHardware.vibrateExplosion(shakeFactor);
+
+    let targetsHitCount = 0;
+    let killsCount = 0;
+
+    for (let i = 0; i < this.targets.length; i++) {
+      const t = this.targets[i];
+      if (t.isDown) continue;
+
+      const dist = t.root.position.distanceTo(blastCenter);
+      if (dist > blastRadius) continue;
+
+      targetsHitCount++;
+      this.state.hits += 1;
+
+      if (t.type === 'STEEL_GONG') {
+        soundEngine.playImpact('STEEL_GONG');
+        t.hitTiltVelocity = -18.0;
+        this.state.score += 100;
+        this.addPlayerXp(35);
+        continue;
+      }
+
+      // Radial fragmentation blast damage (up to 190 at center)
+      const falloff = Math.max(0.25, 1 - dist / (blastRadius * 1.1));
+      const blastDmg = Math.round(190 * falloff);
+
+      if (t.armorHealth > 0) {
+        t.armorHealth = 0;
+        if (t.armorMesh) t.armorMesh.visible = false;
+      }
+
+      t.health -= blastDmg;
+      t.hitTiltVelocity = -16.0;
+
+      if (t.health <= 0) {
+        killsCount++;
+        t.isDown = true;
+        t.downTimer = this.state.drillMode === 'FREE_RANGE' ? 2.6 : 9999;
+        t.isTelegraphing = false;
+        if (t.laserLine) t.laserLine.visible = false;
+        this.state.score += 150;
+        this.addPlayerXp(120);
+        this.state.lastHitZone = 'KILL';
+      } else {
+        this.state.score += 55;
+        this.addPlayerXp(30);
+        this.state.lastHitZone = 'TORSO';
+      }
+    }
+
+    if (targetsHitCount > 0) {
+      this.state.hitMarkerAlpha = 1.0;
+      this.state.hitMarkerIsCrit = killsCount > 0;
+      this.state.reloadTypeLabel =
+        killsCount > 0
+          ? `EXPLOSÃO FRAG! ${killsCount} ALVO(S) ELIMINADO(S) (+${killsCount * 120} XP)`
+          : `IMPACTO DE FRAGMENTAÇÃO EM ${targetsHitCount} ALVO(S)!`;
+      this.magCheckTimer = 2.0;
+
+      if (
+        this.state.drillMode === 'KILLHOUSE_BLITZ' ||
+        this.state.drillMode === 'TACTICAL_WAVE'
+      ) {
+        const remaining = this.targets.filter(
+          (t) => t.sector === 'KILLHOUSE' && !t.isDown
+        ).length;
+        this.state.targetsRemaining = remaining;
+
+        if (remaining === 0) {
+          if (
+            this.state.bestCourseTimeSec === null ||
+            this.state.courseTimerSec < this.state.bestCourseTimeSec
+          ) {
+            this.state.bestCourseTimeSec = Number(
+              this.state.courseTimerSec.toFixed(2)
+            );
+          }
+          this.addPlayerXp(350);
+          this.state.screen = 'VICTORY';
+          if (document.pointerLockElement) {
+            document.exitPointerLock();
+          }
+        }
+      }
+    }
+
     this.emitHud();
   }
 
@@ -720,10 +932,19 @@ export class TacticalFPSEngine {
 
   public toggleAds(): void {
     if (this.state.screen !== 'PLAYING') return;
+    if (this.state.equippedGrenade !== null) {
+      this.grenadeSystem?.unequipFromHand();
+      this.state.equippedGrenade = null;
+      this.weaponRig.root.visible = true;
+    }
+    if (this.sniperChamberTimer > 0) {
+      this.sniperReturnToScopeAfterBolt = !this.sniperReturnToScopeAfterBolt;
+      soundEngine.playMechanicalSwitch(1.05);
+      this.emitHud();
+      return;
+    }
     this.state.isAds = !this.state.isAds;
-    if (this.state.isAds) {
-      this.state.isCrouchingToggled = this.state.isCrouchingToggled;
-    } else {
+    if (!this.state.isAds) {
       this.touchHoldBreath = false;
     }
     soundEngine.playMechanicalSwitch(1.05);
@@ -767,7 +988,7 @@ export class TacticalFPSEngine {
       this.slideDir.copy(_forward);
       this.state.isCrouchingToggled = true;
       this.state.isProneToggled = false;
-      soundEngine.playMechanicalSwitch(0.65);
+      soundEngine.playPlayerSlide();
     } else if (this.state.isProneToggled) {
       // Stand up from Prone
       this.state.isProneToggled = false;
@@ -979,6 +1200,11 @@ export class TacticalFPSEngine {
     this.state.damageFlashAlpha = 0;
     const startingWeapon = this.state.activeWeapon || this.primaryWeapon || 'M4_CARBINE';
     this.selectWeapon(startingWeapon);
+    this.state.fragGrenades = 3;
+    this.state.smokeGrenades = 3;
+    this.state.equippedGrenade = null;
+    this.state.isThrowingGrenade = false;
+    this.grenadeSystem?.clearAll();
     this.state.boltLockedBack = false;
     this.state.reloadPhase = 'IDLE';
 
@@ -1080,7 +1306,15 @@ export class TacticalFPSEngine {
         this.triggerMagCheck();
         break;
       case 'KeyG':
-        this.triggerManualBoltRack();
+        if (this.state.boltLockedBack || this.state.chambered === 0) {
+          this.triggerManualBoltRack();
+        } else {
+          this.throwGrenade('FRAG');
+        }
+        break;
+      case 'KeyJ':
+      case 'KeyN':
+        this.throwGrenade('SMOKE');
         break;
       case 'KeyB':
         this.cycleFireMode();
@@ -1169,7 +1403,7 @@ export class TacticalFPSEngine {
           _forward.y = 0;
           _forward.normalize();
           this.slideDir.copy(_forward);
-          soundEngine.playMechanicalSwitch(0.65);
+          soundEngine.playPlayerSlide();
         }
         break;
     }
@@ -1351,6 +1585,15 @@ export class TacticalFPSEngine {
   // ADVANCED RELOAD, MAG CHECK & BOLT MECHANICS
   // =========================================================================
   public triggerReload(isDoubleTapSpeedReload = false): void {
+    if (this.state.equippedGrenade !== null) {
+      this.grenadeSystem?.unequipFromHand();
+      this.state.equippedGrenade = null;
+      this.weaponRig.root.visible = true;
+    }
+    if (this.state.reloadPhase === 'MAG_CHECK') {
+      this.state.reloadPhase = 'IDLE';
+      this.state.magCheckVisible = false;
+    }
     // If already in a reload, upgrade to speed reload if double-tapped early!
     if (this.state.reloadPhase !== 'IDLE') {
       if (isDoubleTapSpeedReload && !this.isSpeedReload && this.state.reloadPhase === 'MAG_OUT') {
@@ -1413,9 +1656,17 @@ export class TacticalFPSEngine {
     ) {
       this.reloadDuration = 2.75;
       soundEngine.playM4a1FullReload();
+    } else if (
+      this.state.activeWeapon === 'SNIPER_BOLT' ||
+      this.state.activeWeapon === 'SNIPER_TACTICAL'
+    ) {
+      soundEngine.playBoltActionCycle();
     }
 
     this.reloadTimer = 0;
+    this.sniperChamberTimer = 0;
+    this.sniperReturnToScopeAfterBolt = false;
+    this.state.isAds = false;
     this.state.reloadPhase = 'MAG_OUT';
     this.state.reloadProgress = 0;
     this.stageSoundFlags = { magOut: false, magIn: false, boltSlap: false };
@@ -1436,14 +1687,30 @@ export class TacticalFPSEngine {
   }
 
   public triggerManualBoltRack(): void {
-    if (this.state.reloadPhase !== 'IDLE') return;
+    if (
+      this.state.reloadPhase !== 'IDLE' &&
+      this.state.reloadPhase !== 'MAG_CHECK'
+    ) {
+      return;
+    }
+    if (this.state.currentMagRounds <= 0 && this.state.chambered === 0) {
+      this.triggerReload(false);
+      return;
+    }
     this.state.reloadPhase = 'CHARGING_PULL';
     this.reloadTimer = 0;
     this.reloadDuration = 0.65;
     this.state.reloadTypeLabel = this.state.boltLockedBack
       ? 'LIBERANDO FERROLHO [G]'
-      : 'MANobrando ALAVANCA DE MANEJO [G]';
-    soundEngine.playReloadStage('CHARGING_HANDLE');
+      : 'MANOBRANDO ALAVANCA DE MANEJO [G]';
+    if (
+      this.state.activeWeapon === 'SNIPER_BOLT' ||
+      this.state.activeWeapon === 'SNIPER_TACTICAL'
+    ) {
+      soundEngine.playBoltActionCycle();
+    } else {
+      soundEngine.playReloadStage('CHARGING_HANDLE');
+    }
     this.weaponRig.triggerBoltAnimation();
 
     // If a live round was chambered, eject it!
@@ -1504,6 +1771,18 @@ export class TacticalFPSEngine {
   // BALLISTICS & WEAPON FIRING
   // =========================================================================
   private attemptFireWeapon(): void {
+    // If the player is holding a grenade in hand, pressing Fire pulls the pin & throws the grenade!
+    if (
+      this.state.equippedGrenade !== null ||
+      this.grenadeSystem.isBusyOrHolding()
+    ) {
+      if (!this.triggerPulledThisPress) {
+        this.triggerPulledThisPress = true;
+        this.useEquippedGrenade();
+      }
+      return;
+    }
+
     if (this.state.reloadPhase !== 'IDLE' && this.state.reloadPhase !== 'MAG_CHECK') {
       return;
     }
@@ -1516,14 +1795,16 @@ export class TacticalFPSEngine {
     }
 
     if (this.state.chambered === 0) {
+      if (this.sniperChamberTimer > 0) {
+        return;
+      }
       if (!this.triggerPulledThisPress) {
         soundEngine.playDryFire();
         this.triggerPulledThisPress = true;
-        // If magazine has rounds but chamber is empty, prompt bolt rack
-        if (this.state.currentMagRounds > 0) {
-          this.state.reloadTypeLabel = 'CÂMARA VAZIA — PRESSIONE [G] OU [R] PARA ENGATILHAR';
-          this.magCheckTimer = 1.5;
-          this.emitHud();
+        if (this.state.currentMagRounds <= 0) {
+          this.triggerReload(false);
+        } else {
+          this.triggerManualBoltRack();
         }
       }
       return;
@@ -1542,27 +1823,41 @@ export class TacticalFPSEngine {
   }
 
   private executeSingleShot(): void {
-    if (this.state.activeWeapon === 'SNIPER_BOLT') {
-      this.fireCooldown = 1.48;
-      this.sniperChamberTimer = 1.15;
-      this.state.reloadTypeLabel = 'CICLANDO FERROLHO (.338)';
-      this.magCheckTimer = 1.48;
-      soundEngine.playBoltActionCycle();
+    const isSniper =
+      this.state.activeWeapon === 'SNIPER_BOLT' ||
+      this.state.activeWeapon === 'SNIPER_TACTICAL';
+    const wasScopedAtShot = this.state.isAds;
+
+    if (isSniper) {
+      const boltDur =
+        this.state.activeWeapon === 'SNIPER_BOLT' ? 1.32 : 1.08;
+      this.fireCooldown = boltDur + 0.1;
+      this.sniperChamberDuration = boltDur;
+      if (this.state.currentMagRounds > 0) {
+        this.sniperChamberTimer = boltDur;
+        this.sniperReturnToScopeAfterBolt = wasScopedAtShot;
+        this.state.reloadTypeLabel =
+          'CICLANDO FERROLHO — CARREGANDO PRÓXIMA BALA...';
+        this.magCheckTimer = boltDur;
+        soundEngine.playBoltActionCycle();
+      } else {
+        this.sniperChamberTimer = 0;
+        this.sniperReturnToScopeAfterBolt = false;
+        this.state.boltLockedBack = true;
+      }
     } else {
       this.fireCooldown =
-        this.state.activeWeapon === 'SNIPER_TACTICAL'
-          ? 0.75
-          : this.state.activeWeapon === 'SMG_45'
-            ? 0.066
-            : this.state.activeWeapon === 'AK47_RIFLE'
-              ? 0.095
-              : 0.078;
+        this.state.activeWeapon === 'SMG_45'
+          ? 0.066
+          : this.state.activeWeapon === 'AK47_RIFLE'
+            ? 0.095
+            : 0.078;
     }
     this.state.shotsFired += 1;
 
     // Consume chambered round and cycle bolt carrier
     this.state.chambered = 0;
-    if (this.state.activeWeapon !== 'SNIPER_BOLT') {
+    if (!isSniper) {
       if (this.state.currentMagRounds > 0) {
         this.state.currentMagRounds -= 1;
         this.state.chambered = 1;
@@ -1585,10 +1880,16 @@ export class TacticalFPSEngine {
     );
 
     // Muzzle flash, GLB embedded fire animation (Fire / Fire_ADS) & bolt carrier kick
-    this.weaponRig.triggerFireAnimation(this.state.isAds);
+    this.weaponRig.triggerFireAnimation(wasScopedAtShot);
     this.boltCycleOffset = 0.052;
-    this.muzzleFlashTimer = this.state.suppressorAttached ? 0.018 : 0.042;
+    this.muzzleFlashTimer = this.state.suppressorAttached ? 0.022 : 0.056;
     this.weaponRig.muzzleFlashGroup.rotation.z = Math.random() * Math.PI * 2;
+    const randFlashScale = 0.92 + Math.random() * 0.36;
+    this.weaponRig.muzzleFlashGroup.scale.set(
+      randFlashScale,
+      randFlashScale,
+      0.95 + Math.random() * 0.45
+    );
 
     // Eject spinning 5.56mm brass casing from ejection port
     this.weaponRig.ejectionPortWorldPos.getWorldPosition(_worldPos);
@@ -1596,7 +1897,7 @@ export class TacticalFPSEngine {
     _right.crossVectors(_forward, _up).normalize();
     this.fxPool.spawnBrassCasing(_worldPos, _right, _up);
 
-    // Perform Ballistic Raycast FIRST (aligned with exact current Sight/Crosshair vector before recoil kick!)
+    // Perform Ballistic Raycast FIRST (aligned with exact current Sight/Crosshair vector before recoil kick & unscope!)
     this.yawObject.rotation.y = this.yaw;
     this.pitchObject.rotation.x = this.pitch;
     this.camera.updateMatrixWorld(true);
@@ -1617,6 +1918,12 @@ export class TacticalFPSEngine {
       _rayDir.normalize();
     }
 
+    // For bolt-action Snipers: immediately exit the scope zoom AFTER the shot raycast so the player sees the 3D bolt-action animation!
+    if (isSniper && wasScopedAtShot) {
+      this.state.isAds = false;
+      this.touchHoldBreath = false;
+    }
+
     this.raycaster.set(_rayOrigin, _rayDir);
     this.raycaster.far = 140;
 
@@ -1626,7 +1933,7 @@ export class TacticalFPSEngine {
     // Physical Recoil Impulse applied AFTER raycast (so shot lands where player aimed)
     const stanceMult = this.state.stance === 'CROUCH' ? 0.72 : 1.0;
     const suppMult = this.state.suppressorAttached ? 0.82 : 1.0;
-    const adsMult = this.state.isAds ? 0.55 : 1.0;
+    const adsMult = wasScopedAtShot ? 0.55 : 1.0;
     const totalMult = stanceMult * suppMult * adsMult;
 
     this.recoilKickZ = Math.min(this.recoilKickZ + 0.032 * totalMult, 0.075);
@@ -1928,27 +2235,41 @@ export class TacticalFPSEngine {
         this.state.magCheckVisible = false;
         if (this.state.reloadPhase === 'MAG_CHECK') {
           this.state.reloadPhase = 'IDLE';
+        }
+        if (this.state.reloadPhase === 'IDLE') {
           this.state.reloadTypeLabel = '';
         }
       }
     }
 
-    // Sniper Bolt-Action Chambering Timer (Cycles fresh round into battery)
+    // Sniper Bolt-Action Chambering Timer (Cycles fresh round into battery & returns to scope if player was scoped!)
     if (this.sniperChamberTimer > 0) {
       this.sniperChamberTimer -= dt;
       if (this.sniperChamberTimer <= 0) {
         this.sniperChamberTimer = 0;
-        if (this.state.activeWeapon === 'SNIPER_BOLT') {
+        if (
+          this.state.activeWeapon === 'SNIPER_BOLT' ||
+          this.state.activeWeapon === 'SNIPER_TACTICAL'
+        ) {
           if (this.state.currentMagRounds > 0) {
             this.state.currentMagRounds -= 1;
             this.state.chambered = 1;
             this.state.boltLockedBack = false;
             this.state.reloadTypeLabel = '';
+            if (
+              this.sniperReturnToScopeAfterBolt &&
+              this.state.reloadPhase === 'IDLE' &&
+              this.state.equippedGrenade === null
+            ) {
+              this.state.isAds = true;
+              soundEngine.playMechanicalSwitch(1.08);
+            }
           } else {
             this.state.chambered = 0;
             this.state.boltLockedBack = true;
             this.state.reloadTypeLabel = 'FERROLHO ABERTO — SEM MUNIÇÃO';
           }
+          this.sniperReturnToScopeAfterBolt = false;
           this.emitHud();
         }
       }
@@ -1964,7 +2285,8 @@ export class TacticalFPSEngine {
       } else if (
         this.state.fireMode === 'AUTO' &&
         (this.mouseButtonsHeld.has(0) || this.touchFireHeld) &&
-        this.state.reloadPhase === 'IDLE'
+        this.state.reloadPhase === 'IDLE' &&
+        !this.grenadeSystem.isBusyOrHolding()
       ) {
         this.executeSingleShot();
       }
@@ -1982,8 +2304,11 @@ export class TacticalFPSEngine {
     // 6. Reactive Targets & Killhouse Combat Bot AI
     this.updateTargetsAndCombatAI(dt);
 
-    // 7. Update Pooled Brass Casings, Dropped Magazines, Sparks & Tracers
+    // 7. Update Pooled Brass Casings, Dropped Magazines, Sparks, Tracers & 3D Grenades
     this.fxPool.update(dt);
+    this.grenadeSystem.update(dt, this.colliders, this.walkBobAmp);
+    this.state.isThrowingGrenade = this.grenadeSystem.isThrowing();
+    this.state.equippedGrenade = this.grenadeSystem.getHeldGrenade();
 
     // 8. Throttled HUD Sync (11Hz smooth telemetry without React main-thread saturation)
     this.hudSyncTimer += dt;
@@ -2252,6 +2577,7 @@ export class TacticalFPSEngine {
       this.isGrounded = false;
       this.coyoteTimer = 0;
       this.jumpBufferTimer = 0;
+      soundEngine.playPlayerJump();
     }
 
     // Gravity
@@ -2278,7 +2604,7 @@ export class TacticalFPSEngine {
     if (this.playerPos.y <= 0) {
       if (!wasGrounded && this.playerVel.y < -2.0) {
         this.landingDipVel = Math.max(this.playerVel.y * 0.03, -0.12);
-        soundEngine.playMechanicalSwitch(0.55);
+        soundEngine.playFootstep(true, false);
       }
       this.playerPos.y = 0;
       this.playerVel.y = 0;
@@ -2449,7 +2775,15 @@ export class TacticalFPSEngine {
           ? 6.5
           : 9.2;
     if (this.isGrounded && horizSpeed > 0.25 && this.slideTimer <= 0) {
+      const prevStepCycle = Math.floor(this.walkBobPhase / Math.PI);
       this.walkBobPhase += dt * bobFreq;
+      const nextStepCycle = Math.floor(this.walkBobPhase / Math.PI);
+      if (nextStepCycle > prevStepCycle && this.state.stance !== 'PRONE') {
+        soundEngine.playFootstep(
+          this.state.stance === 'SPRINT',
+          this.state.stance === 'CROUCH'
+        );
+      }
       this.walkBobAmp = THREE.MathUtils.damp(
         this.walkBobAmp,
         Math.min(1, horizSpeed / 5.0),
@@ -2521,16 +2855,34 @@ export class TacticalFPSEngine {
 
     // Sprint / Mag Check / Wall-Tuck / CS2 Hip-Angle Pose Modifiers
     const isSprinting = this.state.stance === 'SPRINT' && this.state.adsAlpha < 0.2;
-    const sprintRotX = isSprinting ? -0.26 : 0;
-    const sprintRotY = isSprinting ? 0.48 : 0;
-    const sprintRotZ = isSprinting ? -0.24 : 0;
+    const isAk47 = this.state.activeWeapon === 'AK47_RIFLE';
+    const sprintRotX = isSprinting ? (isAk47 ? -0.14 : -0.26) : 0;
+    const sprintRotY = isSprinting ? (isAk47 ? 0.08 : 0.48) : 0;
+    const sprintRotZ = isSprinting ? (isAk47 ? -0.08 : -0.24) : 0;
+    const sprintDropY = isSprinting && isAk47 ? -0.032 : 0;
 
     // CS2 inward barrel angle in hipfire (smoothly zeroes out in ADS)
     const cs2HipRotY = (1 - this.state.adsAlpha) * 0.055;
     const cs2HipRotX = (1 - this.state.adsAlpha) * 0.015;
 
     const magCheckAlpha = this.state.reloadPhase === 'MAG_CHECK' ? 1 : 0;
-    const tuck = this.state.wallTuckAmount;
+    const throwDipAlpha = this.grenadeSystem.isThrowing() ? 1 : 0;
+    const tuck = Math.max(this.state.wallTuckAmount, throwDipAlpha * 0.72);
+
+    // Procedural bolt-action chambering tilt on Sniper rifles while pulling the bolt handle
+    let boltTiltRotX = 0;
+    let boltTiltRotZ = 0;
+    let boltPullPosZ = 0;
+    let boltLiftPosY = 0;
+    if (this.sniperChamberTimer > 0 && this.sniperChamberDuration > 0.1) {
+      const boltP = 1 - this.sniperChamberTimer / this.sniperChamberDuration;
+      const boltWave = Math.sin(boltP * Math.PI);
+      const pullPulse = Math.sin(Math.min(1, Math.max(0, (boltP - 0.18) / 0.65)) * Math.PI);
+      boltTiltRotZ = boltWave * 0.22;
+      boltTiltRotX = boltWave * 0.08 + pullPulse * 0.06;
+      boltPullPosZ = pullPulse * 0.032;
+      boltLiftPosY = boltWave * 0.015;
+    }
 
     this.weaponRig.root.position.set(
       basePosX + bobX + this.swayPos.x * bobScale + breathX + magCheckAlpha * 0.025,
@@ -2539,9 +2891,12 @@ export class TacticalFPSEngine {
         this.swayPos.y * bobScale +
         breathY +
         this.landingDip * 0.35 +
-        magCheckAlpha * 0.032 -
-        tuck * 0.06,
-      basePosZ + this.recoilKickZ + tuck * 0.14
+        magCheckAlpha * 0.032 +
+        boltLiftPosY +
+        sprintDropY -
+        tuck * 0.06 -
+        throwDipAlpha * 0.08,
+      basePosZ + this.recoilKickZ + boltPullPosZ + tuck * 0.14
     );
 
     const targetRotZ = THREE.MathUtils.lerp(
@@ -2551,19 +2906,20 @@ export class TacticalFPSEngine {
     );
 
     this.weaponRig.root.rotation.set(
-      cs2HipRotX + this.recoilPitch + sprintRotX + tuck * 0.65 + magCheckAlpha * 0.24,
+      cs2HipRotX + this.recoilPitch + sprintRotX + boltTiltRotX + tuck * 0.65 + magCheckAlpha * 0.24,
       cs2HipRotY + this.recoilYaw + sprintRotY - this.swayPos.x * 1.2 - magCheckAlpha * 0.18,
-      targetRotZ - magCheckAlpha * 0.42
+      targetRotZ + boltTiltRotZ - magCheckAlpha * 0.42
     );
 
-    // Hide 3D weapon viewmodel when looking through high-magnification sniper scope
+    // Hide 3D weapon viewmodel when looking through high-magnification sniper scope OR when holding a grenade in hand
     const isSniperScoped =
       (this.state.activeWeapon === 'SNIPER_BOLT' ||
         this.state.activeWeapon === 'SNIPER_TACTICAL' ||
         this.state.optic === 'lpvo') &&
       !this.state.cantedActive &&
       this.state.adsAlpha > 0.82;
-    this.weaponRig.root.visible = !isSniperScoped;
+    this.weaponRig.root.visible =
+      !isSniperScoped && !this.grenadeSystem.isBusyOrHolding();
 
     // 5. Mechanical Sub-Component Animations (Bolt Carrier, Selector, Reticle Parallax)
     if (this.state.boltLockedBack) {
@@ -2632,13 +2988,15 @@ export class TacticalFPSEngine {
     this.weaponRig.holoReticleMesh.position.x = parallaxX;
     this.weaponRig.holoReticleMesh.position.y = 0.03 + parallaxY;
 
-    // Muzzle Flash Visibility & Light Decay
+    // Muzzle Flash Visibility, Volumetric Expansion & HDR PointLight Decay
     if (this.muzzleFlashTimer > 0) {
       this.muzzleFlashTimer -= dt;
+      const maxFlashTime = this.state.suppressorAttached ? 0.022 : 0.056;
+      const flashAlpha = Math.max(0, this.muzzleFlashTimer / maxFlashTime);
       this.weaponRig.muzzleFlashGroup.visible = !this.state.suppressorAttached;
       this.weaponRig.muzzleLight.intensity = this.state.suppressorAttached
-        ? 1.2
-        : 6.5;
+        ? 2.2 * flashAlpha
+        : 15.5 * Math.pow(flashAlpha, 0.65);
     } else {
       this.weaponRig.muzzleFlashGroup.visible = false;
       this.weaponRig.muzzleLight.intensity = 0;
@@ -2712,9 +3070,13 @@ export class TacticalFPSEngine {
             false
           );
           const blockedByCover =
-            envHits.length > 0 &&
-            envHits[0].object.userData.isEnvironment &&
-            envHits[0].distance < distToPlayer - 0.5;
+            (envHits.length > 0 &&
+              envHits[0].object.userData.isEnvironment &&
+              envHits[0].distance < distToPlayer - 0.5) ||
+            this.grenadeSystem.isLineOfSightBlockedBySmoke(
+              _rayOrigin,
+              _worldPos
+            );
 
           if (!blockedByCover) {
             // Rotate bot gently toward player

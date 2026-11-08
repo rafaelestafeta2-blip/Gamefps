@@ -19,6 +19,7 @@ export type WeaponId =
   | 'SNIPER_TACTICAL';
 export type OpticType = 'holo' | 'lpvo' | 'iron';
 export type FireMode = 'SEMI' | 'BURST' | 'AUTO';
+export type GrenadeType = 'FRAG' | 'SMOKE';
 export type ReloadPhase =
   | 'IDLE'
   | 'MAG_OUT'
@@ -54,6 +55,10 @@ export interface HudState {
   currentMagRounds: number; // 0..30
   magCapacity: number; // 12, 30, or 100
   magazines: number[]; // e.g., [12, 12, 12, 12] in chest rig
+  fragGrenades: number; // Frag grenades count
+  smokeGrenades: number; // Smoke grenades count
+  equippedGrenade: GrenadeType | null; // Currently held grenade in player's hand
+  isThrowingGrenade: boolean;
   boltLockedBack: boolean;
   fireMode: FireMode;
   optic: OpticType;
