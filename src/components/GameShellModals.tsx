@@ -580,7 +580,7 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
 
   // PAUSED / VICTORY / GAME_OVER Modal
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#090b0e]/88 p-4 sm:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#090b0e]/88 p-4 sm:p-6 overflow-y-auto pointer-events-auto">
       {renderApkInstructionsModal()}
 
       <div className="bg-[#0e131b] border border-white/15 rounded-2xl p-5 sm:p-7 max-w-2xl w-full shadow-2xl space-y-4 my-auto">

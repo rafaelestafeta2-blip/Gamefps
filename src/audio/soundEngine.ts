@@ -21,6 +21,18 @@ export const M4A1_SHOT_WAV_LOCAL_URL =
 export const M4A1_SHOT_WAV_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/02108defabf18df9a79b33638bbee54f344eedff/assault-rifle-shot-1.wav';
 
+export const AK47_SHOT_WAV_LOCAL_URL = '/sounds/ak47_shot.wav';
+export const AK47_SHOT_WAV_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/fd19226e4612b67ce68f0651d5b003ba3a200a99/Sound/Ak47/855842__serutonin-deprivd__an-ak-47-being-shot-has-distinctive-metallic-kalashnikov-esque-report-punchy-sounding.wav';
+
+export const AK47_RELOAD_WAV_LOCAL_URL = '/sounds/ak47_reload.wav';
+export const AK47_RELOAD_WAV_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/fd19226e4612b67ce68f0651d5b003ba3a200a99/Sound/Ak47/674742__serutonin-deprivd__ak-47-assault-rifle-being-unloaded-and-reloaded.wav';
+
+export const AK47_BOLT_RACK_WAV_LOCAL_URL = '/sounds/ak47_bolt_rack.wav';
+export const AK47_BOLT_RACK_WAV_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/fd19226e4612b67ce68f0651d5b003ba3a200a99/Sound/Ak47/543597__dwightsabeast__ak-47-action-rack-4.wav';
+
 export const MENU_MUSIC_LOCAL_URL =
   '/sounds/menu_theme.m4a';
 export const MENU_MUSIC_GITHUB_RAW_URL =
@@ -104,6 +116,25 @@ class TacticalSoundEngine {
   private m4a1ShotDecoding = false;
   private m4a1ShotAudioPool: HTMLAudioElement[] = [];
   private m4a1ShotPoolIdx = 0;
+
+  // Real AK-47 Kalashnikov (7.62x39mm) Audio Samples (Punchy Shot, Mag Reload, Bolt Rack)
+  private ak47ShotRawData: ArrayBuffer | null = null;
+  private ak47ShotBuffer: AudioBuffer | null = null;
+  private ak47ShotDecoding = false;
+  private ak47ShotAudioPool: HTMLAudioElement[] = [];
+  private ak47ShotPoolIdx = 0;
+
+  private ak47ReloadRawData: ArrayBuffer | null = null;
+  private ak47ReloadBuffer: AudioBuffer | null = null;
+  private ak47ReloadDecoding = false;
+  private ak47ReloadAudioPool: HTMLAudioElement[] = [];
+  private ak47ReloadPoolIdx = 0;
+
+  private ak47BoltRackRawData: ArrayBuffer | null = null;
+  private ak47BoltRackBuffer: AudioBuffer | null = null;
+  private ak47BoltRackDecoding = false;
+  private ak47BoltRackAudioPool: HTMLAudioElement[] = [];
+  private ak47BoltRackPoolIdx = 0;
 
   // Real Dry-Fire Click Audio Sample
   private dryFireRawData: ArrayBuffer | null = null;
@@ -207,6 +238,7 @@ class TacticalSoundEngine {
     this.preloadM4a1ReloadSample();
     this.preloadM4a1ShotSample();
     this.preloadDryFireSample();
+    this.preloadAk47Samples();
     this.preloadSniperSamples();
     this.preloadGrenadeSamples();
     this.preloadMovementAndSwapSamples();
@@ -484,6 +516,7 @@ class TacticalSoundEngine {
       this.tryDecodeM4a1Shot(this.ctx);
     }
     if (this.ctx) {
+      this.tryDecodeAk47Samples(this.ctx);
       this.tryDecodeSniperSamples(this.ctx);
       this.tryDecodeGrenadeSamples(this.ctx);
       this.tryDecodeMovementAndSwapSamples(this.ctx);
@@ -497,6 +530,126 @@ class TacticalSoundEngine {
       }
     }
     return this.ctx;
+  }
+
+  private preloadAk47Samples(): void {
+    // 1. AK-47 Shot WAV (Punchy Kalashnikov report)
+    for (let i = 0; i < 4; i++) {
+      const audio = new Audio(AK47_SHOT_WAV_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = AK47_SHOT_WAV_GITHUB_RAW_URL;
+      };
+      this.ak47ShotAudioPool.push(audio);
+    }
+    fetch(AK47_SHOT_WAV_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local AK47 shot WAV fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(AK47_SHOT_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.ak47ShotRawData = buf;
+        if (this.ctx) this.tryDecodeAk47Samples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 2. AK-47 Mag Reload WAV (Unload and reload)
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(AK47_RELOAD_WAV_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = AK47_RELOAD_WAV_GITHUB_RAW_URL;
+      };
+      this.ak47ReloadAudioPool.push(audio);
+    }
+    fetch(AK47_RELOAD_WAV_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local AK47 reload WAV fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(AK47_RELOAD_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.ak47ReloadRawData = buf;
+        if (this.ctx) this.tryDecodeAk47Samples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 3. AK-47 Action Bolt Rack WAV (Metallic charging handle rack)
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(AK47_BOLT_RACK_WAV_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = AK47_BOLT_RACK_WAV_GITHUB_RAW_URL;
+      };
+      this.ak47BoltRackAudioPool.push(audio);
+    }
+    fetch(AK47_BOLT_RACK_WAV_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local AK47 bolt rack WAV fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(AK47_BOLT_RACK_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.ak47BoltRackRawData = buf;
+        if (this.ctx) this.tryDecodeAk47Samples(this.ctx);
+      })
+      .catch(() => {});
+  }
+
+  private tryDecodeAk47Samples(ctx: AudioContext): void {
+    if (!this.ak47ShotBuffer && !this.ak47ShotDecoding && this.ak47ShotRawData) {
+      this.ak47ShotDecoding = true;
+      ctx
+        .decodeAudioData(this.ak47ShotRawData.slice(0))
+        .then((decoded) => {
+          this.ak47ShotBuffer = decoded;
+          this.ak47ShotDecoding = false;
+        })
+        .catch(() => {
+          this.ak47ShotDecoding = false;
+        });
+    }
+
+    if (
+      !this.ak47ReloadBuffer &&
+      !this.ak47ReloadDecoding &&
+      this.ak47ReloadRawData
+    ) {
+      this.ak47ReloadDecoding = true;
+      ctx
+        .decodeAudioData(this.ak47ReloadRawData.slice(0))
+        .then((decoded) => {
+          this.ak47ReloadBuffer = decoded;
+          this.ak47ReloadDecoding = false;
+        })
+        .catch(() => {
+          this.ak47ReloadDecoding = false;
+        });
+    }
+
+    if (
+      !this.ak47BoltRackBuffer &&
+      !this.ak47BoltRackDecoding &&
+      this.ak47BoltRackRawData
+    ) {
+      this.ak47BoltRackDecoding = true;
+      ctx
+        .decodeAudioData(this.ak47BoltRackRawData.slice(0))
+        .then((decoded) => {
+          this.ak47BoltRackBuffer = decoded;
+          this.ak47BoltRackDecoding = false;
+        })
+        .catch(() => {
+          this.ak47BoltRackDecoding = false;
+        });
+    }
   }
 
   private preloadSniperSamples(): void {
@@ -839,7 +992,44 @@ class TacticalSoundEngine {
       return;
     }
 
-    // 3. REAL SNIPER RIFLE (.338 LAPUA / .308 WIN) WAV SAMPLE FOR SNIPER_BOLT & SNIPER_TACTICAL
+    // 3. REAL AK-47 KALASHNIKOV (7.62X39MM) PUNCHY METALLIC WAV SAMPLE FOR AK47_RIFLE
+    if (weaponId === 'AK47_RIFLE') {
+      if (this.ak47ShotBuffer) {
+        const src = ctx.createBufferSource();
+        src.buffer = this.ak47ShotBuffer;
+        // Subtle organic pitch variation per shot
+        src.playbackRate.setValueAtTime(0.98 + Math.random() * 0.04, now);
+
+        const gain = ctx.createGain();
+        if (suppressed) {
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.setValueAtTime(1350, now);
+          gain.gain.setValueAtTime(0.62, now);
+          src.connect(lp);
+          lp.connect(gain);
+        } else {
+          gain.gain.setValueAtTime(1.0, now);
+          src.connect(gain);
+        }
+        gain.connect(ctx.destination);
+        src.start(now);
+      } else if (this.ak47ShotAudioPool.length > 0) {
+        const el = this.ak47ShotAudioPool[this.ak47ShotPoolIdx];
+        this.ak47ShotPoolIdx =
+          (this.ak47ShotPoolIdx + 1) % this.ak47ShotAudioPool.length;
+        el.currentTime = 0;
+        el.volume = suppressed ? 0.62 : 1.0;
+        el.play().catch(() => {});
+      }
+
+      if (boltLockedBackAfterShot) {
+        this.playAk47BoltRack();
+      }
+      return;
+    }
+
+    // 4. REAL SNIPER RIFLE (.338 LAPUA / .308 WIN) WAV SAMPLE FOR SNIPER_BOLT & SNIPER_TACTICAL
     if (weaponId === 'SNIPER_BOLT' || weaponId === 'SNIPER_TACTICAL') {
       if (this.sniperShotBuffer) {
         const src = ctx.createBufferSource();
@@ -1106,6 +1296,68 @@ class TacticalSoundEngine {
     }
   }
 
+  public playAk47FullReload(isDry = false): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.ak47ReloadBuffer) {
+      const source = ctx.createBufferSource();
+      source.buffer = this.ak47ReloadBuffer;
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(1.0, ctx.currentTime);
+      source.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      source.start();
+    } else if (this.ak47ReloadAudioPool.length > 0) {
+      const el = this.ak47ReloadAudioPool[this.ak47ReloadPoolIdx];
+      this.ak47ReloadPoolIdx =
+        (this.ak47ReloadPoolIdx + 1) % this.ak47ReloadAudioPool.length;
+      el.currentTime = 0;
+      el.volume = 1.0;
+      el.play().catch(() => {});
+    }
+
+    if (isDry) {
+      setTimeout(() => {
+        if (!this.muted) {
+          this.playAk47BoltRack();
+        }
+      }, 1550);
+    }
+  }
+
+  public playAk47BoltRack(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.ak47BoltRackBuffer) {
+      const source = ctx.createBufferSource();
+      source.buffer = this.ak47BoltRackBuffer;
+      source.playbackRate.setValueAtTime(
+        0.985 + Math.random() * 0.03,
+        ctx.currentTime
+      );
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(1.0, ctx.currentTime);
+      source.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      source.start();
+      return;
+    }
+
+    if (this.ak47BoltRackAudioPool.length > 0) {
+      const el = this.ak47BoltRackAudioPool[this.ak47BoltRackPoolIdx];
+      this.ak47BoltRackPoolIdx =
+        (this.ak47BoltRackPoolIdx + 1) % this.ak47BoltRackAudioPool.length;
+      el.currentTime = 0;
+      el.volume = 1.0;
+      el.play().catch(() => {});
+      return;
+    }
+
+    this.playReloadStage('CHARGING_HANDLE');
+  }
+
   public playReloadStage(stage: 'MAG_OUT' | 'MAG_DROP_FLOOR' | 'MAG_IN' | 'BOLT_SLAP' | 'CHARGING_HANDLE'): void {
     const ctx = this.ensureContext();
     if (!ctx || !this.noiseBuffer) return;
@@ -1327,6 +1579,87 @@ class TacticalSoundEngine {
       osc.start(now);
       osc.stop(now + 0.06);
     }
+  }
+
+  public playKnifeSlash(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const pitchVar = 0.94 + Math.random() * 0.14;
+
+    // 1. Air slicing noise burst
+    if (this.noiseBuffer) {
+      const noise = ctx.createBufferSource();
+      noise.buffer = this.noiseBuffer;
+      const bpf = ctx.createBiquadFilter();
+      bpf.type = 'bandpass';
+      bpf.Q.setValueAtTime(3.2, now);
+      bpf.frequency.setValueAtTime(700 * pitchVar, now);
+      bpf.frequency.exponentialRampToValueAtTime(2200 * pitchVar, now + 0.055);
+      bpf.frequency.exponentialRampToValueAtTime(450 * pitchVar, now + 0.16);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.68, now + 0.035);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.17);
+
+      noise.connect(bpf);
+      bpf.connect(gain);
+      gain.connect(ctx.destination);
+      noise.start(now);
+      noise.stop(now + 0.18);
+    }
+
+    // 2. High-speed blade friction whistle
+    const osc = ctx.createOscillator();
+    const oscGain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(580 * pitchVar, now);
+    osc.frequency.exponentialRampToValueAtTime(1450 * pitchVar, now + 0.045);
+    osc.frequency.exponentialRampToValueAtTime(320 * pitchVar, now + 0.14);
+
+    oscGain.gain.setValueAtTime(0.001, now);
+    oscGain.gain.linearRampToValueAtTime(0.18, now + 0.03);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+    osc.connect(oscGain);
+    oscGain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.16);
+  }
+
+  public playKnifeHit(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // 1. Meat slice & flesh penetration thud
+    const oscThud = ctx.createOscillator();
+    const gainThud = ctx.createGain();
+    oscThud.type = 'triangle';
+    oscThud.frequency.setValueAtTime(260, now);
+    oscThud.frequency.exponentialRampToValueAtTime(55, now + 0.09);
+    gainThud.gain.setValueAtTime(0.42, now);
+    gainThud.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+    oscThud.connect(gainThud);
+    gainThud.connect(ctx.destination);
+    oscThud.start(now);
+    oscThud.stop(now + 0.12);
+
+    // 2. Sharp blade edge bite
+    const oscSlice = ctx.createOscillator();
+    const gainSlice = ctx.createGain();
+    oscSlice.type = 'sawtooth';
+    oscSlice.frequency.setValueAtTime(1950, now);
+    oscSlice.frequency.exponentialRampToValueAtTime(420, now + 0.06);
+    gainSlice.gain.setValueAtTime(0.24, now);
+    gainSlice.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+    oscSlice.connect(gainSlice);
+    gainSlice.connect(ctx.destination);
+    oscSlice.start(now);
+    oscSlice.stop(now + 0.075);
   }
 
   public playEnemyTelegraph(): void {

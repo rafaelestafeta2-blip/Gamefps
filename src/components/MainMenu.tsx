@@ -66,6 +66,11 @@ const WEAPON_DISPLAY_NAMES: Record<
     caliber: '.338 Lapua',
     category: 'Fuzil de Precisão',
   },
+  KNIFE_TACTICAL: {
+    name: 'FACA TÁTICA COMBATE',
+    caliber: 'Aço Carbono',
+    category: 'Lâmina Corpo a Corpo',
+  },
 };
 
 export const MainMenu: React.FC<MainMenuProps> = ({

@@ -247,6 +247,24 @@ export function buildPreProductionLevel(
     levelGroup.add(markerBar);
   });
 
+  // -------------------------------------------------------------------------
+  // 3.1 TACTICAL DRILL OBSTACLES: JUMP HURDLE & SLIDE-UNDER CLEARANCE
+  // -------------------------------------------------------------------------
+  // Obstacle A: Low Vault/Jump Barrier Hurdle (0.88m height, requires Jump to cross)
+  // Located at X: -7.0, Z: -6.0
+  addArchitectureBlock(-7.0, 0, -6.0, 4.2, 0.88, 0.38, matHazardCover);
+  // Hurdle side steel support posts
+  addArchitectureBlock(-9.25, 0, -6.0, 0.32, 1.15, 0.42, matDarkSteel);
+  addArchitectureBlock(-4.75, 0, -6.0, 0.32, 1.15, 0.42, matDarkSteel);
+
+  // Obstacle B: Slide-Under Overhead Clearance Barrier (requires Slide or Crouch to pass)
+  // Located at X: -7.0, Z: -11.0. Bottom of beam is at 1.12m above ground (1.12m - 2.62m).
+  // Standing player (1.70m) collides; sliding player (0.86m) or crouching (1.08m) slides underneath!
+  addArchitectureBlock(-7.0, 1.12, -11.0, 4.2, 1.5, 0.4, matHazardCover);
+  // Side support pillars leaving clear 4.2m passageway in between
+  addArchitectureBlock(-9.25, 0, -11.0, 0.35, 2.7, 0.45, matDarkSteel);
+  addArchitectureBlock(-4.75, 0, -11.0, 0.35, 2.7, 0.45, matDarkSteel);
+
   // Divider Wall between Calibration Range (West) and CQB Killhouse (East)
   addArchitectureBlock(2.5, 0, -10, 0.6, 4.0, 16, matWallBase);
   addArchitectureBlock(2.5, 0, -38, 0.6, 4.0, 26, matWallBase);
@@ -521,6 +539,16 @@ export function buildPreProductionLevel(
         const stock = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.09, 0.028), matMetal);
         stock.position.set(-0.25, -0.01, 0);
         g.add(rec, barrel, suppressor, scope, mag, grip, stock);
+        break;
+      }
+      case 'KNIFE_TACTICAL': {
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.01), matMetal);
+        blade.position.set(0.08, 0, 0);
+        const guard = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.08, 0.016), matMetal);
+        guard.position.set(-0.03, 0, 0);
+        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.032, 0.02), matAccent);
+        grip.position.set(-0.1, 0, 0);
+        g.add(blade, guard, grip);
         break;
       }
     }

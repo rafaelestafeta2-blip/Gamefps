@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OpticType, ReloadPhase, WeaponId } from '../types/game';
 import { ProceduralTextures } from './textures';
+import { WeaponAttachmentSystem } from './attachmentSystem';
 
 // Direct GitHub Raw URLs & bundled local mirrors for all 8 animated 3D FPS weapons and Arms Rig
 export const MARK_23_GITHUB_RAW_URL =
@@ -42,6 +43,10 @@ export const SNIPER_TACTICAL_LOCAL_URL = '/models/sniper_fps_animation.glb';
 export const ARMS_RIG_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/03ecdb098c01e77ffdab4d819cc7f5aa43eafda0/arms_rig.glb';
 export const ARMS_RIG_LOCAL_URL = '/models/arms_rig.glb';
+
+export const KNIFE_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cfac55452b306860453fb3785c4c485a322faa8a/knife_animated%20(1).glb';
+export const KNIFE_LOCAL_URL = '/models/knife_animated.glb';
 
 export interface TacticalWeaponRig {
   root: THREE.Group;
@@ -88,6 +93,7 @@ export interface TacticalWeaponRig {
   muzzleWorldPos: THREE.Object3D;
   laserOriginWorldPos: THREE.Object3D;
   armsRigContainer: THREE.Group;
+  attachmentSystem: WeaponAttachmentSystem;
 }
 
 const _ikShoulderWorld = new THREE.Vector3();
@@ -923,7 +929,10 @@ export function buildTacticalWeaponRig(
     })
   );
   peqLaserBeam.position.copy(laserOriginWorldPos.position);
+  peqLaserBeam.visible = false;
   weaponMotionAnchor.add(peqLaserBeam);
+
+  const attachmentSystem = new WeaponAttachmentSystem(weaponMotionAnchor);
 
   // -------------------------------------------------------------------------
   // 3. MODULAR OPTICS SUITE (LOCKED TO WEAPON MOTION ANCHOR)
@@ -1500,6 +1509,26 @@ export function buildTacticalWeaponRig(
         Holster: [5.8, 6.8],
       },
     }),
+
+    // [9] Combat Tactical Knife (`knife_animated.glb`) — Built-in animated hands & slash/draw
+    KNIFE_TACTICAL: createAnimatedWeaponEntry({
+      weaponId: 'KNIFE_TACTICAL',
+      localUrl: KNIFE_LOCAL_URL,
+      githubUrl: KNIFE_GITHUB_RAW_URL,
+      scale: 0.01,
+      rotY: Math.PI,
+      pos: [-0.012, -0.092, 0.055],
+      mainBoneName: 'knife',
+      mainBoneScale: 0.01,
+      subclipWindows: {
+        Idle: [0.0, 1.33],
+        Fire: [1.33, 2.0],
+        Reload: [2.67, 4.13],
+        Reload_Empty: [2.67, 4.13],
+        Draw: [4.2, 4.83],
+        Holster: [4.2, 4.53],
+      },
+    }),
   };
 
   // =========================================================================
@@ -1665,6 +1694,7 @@ export function buildTacticalWeaponRig(
     weaponMotionAnchor.position.set(0, 0, 0);
     weaponMotionAnchor.quaternion.identity();
     configureWeaponAnchors(weaponId);
+    attachmentSystem.updateWeaponAlignment(weaponId);
 
     playWeaponPackAction(activeEntry, 'Draw', undefined, 1.15);
   };
@@ -1862,6 +1892,7 @@ export function buildTacticalWeaponRig(
     muzzleWorldPos,
     laserOriginWorldPos,
     armsRigContainer,
+    attachmentSystem,
   };
 }
 
@@ -1921,6 +1952,12 @@ export function getOpticAdsTransform(
   if (activeWeapon === 'SNIPER_BOLT' || activeWeapon === 'SNIPER_TACTICAL') {
     return {
       pos: new THREE.Vector3(0, -0.046, -0.2),
+      rotZ: 0,
+    };
+  }
+  if (activeWeapon === 'KNIFE_TACTICAL') {
+    return {
+      pos: new THREE.Vector3(0, -0.02, -0.06),
       rotZ: 0,
     };
   }

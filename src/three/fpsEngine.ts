@@ -174,7 +174,9 @@ export class TacticalFPSEngine {
     lpvoZoom: 2.0,
     cantedActive: false,
     suppressorAttached: false,
-    laserActive: true,
+    muzzleDevice: 'NONE',
+    weaponCharm: 'NONE',
+    laserActive: false,
     reloadPhase: 'IDLE',
     reloadProgress: 0,
     reloadTypeLabel: '',
@@ -376,6 +378,7 @@ export class TacticalFPSEngine {
       new THREE.SphereGeometry(0.016, 8, 8),
       new THREE.MeshBasicMaterial({ color: 0x10b981 })
     );
+    this.laserDotMesh.visible = false;
     this.scene.add(this.laserDotMesh);
 
     // Pre-warm shaders on GPU
@@ -510,13 +513,69 @@ export class TacticalFPSEngine {
   }
 
   public toggleSuppressor(): void {
-    this.state.suppressorAttached = !this.state.suppressorAttached;
-    this.weaponRig.suppressorGroup.visible = this.state.suppressorAttached;
-    this.state.reloadTypeLabel = this.state.suppressorAttached
-      ? 'SUPRESSOR ACÚSTICO ACOPLADO'
-      : 'SUPRESSOR ACÚSTICO REMOVIDO';
-    this.magCheckTimer = 1.6;
-    soundEngine.playMechanicalSwitch(0.8);
+    if (this.state.activeWeapon === 'KNIFE_TACTICAL') {
+      soundEngine.playMechanicalSwitch(0.7);
+      return;
+    }
+
+    const order: Array<typeof this.state.muzzleDevice> = [
+      'NONE',
+      'SL01_LONG',
+      'SC01_SHORT',
+      'FH01_FLASH_HIDER',
+      'MB01_BRAKE',
+      'MC01_COMPENSATOR',
+    ];
+    const currIdx = order.indexOf(this.state.muzzleDevice);
+    const nextIdx = (currIdx + 1) % order.length;
+    const nextMuzzle = order[nextIdx];
+
+    this.state.muzzleDevice = nextMuzzle;
+    this.weaponRig.attachmentSystem.setMuzzle(nextMuzzle);
+
+    // Suppressor ballistic flags: SL01 and SC01 act as sound suppressors
+    this.state.suppressorAttached =
+      nextMuzzle === 'SL01_LONG' || nextMuzzle === 'SC01_SHORT';
+
+    const labels: Record<typeof nextMuzzle, string> = {
+      NONE: 'DISPOSITIVO DE BOCA REMOVIDO (CANO ORIGINAL)',
+      SL01_LONG: 'SUPRESSOR SL01 SLIM LONGO ACOPLADO (.GLB REAL)',
+      SC01_SHORT: 'SUPRESSOR SC01 CQB CURTO ACOPLADO (.GLB REAL)',
+      FH01_FLASH_HIDER: 'QUEBRA-CHAMAS FH01 PETAL ACOPLADO (.GLB REAL)',
+      MB01_BRAKE: 'FREIO DE BOCA MB01 CUT ACOPLADO (.GLB REAL)',
+      MC01_COMPENSATOR: 'COMPENSADOR COMPACTO MC01 ACOPLADO (.GLB REAL)',
+    };
+
+    this.state.reloadTypeLabel = labels[nextMuzzle];
+    this.magCheckTimer = 2.0;
+    soundEngine.playMechanicalSwitch(0.85);
+    this.emitHud();
+  }
+
+  public cycleWeaponCharm(): void {
+    const order: Array<typeof this.state.weaponCharm> = [
+      'NONE',
+      'HONEY_CUB',
+      'MICRO_TERMINAL',
+      'STARDROP_TEAL',
+    ];
+    const currIdx = order.indexOf(this.state.weaponCharm);
+    const nextIdx = (currIdx + 1) % order.length;
+    const nextCharm = order[nextIdx];
+
+    this.state.weaponCharm = nextCharm;
+    this.weaponRig.attachmentSystem.setCharm(nextCharm);
+
+    const labels: Record<typeof nextCharm, string> = {
+      NONE: 'PINGENTE TÁTICO REMOVIDO',
+      HONEY_CUB: 'PINGENTE 3D: URSINHO HONEY CUB ACOPLADO',
+      MICRO_TERMINAL: 'PINGENTE 3D: MICRO TERMINAL CYBER ACOPLADO',
+      STARDROP_TEAL: 'PINGENTE 3D: STARDROP SMOKE TEAL ACOPLADO',
+    };
+
+    this.state.reloadTypeLabel = labels[nextCharm];
+    this.magCheckTimer = 2.0;
+    soundEngine.playMechanicalSwitch(1.15);
     this.emitHud();
   }
 
@@ -554,7 +613,10 @@ export class TacticalFPSEngine {
       this.selectWeapon(this.state.activeWeapon);
       return;
     }
-    if (this.state.activeWeapon === 'P50_PISTOL') {
+    if (
+      this.state.activeWeapon === 'P50_PISTOL' ||
+      this.state.activeWeapon === 'KNIFE_TACTICAL'
+    ) {
       this.selectWeapon(this.primaryWeapon);
     } else {
       this.selectWeapon('P50_PISTOL');
@@ -566,7 +628,7 @@ export class TacticalFPSEngine {
     this.state.equippedGrenade = null;
     if (weaponId === 'P50_PISTOL') {
       this.secondaryWeapon = 'P50_PISTOL';
-    } else {
+    } else if (weaponId !== 'KNIFE_TACTICAL') {
       this.primaryWeapon = weaponId;
     }
     this.state.primaryWeapon = this.primaryWeapon;
@@ -646,6 +708,14 @@ export class TacticalFPSEngine {
         this.setOptic('iron');
         this.state.reloadTypeLabel = 'EQUIPADO: SNIPER TÁTICA (.308 WIN)';
         break;
+      case 'KNIFE_TACTICAL':
+        this.state.magCapacity = 1;
+        this.state.currentMagRounds = 1;
+        this.state.magazines = [1];
+        this.state.fireMode = 'SEMI';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: FACA TÁTICA COMBATE';
+        break;
     }
 
     this.magCheckTimer = 1.8;
@@ -676,6 +746,7 @@ export class TacticalFPSEngine {
       L49_LMG: 'INSPECIONANDO LMG PESADA (5.56MM)',
       SNIPER_BOLT: 'INSPECIONANDO SNIPER BOLT-ACTION (.338 LAPUA)',
       SNIPER_TACTICAL: 'INSPECIONANDO SNIPER TÁTICA (.308 WIN)',
+      KNIFE_TACTICAL: 'INSPECIONANDO FACA TÁTICA DE COMBATE',
     };
     this.state.reloadTypeLabel = names[this.state.activeWeapon];
     this.magCheckTimer = 2.4;
@@ -750,7 +821,7 @@ export class TacticalFPSEngine {
   public useEquippedGrenade(): void {
     if (this.state.screen !== 'PLAYING') return;
     if (!this.state.equippedGrenade || this.grenadeSystem.isThrowing()) return;
-    if (performance.now() - this.lastGrenadeEquipTime < 280) return;
+    if (performance.now() - this.lastGrenadeEquipTime < 100) return;
 
     const type = this.state.equippedGrenade;
     if (this.grenadeSystem.triggerPinPullAndThrow()) {
@@ -1325,6 +1396,9 @@ export class TacticalFPSEngine {
       case 'KeyX':
         this.toggleSuppressor();
         break;
+      case 'KeyK':
+        this.cycleWeaponCharm();
+        break;
       case 'KeyL':
         this.toggleLaser();
         break;
@@ -1355,10 +1429,10 @@ export class TacticalFPSEngine {
         this.selectWeapon('P50_PISTOL');
         break;
       case 'Digit3':
-        this.selectWeapon('M4_CARBINE');
+        this.selectWeapon('KNIFE_TACTICAL');
         break;
       case 'Digit4':
-        this.selectWeapon('CARBINE_AR');
+        this.selectWeapon('M4_CARBINE');
         break;
       case 'Digit5':
         this.selectWeapon('AK47_RIFLE');
@@ -1609,6 +1683,11 @@ export class TacticalFPSEngine {
       return;
     }
 
+    if (this.state.activeWeapon === 'KNIFE_TACTICAL') {
+      this.triggerWeaponInspect();
+      return;
+    }
+
     // Do not allow reload if current magazine is already 100% full and a round is chambered
     if (
       this.state.currentMagRounds === this.state.magCapacity &&
@@ -1656,6 +1735,9 @@ export class TacticalFPSEngine {
     ) {
       this.reloadDuration = 2.75;
       soundEngine.playM4a1FullReload();
+    } else if (this.state.activeWeapon === 'AK47_RIFLE') {
+      this.reloadDuration = dryReload ? 2.5 : 2.0;
+      soundEngine.playAk47FullReload(dryReload);
     } else if (
       this.state.activeWeapon === 'SNIPER_BOLT' ||
       this.state.activeWeapon === 'SNIPER_TACTICAL'
@@ -1703,7 +1785,9 @@ export class TacticalFPSEngine {
     this.state.reloadTypeLabel = this.state.boltLockedBack
       ? 'LIBERANDO FERROLHO [G]'
       : 'MANOBRANDO ALAVANCA DE MANEJO [G]';
-    if (
+    if (this.state.activeWeapon === 'AK47_RIFLE') {
+      soundEngine.playAk47BoltRack();
+    } else if (
       this.state.activeWeapon === 'SNIPER_BOLT' ||
       this.state.activeWeapon === 'SNIPER_TACTICAL'
     ) {
@@ -1823,6 +1907,70 @@ export class TacticalFPSEngine {
   }
 
   private executeSingleShot(): void {
+    if (this.state.activeWeapon === 'KNIFE_TACTICAL') {
+      this.fireCooldown = 0.52;
+      this.state.shotsFired += 1;
+      this.weaponRig.triggerFireAnimation(false);
+      soundEngine.playKnifeSlash();
+      mobileHardware.vibrateKnifeSlash();
+
+      this.yawObject.rotation.y = this.yaw;
+      this.pitchObject.rotation.x = this.pitch;
+      this.camera.updateMatrixWorld(true);
+
+      this.camera.getWorldPosition(_rayOrigin);
+      this.camera.getWorldDirection(_rayDir);
+      this.raycaster.set(_rayOrigin, _rayDir);
+      this.raycaster.far = 2.4;
+
+      const hits = this.raycaster.intersectObjects(this.shootableMeshes, false);
+      if (hits.length > 0) {
+        const hit = hits[0];
+        const hitMesh = hit.object as THREE.Mesh;
+        const wallWeaponId = hitMesh.userData.wallWeaponId as
+          | WeaponId
+          | undefined;
+        if (wallWeaponId) {
+          this.selectWeapon(wallWeaponId);
+          return;
+        }
+
+        const targetId = hitMesh.userData.targetId as string | undefined;
+        if (targetId) {
+          soundEngine.playKnifeHit();
+          mobileHardware.vibrateKnifeHit();
+          this.state.hitMarkerAlpha = 1.0;
+          this.state.hitMarkerIsCrit = true;
+          _hitNormal.set(0, 1, 0);
+          this.handleTargetHit(
+            targetId,
+            'HEAD',
+            hit.distance,
+            hit.point,
+            _hitNormal
+          );
+        } else {
+          soundEngine.playKnifeHit();
+          _hitNormal.set(0, 1, 0);
+          this.fxPool.spawnImpactFX(hit.point, _hitNormal, false, false);
+        }
+      }
+      this.emitHud();
+      return;
+    }
+
+    // Safety check: weapon cannot fire if chamber is empty
+    if (this.state.chambered === 0) {
+      this.burstRemaining = 0;
+      soundEngine.playDryFire();
+      if (this.state.currentMagRounds <= 0) {
+        this.triggerReload(false);
+      } else {
+        this.triggerManualBoltRack();
+      }
+      return;
+    }
+
     const isSniper =
       this.state.activeWeapon === 'SNIPER_BOLT' ||
       this.state.activeWeapon === 'SNIPER_TACTICAL';
@@ -2281,14 +2429,33 @@ export class TacticalFPSEngine {
     }
     if (this.fireCooldown <= 0) {
       if (this.burstRemaining > 0) {
-        this.executeSingleShot();
+        if (this.state.chambered === 0 && this.state.activeWeapon !== 'KNIFE_TACTICAL') {
+          this.burstRemaining = 0;
+          soundEngine.playDryFire();
+          if (this.state.currentMagRounds <= 0) {
+            this.triggerReload(false);
+          } else {
+            this.triggerManualBoltRack();
+          }
+        } else {
+          this.executeSingleShot();
+        }
       } else if (
         this.state.fireMode === 'AUTO' &&
         (this.mouseButtonsHeld.has(0) || this.touchFireHeld) &&
         this.state.reloadPhase === 'IDLE' &&
         !this.grenadeSystem.isBusyOrHolding()
       ) {
-        this.executeSingleShot();
+        if (this.state.chambered === 0 && this.state.activeWeapon !== 'KNIFE_TACTICAL') {
+          soundEngine.playDryFire();
+          if (this.state.currentMagRounds <= 0) {
+            this.triggerReload(false);
+          } else {
+            this.triggerManualBoltRack();
+          }
+        } else {
+          this.executeSingleShot();
+        }
       }
     }
 
@@ -2601,13 +2768,33 @@ export class TacticalFPSEngine {
 
     const wasGrounded = this.isGrounded;
     this.playerPos.y += this.playerVel.y * dt;
-    if (this.playerPos.y <= 0) {
+
+    // Find highest walkable ground underneath player (ground 0 or top surface of an obstacle)
+    let groundHeight = 0;
+    for (let i = 0; i < this.colliders.length; i++) {
+      const c = this.colliders[i];
+      if (
+        this.playerPos.x + radius > c.minX &&
+        this.playerPos.x - radius < c.maxX &&
+        this.playerPos.z + radius > c.minZ &&
+        this.playerPos.z - radius < c.maxZ
+      ) {
+        // If player is above or close to the top of collider and falling down onto it
+        if (this.playerPos.y >= c.maxY - 0.28 && c.maxY > groundHeight && c.maxY <= 1.6) {
+          groundHeight = c.maxY;
+        }
+      }
+    }
+
+    if (this.playerPos.y <= groundHeight) {
       if (!wasGrounded && this.playerVel.y < -2.0) {
         this.landingDipVel = Math.max(this.playerVel.y * 0.03, -0.12);
         soundEngine.playFootstep(true, false);
       }
-      this.playerPos.y = 0;
+      this.playerPos.y = groundHeight;
       this.playerVel.y = 0;
+      this.isGrounded = true;
+    } else if (groundHeight > 0 && Math.abs(this.playerPos.y - groundHeight) < 0.05) {
       this.isGrounded = true;
     }
 
@@ -2666,10 +2853,18 @@ export class TacticalFPSEngine {
     yBottom: number,
     r: number
   ): boolean {
-    const playerTop = yBottom + 1.7;
+    const currentHeight =
+      this.state.stance === 'SLIDE'
+        ? 0.90
+        : this.state.stance === 'PRONE'
+          ? 0.45
+          : this.state.stance === 'CROUCH'
+            ? 1.10
+            : 1.72;
+    const playerTop = yBottom + currentHeight;
     for (let i = 0; i < this.colliders.length; i++) {
       const c = this.colliders[i];
-      if (playerTop <= c.minY || yBottom >= c.maxY) continue;
+      if (playerTop <= c.minY || yBottom >= c.maxY - 0.04) continue;
       if (
         x + r > c.minX &&
         x - r < c.maxX &&
@@ -2751,7 +2946,8 @@ export class TacticalFPSEngine {
     }
 
     // 3. Green Laser Beam & World Impact Dot
-    if (this.state.laserActive) {
+    if (this.state.laserActive && this.state.activeWeapon !== 'KNIFE_TACTICAL') {
+      this.weaponRig.peqLaserBeam.visible = true;
       const laserDist = aimHits.length > 0 ? aimHits[0].distance : 45.0;
       this.weaponRig.peqLaserBeam.scale.set(1, 1, Math.max(0.2, laserDist));
       if (aimHits.length > 0) {
@@ -2763,6 +2959,7 @@ export class TacticalFPSEngine {
         this.laserDotMesh.visible = false;
       }
     } else {
+      this.weaponRig.peqLaserBeam.visible = false;
       this.laserDotMesh.visible = false;
     }
 

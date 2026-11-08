@@ -16,7 +16,8 @@ export type WeaponId =
   | 'AK47_RIFLE'
   | 'L49_LMG'
   | 'SNIPER_BOLT'
-  | 'SNIPER_TACTICAL';
+  | 'SNIPER_TACTICAL'
+  | 'KNIFE_TACTICAL';
 export type OpticType = 'holo' | 'lpvo' | 'iron';
 export type FireMode = 'SEMI' | 'BURST' | 'AUTO';
 export type GrenadeType = 'FRAG' | 'SMOKE';
@@ -65,6 +66,14 @@ export interface HudState {
   lpvoZoom: number; // 1.0 to 4.0
   cantedActive: boolean;
   suppressorAttached: boolean;
+  muzzleDevice:
+    | 'NONE'
+    | 'SL01_LONG'
+    | 'SC01_SHORT'
+    | 'FH01_FLASH_HIDER'
+    | 'MB01_BRAKE'
+    | 'MC01_COMPENSATOR';
+  weaponCharm: 'NONE' | 'HONEY_CUB' | 'MICRO_TERMINAL' | 'STARDROP_TEAL';
   laserActive: boolean;
   reloadPhase: ReloadPhase;
   reloadProgress: number; // 0..1

@@ -24,6 +24,8 @@ import {
   SNIPER_BOLT_LOCAL_URL,
   SNIPER_TACTICAL_GITHUB_RAW_URL,
   SNIPER_TACTICAL_LOCAL_URL,
+  KNIFE_GITHUB_RAW_URL,
+  KNIFE_LOCAL_URL,
 } from '../three/weaponBuilder';
 import { WeaponId } from '../types/game';
 import { WarfaceRankIcon } from './WarfaceRankIcon';
@@ -227,6 +229,27 @@ const WEAPON_SPECS: Record<WeaponId, WeaponSpec> = {
     readyClipName: 'Shoot',
     readyPoseTime: 0,
     targetSpan: 0.52,
+  },
+  KNIFE_TACTICAL: {
+    id: 'KNIFE_TACTICAL',
+    name: 'FACA TÁTICA COMBATE',
+    caliber: 'Aço Carbono Militar 8Cr13MoV',
+    categoryTag: 'Lâmina Corpo a Corpo',
+    category: 'PISTOLA',
+    description:
+      'Lâmina tática militar com empunhadura ergonômica e quebra-vidro no pomo. Ataque corpo a corpo silencioso com letalidade extrema a curta distância.',
+    firepower: 100,
+    accuracy: 100,
+    mobility: 100,
+    range: '2.4m',
+    fireRate: 'Manual',
+    magSize: 1,
+    reserve: 0,
+    localUrl: KNIFE_LOCAL_URL,
+    githubUrl: KNIFE_GITHUB_RAW_URL,
+    readyClipName: 'anims',
+    readyPoseTime: 0,
+    targetSpan: 0.42,
   },
 };
 

@@ -63,6 +63,14 @@ export class MobileHardwareManager {
     }
   }
 
+  public vibrateKnifeSlash(): void {
+    this.triggerVibrate(12);
+  }
+
+  public vibrateKnifeHit(): void {
+    this.triggerVibrate([28, 30, 42]);
+  }
+
   public vibrateDamage(): void {
     this.triggerVibrate([50, 35, 65]);
   }

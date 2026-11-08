@@ -719,7 +719,7 @@ export class TacticalGrenadeSystem {
 
     this.heldGrenadeType = type;
     this.holdIdleTime = 0;
-    this.equipCooldownTimer = 0.25;
+    this.equipCooldownTimer = 0.08;
     this.projectileLaunchedInSequence = false;
     this.viewmodelGroup.visible = true;
     this.handRig.grenadeSocket.visible = true;

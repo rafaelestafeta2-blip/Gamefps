@@ -23,8 +23,8 @@ export const WARFACE_RANKS: RankDefinition[] = [
     badgeColor: '#10b981',
     category: 'INICIANTE',
     requiredXp: 0,
-    unlockRewardLabel: 'Equipamentos Iniciais: Mark 23, M4A1 SOPMOD, Mira de Ferro',
-    unlockedWeapons: ['P50_PISTOL', 'M4_CARBINE'],
+    unlockRewardLabel: 'Equipamentos Iniciais: Mark 23, M4A1 SOPMOD, Faca Tática, Mira de Ferro',
+    unlockedWeapons: ['P50_PISTOL', 'M4_CARBINE', 'KNIFE_TACTICAL'],
     unlockedOptics: ['iron'],
     unlockedAttachments: [],
   },
@@ -911,6 +911,9 @@ export function getRequiredXpForWeapon(weaponId: WeaponId): {
   requiredLevel: number;
   rankTitle: string;
 } {
+  if (weaponId === 'KNIFE_TACTICAL') {
+    return { requiredLevel: 1, rankTitle: 'Trainee' };
+  }
   for (const rank of WARFACE_RANKS) {
     if (rank.unlockedWeapons.includes(weaponId)) {
       return { requiredLevel: rank.level, rankTitle: rank.title };
@@ -946,6 +949,7 @@ export function getRequiredXpForAttachment(
 }
 
 export function isWeaponUnlockedAtXp(weaponId: WeaponId, xp: number): boolean {
+  if (weaponId === 'KNIFE_TACTICAL') return true;
   const currentRank = getRankForXp(xp);
   return currentRank.unlockedWeapons.includes(weaponId);
 }

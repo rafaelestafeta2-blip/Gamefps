@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GrenadeType, HudState } from '../types/game';
+import { bindTap } from './hudTapUtils';
 
 interface MobileTouchControlsProps {
   hud: HudState;
@@ -20,22 +21,10 @@ interface MobileTouchControlsProps {
   onThrowGrenade: (type: GrenadeType) => void;
 }
 
-interface CrouchProneButtonProps {
+const CrouchProneButton: React.FC<{
   stance: HudState['stance'];
   onCrouchOrSlide: () => void;
-}
-
-const bindTap = (action: () => void) => ({
-  onPointerDown: (e: React.PointerEvent) => {
-    e.stopPropagation();
-    action();
-  },
-});
-
-const CrouchProneButton: React.FC<CrouchProneButtonProps> = ({
-  stance,
-  onCrouchOrSlide,
-}) => {
+}> = ({ stance, onCrouchOrSlide }) => {
   const isProne = stance === 'PRONE';
   const isCrouchOrSlide = stance === 'CROUCH' || stance === 'SLIDE';
 
@@ -45,7 +34,7 @@ const CrouchProneButton: React.FC<CrouchProneButtonProps> = ({
       {...bindTap(onCrouchOrSlide)}
       aria-label="Agachar e Deitar no Chão"
       title="Toque para agachar e deitar no chão (Posição Prone)"
-      className={`fixed bottom-5 right-5 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-30 active:scale-90 transition-transform cursor-pointer ${
+      className={`fixed bottom-5 right-5 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-30 select-none active:scale-90 transition-transform cursor-pointer ${
         isProne
           ? 'bg-amber-500 border-amber-300 text-black shadow-[0_0_18px_rgba(245,158,11,0.8)] font-bold'
           : isCrouchOrSlide
@@ -54,7 +43,6 @@ const CrouchProneButton: React.FC<CrouchProneButtonProps> = ({
       }`}
     >
       {isProne ? (
-        // Prone Soldier Silhouette (Lying flat on stomach)
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
           <circle cx="5" cy="14" r="2.2" fill="currentColor" />
           <path
@@ -66,7 +54,6 @@ const CrouchProneButton: React.FC<CrouchProneButtonProps> = ({
           />
         </svg>
       ) : (
-        // Crouching Soldier Silhouette
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
           <circle cx="13.5" cy="6" r="2.2" fill="currentColor" />
           <path
@@ -95,7 +82,6 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
   onHoldBreath,
   onCycleZoom,
 }) => {
-  // Left Virtual Joystick State
   const joyContainerRef = useRef<HTMLDivElement | null>(null);
   const joyPointerIdRef = useRef<number | null>(null);
   const [knobOffset, setKnobOffset] = useState<{ x: number; y: number }>({
@@ -105,16 +91,13 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
   const [isSprinting, setIsSprinting] = useState(false);
   const [joyActive, setJoyActive] = useState(false);
 
-  // Full-Screen Touch-Look Camera State (Right thumb / Free screen area)
   const lookPointerIdRef = useRef<number | null>(null);
   const lookLastPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Right Fire-and-Aim Button State
   const firePointerIdRef = useRef<number | null>(null);
   const fireLastPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [firePressed, setFirePressed] = useState(false);
 
-  // Keep latest callbacks in refs so window-level listeners never go stale
   const callbacksRef = useRef({
     onMove,
     onLookDelta,
@@ -156,7 +139,6 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         const rawDx = e.clientX - lookLastPosRef.current.x;
         const rawDy = e.clientY - lookLastPosRef.current.y;
         lookLastPosRef.current = { x: e.clientX, y: e.clientY };
-        // Clamp spikes from multi-touch transitions
         if (Math.abs(rawDx) < 140 && Math.abs(rawDy) < 140) {
           callbacksRef.current.onLookDelta(rawDx, rawDy);
         }
@@ -214,7 +196,6 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
 
   const handleLookPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    // Always accept the latest camera look touch so fullscreen transitions never lock the pointerId
     lookPointerIdRef.current = e.pointerId;
     lookLastPosRef.current = { x: e.clientX, y: e.clientY };
   };
@@ -233,25 +214,17 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
     hud.reloadPhase === 'IDLE' && (hud.boltLockedBack || hud.chambered === 0);
 
   return (
-    <div
-      className="fixed inset-0 z-20 pointer-events-none select-none overflow-hidden"
-      style={{ touchAction: 'none' }}
-    >
-      {/* =================================================================== */}
-      {/* FULL-SCREEN TOUCH-LOOK CAMERA LAYER (COMO NO COD MOBILE / FREE FIRE)*/}
-      {/* Qualquer área livre da tela gira a câmera e controla a mira         */}
-      {/* =================================================================== */}
+    <>
+      {/* FULL-SCREEN TOUCH-LOOK CAMERA LAYER AT z-10 (UNDERNEATH z-30 AND z-40 HUD BUTTONS) */}
       <div
         onPointerDown={handleLookPointerDown}
-        className="fixed inset-0 z-10 pointer-events-auto"
+        className="fixed inset-0 z-10 pointer-events-auto select-none"
         style={{ touchAction: 'none' }}
         aria-label="Área livre da tela para movimentar a câmera e mirar"
       />
 
-      {/* =================================================================== */}
-      {/* LEFT THUMB ZONE: CALL OF DUTY MOBILE VIRTUAL JOYSTICK (NO TEXT)     */}
-      {/* =================================================================== */}
-      <div className="fixed bottom-12 left-7 sm:left-12 pointer-events-auto z-30">
+      {/* LEFT THUMB ZONE: VIRTUAL JOYSTICK */}
+      <div className="fixed bottom-12 left-7 sm:left-12 pointer-events-auto z-30 select-none">
         <div
           ref={joyContainerRef}
           onPointerDown={handleJoyPointerDown}
@@ -262,7 +235,6 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
               : 'border-white/25'
           }`}
         >
-          {/* COD Mobile Curved Sprint Chevron Arc at Top of Joystick */}
           <svg
             width="44"
             height="22"
@@ -287,7 +259,6 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
             />
           </svg>
 
-          {/* Clean Circular Thumb Knob (Matching COD Mobile Screenshot) */}
           <div
             className={`w-12 h-12 rounded-full border-2 pointer-events-none transition-transform duration-75 ${
               joyActive
@@ -301,11 +272,8 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         </div>
       </div>
 
-      {/* =================================================================== */}
-      {/* RIGHT THUMB ZONE: CALL OF DUTY MOBILE ICON-ONLY BUTTON CLUSTER      */}
-      {/* =================================================================== */}
-      {/* Contextual Icon Buttons (Hold Breath / Zoom / Bolt Rack) positioned cleanly to the left of ADS */}
-      <div className="fixed bottom-38 right-40 flex items-center gap-2 pointer-events-auto z-30">
+      {/* CONTEXTUAL ICON BUTTONS (Hold Breath / Zoom / Bolt Rack) */}
+      <div className="fixed bottom-38 right-40 flex items-center gap-2 pointer-events-auto z-30 select-none">
         {hud.isAds && (
           <>
             <button
@@ -345,8 +313,19 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
                 className="w-10 h-10 rounded-full bg-black/45 border border-white/30 text-amber-300 flex items-center justify-center active:scale-90 transition-transform cursor-pointer"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                  <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-                  <path d="M20 20L16 16M11 8V14M8 11H14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <circle
+                    cx="11"
+                    cy="11"
+                    r="7"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  />
+                  <path
+                    d="M20 20L16 16M11 8V14M8 11H14"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
                 </svg>
               </button>
             )}
@@ -373,12 +352,12 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         )}
       </div>
 
-      {/* 1. ADS / AIM CROSSHAIR BUTTON (Upper-Right, matching COD Mobile screenshot) */}
+      {/* 1. ADS / AIM CROSSHAIR BUTTON */}
       <button
         type="button"
         {...bindTap(onToggleAds)}
         aria-label="Mirar"
-        className={`fixed bottom-38 right-24 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-30 transition-transform active:scale-90 cursor-pointer ${
+        className={`fixed bottom-38 right-24 w-13 h-13 rounded-full border flex items-center justify-center pointer-events-auto z-30 select-none transition-transform active:scale-90 cursor-pointer ${
           hud.isAds
             ? 'bg-white/35 border-amber-300 text-amber-300 scale-105 shadow-[0_0_15px_rgba(250,204,21,0.4)]'
             : 'bg-black/45 border-white/35 text-white/90'
@@ -394,12 +373,12 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         </svg>
       </button>
 
-      {/* 2. JUMP BUTTON (Far-Right Middle, Jumping Soldier Silhouette) */}
+      {/* 2. JUMP BUTTON */}
       <button
         type="button"
         {...bindTap(onJump)}
         aria-label="Pular"
-        className="fixed bottom-28 right-5 w-13 h-13 rounded-full bg-black/45 border border-white/35 text-white/95 flex items-center justify-center pointer-events-auto z-30 active:scale-90 transition-transform cursor-pointer"
+        className="fixed bottom-28 right-5 w-13 h-13 rounded-full bg-black/45 border border-white/35 text-white/95 flex items-center justify-center pointer-events-auto z-30 select-none active:scale-90 transition-transform cursor-pointer"
       >
         <svg width="25" height="25" viewBox="0 0 24 24" fill="none">
           <circle cx="13" cy="4.5" r="2.2" fill="currentColor" />
@@ -413,17 +392,22 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         </svg>
       </button>
 
-      {/* 3. PRIMARY FIRE / THROW GRENADE BUTTON (Large Translucent Circle) */}
+      {/* 3. PRIMARY FIRE / THROW GRENADE BUTTON */}
       <button
         type="button"
         onPointerDown={handleFirePointerDown}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (hud.equippedGrenade) {
+            onFireHeld(true);
+            setTimeout(() => onFireHeld(false), 60);
+          }
+        }}
         style={{ touchAction: 'none' }}
         aria-label={
-          hud.equippedGrenade
-            ? 'Tirar o Pino e Jogar Granada'
-            : 'Atirar'
+          hud.equippedGrenade ? 'Tirar o Pino e Jogar Granada' : 'Atirar'
         }
-        className={`fixed bottom-18 right-38 sm:right-44 w-21 h-21 rounded-full border-2 flex items-center justify-center pointer-events-auto z-30 transition-all cursor-pointer ${
+        className={`fixed bottom-18 right-38 sm:right-44 w-21 h-21 rounded-full border-2 flex items-center justify-center pointer-events-auto z-30 select-none transition-all cursor-pointer ${
           hud.equippedGrenade === 'FRAG'
             ? firePressed
               ? 'bg-orange-500/55 border-orange-200 scale-95 shadow-[0_0_28px_rgba(249,115,22,0.75)]'
@@ -514,12 +498,12 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         </div>
       </button>
 
-      {/* 4. RELOAD BUTTON (Below-Right of Fire Button, 3 Bullets + Reload Arc Icon) */}
+      {/* 4. RELOAD BUTTON */}
       <button
         type="button"
         {...bindTap(() => onReload(false))}
         aria-label="Recarregar"
-        className={`fixed bottom-8 right-22 w-12 h-12 rounded-full border flex items-center justify-center pointer-events-auto z-30 active:scale-90 transition-transform cursor-pointer ${
+        className={`fixed bottom-8 right-22 w-12 h-12 rounded-full border flex items-center justify-center pointer-events-auto z-30 select-none active:scale-90 transition-transform cursor-pointer ${
           hud.reloadPhase !== 'IDLE'
             ? 'bg-amber-500/40 border-amber-300 text-amber-200'
             : 'bg-black/45 border-white/35 text-white/95'
@@ -541,12 +525,12 @@ const MobileTouchControlsBase: React.FC<MobileTouchControlsProps> = ({
         </svg>
       </button>
 
-      {/* 5. CROUCH / PRONE / SLIDE BUTTON (Tap for Crouch, Hold for Prone) */}
+      {/* 5. CROUCH / PRONE / SLIDE BUTTON */}
       <CrouchProneButton
         stance={hud.stance}
         onCrouchOrSlide={onCrouchOrSlide}
       />
-    </div>
+    </>
   );
 };
 

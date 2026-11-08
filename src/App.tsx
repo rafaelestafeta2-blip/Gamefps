@@ -39,7 +39,9 @@ const INITIAL_HUD_STATE: HudState = {
   lpvoZoom: 2.0,
   cantedActive: false,
   suppressorAttached: false,
-  laserActive: true,
+  muzzleDevice: 'NONE',
+  weaponCharm: 'NONE',
+  laserActive: false,
   reloadPhase: 'IDLE',
   reloadProgress: 0,
   reloadTypeLabel: '',
@@ -243,6 +245,7 @@ export default function App() {
             }
             onToggleCanted={() => engineRef.current?.toggleCantedSight()}
             onToggleSuppressor={() => engineRef.current?.toggleSuppressor()}
+            onCycleCharm={() => engineRef.current?.cycleWeaponCharm()}
             onToggleLaser={() => engineRef.current?.toggleLaser()}
             onCycleFireMode={() => engineRef.current?.cycleFireMode()}
             onTriggerReload={(speed: boolean) =>
