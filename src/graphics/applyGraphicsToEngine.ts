@@ -1,13 +1,14 @@
 /**
  * applyGraphicsToEngine.ts
- * Aplica opções gráficas no motor sem alterar a API pública de fpsEngine.ts.
- * Acessa membros internos via cast seguro.
+ * Aplica opções gráficas e de vibração no motor sem alterar a API pública de fpsEngine.ts.
+ * Acessa membros internos via cast seguro e armazena estado por instância (WeakMap).
  */
 
 import * as THREE from 'three';
+import { mobileHardware } from '../mobile/nativeHardware';
+import { QualityPreset as EngineQualityPreset } from '../types/game';
 import { GameSettings, ShadowQuality } from './graphicsSettings';
 
-// Interface parcial para acessar membros internos de TacticalFPSEngine
 interface InternalEngineAccess {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
@@ -21,8 +22,18 @@ interface InternalEngineAccess {
     fpsLimit: number;
     dynamicResolutionEnabled: boolean;
     renderScalePercent: number;
+    qualityPreset: EngineQualityPreset;
+    hapticsEnabled: boolean;
   };
 }
+
+interface EngineGraphicsCache {
+  lastShadowQuality: ShadowQuality | null;
+  lastAcesToneMapping: boolean | null;
+  cachedEnvironmentTex: THREE.Texture | null;
+}
+
+const engineCacheMap = new WeakMap<object, EngineGraphicsCache>();
 
 // Armazena referências originais de normal/bump maps para restauração
 const originalMaps = new WeakMap<
@@ -33,17 +44,21 @@ const originalMaps = new WeakMap<
   }
 >();
 
-let lastShadowQuality: ShadowQuality | null = null;
-let lastAcesToneMapping: boolean | null = null;
-let lastTexturesQuality: string | null = null;
-let cachedEnvironmentTex: THREE.Texture | null = null;
+const PBR_TEXTURE_SLOTS = [
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'aoMap',
+  'emissiveMap',
+] as const;
 
 export function applyGraphicsToEngine(
   rawEngine: unknown,
   settings: GameSettings
 ): void {
-  if (!rawEngine) return;
-  const engine = rawEngine as unknown as InternalEngineAccess;
+  if (!rawEngine || typeof rawEngine !== 'object') return;
+  const engine = rawEngine as InternalEngineAccess;
   const renderer = engine.renderer;
   const scene = engine.scene;
   const camera = engine.camera;
@@ -52,55 +67,71 @@ export function applyGraphicsToEngine(
 
   if (!renderer || !scene || !camera) return;
 
+  let cache = engineCacheMap.get(rawEngine);
+  if (!cache) {
+    cache = {
+      lastShadowQuality: null,
+      lastAcesToneMapping: null,
+      cachedEnvironmentTex: scene.environment || null,
+    };
+    engineCacheMap.set(rawEngine, cache);
+  }
+
+  // 0. Vibração (Haptics) — Fonte única de verdade
+  engine.state.hapticsEnabled = settings.vibration;
+  mobileHardware.hapticsEnabled = settings.vibration;
+
+  // Economia de bateria força fpsLimit 30, sombras no máximo LOW e muzzleLight desligada
+  const effectiveFpsLimit = settings.batterySaver ? 30 : settings.fpsLimit;
+  const effectiveShadows: ShadowQuality = settings.batterySaver
+    ? settings.shadows === 'OFF'
+      ? 'OFF'
+      : 'LOW'
+    : settings.shadows;
+  const effectiveMuzzleLight = settings.batterySaver
+    ? false
+    : settings.muzzleLight;
+
   // 1. Limite de FPS e Resolução Dinâmica (DRS)
-  // REGRA CRÍTICA: Se fpsLimit for 30 FPS, desliga DRS e fixa escala pois o governador assume alvo 60 FPS
-  engine.state.fpsLimit = settings.fpsLimit;
+  engine.state.fpsLimit = effectiveFpsLimit;
 
   const maxDpr = Math.min(window.devicePixelRatio || 1, 2.0);
-  let resolvedScale = 1.0;
+  let autoCeiling = maxDpr;
+
+  if (settings.resolution === 'AUTO_ECO') {
+    engine.state.qualityPreset = 'COMPETITIVE_120';
+    autoCeiling = Math.min(maxDpr, 1.05);
+  } else if (settings.resolution === 'AUTO_BALANCED') {
+    engine.state.qualityPreset = 'BALANCED_60';
+    autoCeiling = Math.min(maxDpr, 1.4);
+  } else if (settings.resolution === 'AUTO_MAX') {
+    engine.state.qualityPreset = 'ULTRA_PBR';
+    autoCeiling = maxDpr;
+  }
+
+  let resolvedScale = engine.currentRenderScale > 0 ? engine.currentRenderScale : 1.0;
   let enableDrs = true;
 
-  if (settings.fpsLimit === 30 || settings.batterySaver) {
+  if (effectiveFpsLimit === 30 || settings.batterySaver) {
     enableDrs = false;
-    switch (settings.resolution) {
-      case 'SCALE_50':
-        resolvedScale = maxDpr * 0.5;
-        break;
-      case 'SCALE_65':
-        resolvedScale = maxDpr * 0.65;
-        break;
-      case 'SCALE_80':
-        resolvedScale = maxDpr * 0.8;
-        break;
-      case 'SCALE_100':
-        resolvedScale = maxDpr * 1.0;
-        break;
-      case 'AUTO_ECO':
-        resolvedScale = Math.min(maxDpr, 0.75);
-        break;
-      case 'AUTO_BALANCED':
-      case 'AUTO_MAX':
-      default:
-        resolvedScale = Math.min(maxDpr, 1.0);
-        break;
-    }
-  } else {
-    // 60 ou 120 FPS
     if (settings.resolution.startsWith('SCALE_')) {
-      enableDrs = false;
-      const pct = parseInt(settings.resolution.replace('SCALE_', ''), 10) || 100;
+      const pct =
+        parseInt(settings.resolution.replace('SCALE_', ''), 10) || 100;
       resolvedScale = maxDpr * (pct / 100);
     } else {
-      enableDrs = true;
-      if (settings.resolution === 'AUTO_ECO') {
-        resolvedScale = Math.min(maxDpr, 0.85);
-      } else if (settings.resolution === 'AUTO_MAX') {
-        resolvedScale = maxDpr;
-      } else {
-        // AUTO_BALANCED
-        resolvedScale = Math.min(maxDpr, 1.35);
-      }
+      const currentOrMax =
+        engine.currentRenderScale > 0 ? engine.currentRenderScale : autoCeiling;
+      resolvedScale = Math.min(currentOrMax, autoCeiling);
     }
+  } else if (settings.resolution.startsWith('SCALE_')) {
+    enableDrs = false;
+    const pct = parseInt(settings.resolution.replace('SCALE_', ''), 10) || 100;
+    resolvedScale = maxDpr * (pct / 100);
+  } else {
+    enableDrs = true;
+    const currentOrMax =
+      engine.currentRenderScale > 0 ? engine.currentRenderScale : autoCeiling;
+    resolvedScale = Math.min(currentOrMax, autoCeiling);
   }
 
   engine.state.dynamicResolutionEnabled = enableDrs;
@@ -108,25 +139,38 @@ export function applyGraphicsToEngine(
   renderer.setPixelRatio(resolvedScale);
   engine.state.renderScalePercent = Math.round((resolvedScale / maxDpr) * 100);
 
+  let forceAllMaterialsNeedsUpdate = false;
+
   // 2. Tonalidade ACES Filmic vs Linear
-  if (lastAcesToneMapping !== settings.acesToneMapping) {
-    lastAcesToneMapping = settings.acesToneMapping;
-    renderer.toneMapping = settings.acesToneMapping
-      ? THREE.ACESFilmicToneMapping
-      : THREE.LinearToneMapping;
+  const targetToneMapping = settings.acesToneMapping
+    ? THREE.ACESFilmicToneMapping
+    : THREE.LinearToneMapping;
+  if (
+    cache.lastAcesToneMapping !== settings.acesToneMapping ||
+    renderer.toneMapping !== targetToneMapping
+  ) {
+    cache.lastAcesToneMapping = settings.acesToneMapping;
+    renderer.toneMapping = targetToneMapping;
     renderer.toneMappingExposure = settings.acesToneMapping ? 1.12 : 1.0;
+    forceAllMaterialsNeedsUpdate = true;
   }
 
   // 3. Sombras (PCFShadowMap, mapSize e reconstrução de shadow map ao alterar)
-  const shadowsActive = settings.shadows !== 'OFF';
-  renderer.shadowMap.enabled = shadowsActive;
+  const shadowsActive = effectiveShadows !== 'OFF';
+  if (renderer.shadowMap.enabled !== shadowsActive) {
+    renderer.shadowMap.enabled = shadowsActive;
+    forceAllMaterialsNeedsUpdate = true;
+  }
 
   if (shadowsActive && keyLight) {
     keyLight.castShadow = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    if (renderer.shadowMap.type !== THREE.PCFShadowMap) {
+      renderer.shadowMap.type = THREE.PCFShadowMap;
+      forceAllMaterialsNeedsUpdate = true;
+    }
 
     let targetMapSize = 1024;
-    switch (settings.shadows) {
+    switch (effectiveShadows) {
       case 'LOW':
         targetMapSize = 512;
         break;
@@ -142,25 +186,24 @@ export function applyGraphicsToEngine(
     }
 
     if (
-      lastShadowQuality !== settings.shadows ||
+      cache.lastShadowQuality !== effectiveShadows ||
       keyLight.shadow.mapSize.width !== targetMapSize
     ) {
       keyLight.shadow.mapSize.width = targetMapSize;
       keyLight.shadow.mapSize.height = targetMapSize;
-      // Forçar recriação completa do Shadow Map no Three.js
       if (keyLight.shadow.map) {
         keyLight.shadow.map.dispose();
         keyLight.shadow.map = null;
       }
-      lastShadowQuality = settings.shadows;
+      cache.lastShadowQuality = effectiveShadows;
     }
   } else if (keyLight) {
     keyLight.castShadow = false;
-    lastShadowQuality = 'OFF';
+    cache.lastShadowQuality = 'OFF';
   }
 
   // 4. Distância de visão (camera.far)
-  let targetFar = 160;
+  let targetFar = 130;
   switch (settings.viewDistance) {
     case 'NEAR':
       targetFar = 80;
@@ -175,7 +218,7 @@ export function applyGraphicsToEngine(
       targetFar = 260;
       break;
   }
-  if (Math.abs(camera.far - targetFar) > 1) {
+  if (Math.abs(camera.far - targetFar) > 0.5) {
     camera.far = targetFar;
     camera.updateProjectionMatrix();
   }
@@ -189,11 +232,11 @@ export function applyGraphicsToEngine(
 
   // 6. Reflexos PBR (Environment map)
   if (scene.environment) {
-    cachedEnvironmentTex = scene.environment;
+    cache.cachedEnvironmentTex = scene.environment;
   }
   if (settings.pbrReflections) {
-    if (!scene.environment && cachedEnvironmentTex) {
-      scene.environment = cachedEnvironmentTex;
+    if (!scene.environment && cache.cachedEnvironmentTex) {
+      scene.environment = cache.cachedEnvironmentTex;
     }
   } else {
     scene.environment = null;
@@ -201,78 +244,81 @@ export function applyGraphicsToEngine(
 
   // 7. Luz de clarão do cano (Muzzle Light)
   if (weaponRig && weaponRig.muzzleLight) {
-    weaponRig.muzzleLight.visible = settings.muzzleLight;
+    weaponRig.muzzleLight.visible = effectiveMuzzleLight;
   }
 
-  // 8. Texturas, Anisotropia e Normal/Bump Maps
-  if (lastTexturesQuality !== settings.textures) {
-    lastTexturesQuality = settings.textures;
-    let maxAnisotropy = 1;
-    switch (settings.textures) {
-      case 'LOW':
-        maxAnisotropy = 1;
-        break;
-      case 'MEDIUM':
-        maxAnisotropy = 2;
-        break;
-      case 'HIGH':
-        maxAnisotropy = 4;
-        break;
-      case 'ULTRA':
-        maxAnisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-        break;
-    }
+  // 8. Texturas, Anisotropia e Normal/Bump Maps (sem trava para cobrir assets carregados depois)
+  const hwMaxAnisotropy = Math.max(1, renderer.capabilities.getMaxAnisotropy());
+  let desiredAniso = 1;
+  switch (settings.textures) {
+    case 'LOW':
+      desiredAniso = 1;
+      break;
+    case 'MEDIUM':
+      desiredAniso = 4;
+      break;
+    case 'HIGH':
+      desiredAniso = 8;
+      break;
+    case 'ULTRA':
+      desiredAniso = 16;
+      break;
+  }
+  const targetAnisotropy = Math.min(desiredAniso, hwMaxAnisotropy);
+  const isLowTextures = settings.textures === 'LOW';
 
-    const isLow = settings.textures === 'LOW';
+  scene.traverse((obj) => {
+    if (!(obj as THREE.Mesh).isMesh) return;
+    const mesh = obj as THREE.Mesh;
+    const materials = Array.isArray(mesh.material)
+      ? mesh.material
+      : [mesh.material];
 
-    scene.traverse((obj) => {
-      if ((obj as THREE.Mesh).isMesh) {
-        const mesh = obj as THREE.Mesh;
-        const materials = Array.isArray(mesh.material)
-          ? mesh.material
-          : [mesh.material];
+    materials.forEach((mat) => {
+      if (!mat) return;
+      const stdMat = mat as THREE.MeshStandardMaterial;
+      let matChanged = forceAllMaterialsNeedsUpdate;
 
-        materials.forEach((mat) => {
-          if (!mat) return;
-          const stdMat = mat as THREE.MeshStandardMaterial;
-
-          // Atualizar anisotropia de texturas
-          if (stdMat.map) {
-            stdMat.map.anisotropy = maxAnisotropy;
-            stdMat.map.needsUpdate = true;
-          }
-
-          if (isLow) {
-            // Salvar para poder restaurar
-            if (!originalMaps.has(mat)) {
-              originalMaps.set(mat, {
-                normalMap: stdMat.normalMap || null,
-                bumpMap: stdMat.bumpMap || null,
-              });
-            }
-            if (stdMat.normalMap || stdMat.bumpMap) {
-              stdMat.normalMap = null;
-              stdMat.bumpMap = null;
-              stdMat.needsUpdate = true;
-            }
-          } else {
-            // Restaurar normal/bump map
-            const saved = originalMaps.get(mat);
-            if (saved) {
-              let needUp = false;
-              if (saved.normalMap && stdMat.normalMap !== saved.normalMap) {
-                stdMat.normalMap = saved.normalMap;
-                needUp = true;
-              }
-              if (saved.bumpMap && stdMat.bumpMap !== saved.bumpMap) {
-                stdMat.bumpMap = saved.bumpMap;
-                needUp = true;
-              }
-              if (needUp) stdMat.needsUpdate = true;
-            }
-          }
+      if (!originalMaps.has(mat)) {
+        originalMaps.set(mat, {
+          normalMap: stdMat.normalMap || null,
+          bumpMap: stdMat.bumpMap || null,
         });
       }
+
+      if (isLowTextures) {
+        if (stdMat.normalMap || stdMat.bumpMap) {
+          stdMat.normalMap = null;
+          stdMat.bumpMap = null;
+          matChanged = true;
+        }
+      } else {
+        const saved = originalMaps.get(mat);
+        if (saved) {
+          if (saved.normalMap && stdMat.normalMap !== saved.normalMap) {
+            stdMat.normalMap = saved.normalMap;
+            matChanged = true;
+          }
+          if (saved.bumpMap && stdMat.bumpMap !== saved.bumpMap) {
+            stdMat.bumpMap = saved.bumpMap;
+            matChanged = true;
+          }
+        }
+      }
+
+      // Aplica anisotropia em map, normalMap, roughnessMap, metalnessMap, aoMap e emissiveMap só quando mudar
+      for (let i = 0; i < PBR_TEXTURE_SLOTS.length; i++) {
+        const slot = PBR_TEXTURE_SLOTS[i];
+        const tex = stdMat[slot] as THREE.Texture | null | undefined;
+        if (tex && tex.anisotropy !== targetAnisotropy) {
+          tex.anisotropy = targetAnisotropy;
+          tex.needsUpdate = true;
+        }
+      }
+
+      if (matChanged) {
+        stdMat.needsUpdate = true;
+      }
     });
-  }
+  });
 }

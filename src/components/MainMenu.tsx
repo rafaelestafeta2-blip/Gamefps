@@ -7,7 +7,7 @@ import {
   getRankForXp,
   loadSavedPlayerXp,
 } from '../progression/ranks';
-import { DrillMode, QualityPreset, WeaponId } from '../types/game';
+import { DrillMode, WeaponId } from '../types/game';
 import { GraphicsSettingsPanel } from './GraphicsSettingsPanel';
 import { MainMenuRanksModal } from './MainMenuRanksModal';
 import { MenuBackground } from './MenuBackground';
@@ -19,8 +19,6 @@ interface MainMenuProps {
   onStartDrill: (mode: DrillMode) => void;
   activeWeapon: WeaponId;
   onSelectStartingWeapon: (weaponId: WeaponId) => void;
-  qualityPreset?: QualityPreset;
-  onSetQualityPreset?: (preset: QualityPreset) => void;
   gameSettings?: GameSettings;
   onUpdateGameSettings?: (settings: GameSettings) => void;
   onResetGameSettings?: () => void;

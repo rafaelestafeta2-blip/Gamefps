@@ -46,6 +46,8 @@ const _worldPos = new THREE.Vector3();
 const _worldPos2 = new THREE.Vector3();
 const _hitNormal = new THREE.Vector3();
 const _targetToPlayer = new THREE.Vector3();
+const _hipPosPistol = new THREE.Vector3(0.115, -0.062, -0.27);
+const _hipPosRifle = new THREE.Vector3(0.105, -0.068, -0.3);
 
 export class TacticalFPSEngine {
   private container: HTMLElement;
@@ -62,6 +64,7 @@ export class TacticalFPSEngine {
   private weaponRig: TacticalWeaponRig;
   private colliders: ColliderBox[] = [];
   private targets: TacticalTargetEntity[] = [];
+  private targetMap = new Map<string, TacticalTargetEntity>();
   private shootableMeshes: THREE.Mesh[] = [];
   private wallStandPositions: THREE.Vector3[] = [];
   private fxPool: BallisticsFXPool;
@@ -72,6 +75,7 @@ export class TacticalFPSEngine {
 
   // Loop, Timing & Dynamic Resolution Governor (DRS)
   private frameId = 0;
+  private rankUpTimeoutId: number | null = null;
   private disposed = false;
   private lastTime = performance.now();
   private elapsedTime = 0;
@@ -82,6 +86,7 @@ export class TacticalFPSEngine {
   private currentRenderScale = 1.0;
   private fpsLimiterAccumulator = 0;
   private aimRaycastTimer = 0;
+  private aimRaycastInitialized = false;
   private cachedAimHits: THREE.Intersection[] = [];
   private isWindowFocused = true;
 
@@ -352,6 +357,10 @@ export class TacticalFPSEngine {
     this.scene.add(levelData.levelGroup);
     this.colliders = levelData.colliders;
     this.targets = levelData.targets;
+    this.targetMap.clear();
+    for (let i = 0; i < this.targets.length; i++) {
+      this.targetMap.set(this.targets[i].id, this.targets[i]);
+    }
     this.shootableMeshes = levelData.shootableMeshes;
     this.wallStandPositions = levelData.wallStandPositions;
 
@@ -480,7 +489,11 @@ export class TacticalFPSEngine {
       this.state.rankUpNotification = `PROMOÇÃO DE PATENTE! NÍVEL ${rankInfo.level} — ${rankInfo.title.toUpperCase()} (${rankInfo.unlockRewardLabel})`;
       soundEngine.playMechanicalSwitch(1.4);
       mobileHardware.vibrateHitConfirm(true);
-      setTimeout(() => {
+      if (this.rankUpTimeoutId !== null) {
+        window.clearTimeout(this.rankUpTimeoutId);
+      }
+      this.rankUpTimeoutId = window.setTimeout(() => {
+        this.rankUpTimeoutId = null;
         this.state.rankUpNotification = null;
         this.emitHud();
       }, 6000);
@@ -2160,7 +2173,7 @@ export class TacticalFPSEngine {
     hitPoint: THREE.Vector3,
     hitNormal: THREE.Vector3
   ): void {
-    const target = this.targets.find((t) => t.id === targetId);
+    const target = this.targetMap.get(targetId);
     if (!target || target.isDown) return;
 
     this.state.hits += 1;
@@ -2307,14 +2320,17 @@ export class TacticalFPSEngine {
     if (this.state.fpsLimit > 0) {
       const targetInterval = 1 / this.state.fpsLimit;
       this.fpsLimiterAccumulator += rawDt;
-      if (this.fpsLimiterAccumulator < targetInterval) {
+      if (this.fpsLimiterAccumulator < targetInterval - 0.0015) {
         this.frameId = requestAnimationFrame(this.tick);
         return;
       }
-      this.fpsLimiterAccumulator = Math.min(
-        this.fpsLimiterAccumulator % targetInterval,
-        targetInterval * 2
+      this.fpsLimiterAccumulator = Math.max(
+        0,
+        this.fpsLimiterAccumulator - targetInterval
       );
+      if (this.fpsLimiterAccumulator > targetInterval) {
+        this.fpsLimiterAccumulator = 0;
+      }
     }
 
     // Clamp delta time to prevent physics tunneling on tab switch
@@ -2930,7 +2946,8 @@ export class TacticalFPSEngine {
 
     // Consolidated Single Forward Camera Raycast for Wall Avoidance, Aim Focus & Green PEQ Laser (Throttled for Mobile Performance)
     this.aimRaycastTimer += dt;
-    if (this.aimRaycastTimer >= 0.033 || this.cachedAimHits.length === 0) {
+    if (!this.aimRaycastInitialized || this.aimRaycastTimer >= 0.033) {
+      this.aimRaycastInitialized = true;
       this.aimRaycastTimer = 0;
       this.camera.getWorldPosition(_rayOrigin);
       this.camera.getWorldDirection(_rayDir);
@@ -3034,9 +3051,7 @@ export class TacticalFPSEngine {
 
     // Counter-Strike 2 (CS2) Viewmodel Framing (matches CS2 Desert Eagle bottom-right framing) vs Precision ADS Target Pose
     const hipPos =
-      this.state.activeWeapon === 'P50_PISTOL'
-        ? new THREE.Vector3(0.115, -0.062, -0.27)
-        : new THREE.Vector3(0.105, -0.068, -0.3);
+      this.state.activeWeapon === 'P50_PISTOL' ? _hipPosPistol : _hipPosRifle;
     const adsTransform = getOpticAdsTransform(
       this.state.optic,
       this.state.cantedActive,
@@ -3391,7 +3406,10 @@ export class TacticalFPSEngine {
   public dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.frameId);
-    clearTimeout(this.frameId);
+    if (this.rankUpTimeoutId !== null) {
+      window.clearTimeout(this.rankUpTimeoutId);
+      this.rankUpTimeoutId = null;
+    }
 
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
@@ -3406,17 +3424,56 @@ export class TacticalFPSEngine {
     window.removeEventListener('resize', this.onResize);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
 
+    this.renderer.domElement.removeEventListener(
+      'touchstart',
+      this.onCanvasTouchStart
+    );
+    this.renderer.domElement.removeEventListener(
+      'touchmove',
+      this.onCanvasTouchMove
+    );
+    this.renderer.domElement.removeEventListener(
+      'touchend',
+      this.onCanvasTouchEnd
+    );
+    this.renderer.domElement.removeEventListener(
+      'touchcancel',
+      this.onCanvasTouchEnd
+    );
+
+    (this.fxPool as unknown as { dispose?: () => void })?.dispose?.();
+    (
+      this.grenadeSystem as unknown as {
+        dispose?: () => void;
+        clearAll?: () => void;
+      }
+    )?.dispose?.();
+    this.grenadeSystem?.clearAll?.();
+
+    if (this.scene.environment) {
+      this.scene.environment.dispose();
+      this.scene.environment = null;
+    }
+
+    const disposeMaterialMaps = (m: THREE.Material) => {
+      const std = m as THREE.MeshStandardMaterial;
+      if (std.map) std.map.dispose();
+      if (std.normalMap) std.normalMap.dispose();
+      if (std.roughnessMap) std.roughnessMap.dispose();
+      if (std.metalnessMap) std.metalnessMap.dispose();
+      if (std.aoMap) std.aoMap.dispose();
+      if (std.emissiveMap) std.emissiveMap.dispose();
+      if (std.bumpMap) std.bumpMap.dispose();
+      m.dispose();
+    };
+
     this.scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         if (child.geometry) child.geometry.dispose();
         if (Array.isArray(child.material)) {
-          child.material.forEach((m) => {
-            if (m.map) m.map.dispose();
-            m.dispose();
-          });
+          child.material.forEach(disposeMaterialMaps);
         } else if (child.material) {
-          if (child.material.map) child.material.map.dispose();
-          child.material.dispose();
+          disposeMaterialMaps(child.material);
         }
       }
     });

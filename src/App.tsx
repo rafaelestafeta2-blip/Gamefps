@@ -9,6 +9,7 @@ import { OrientationLockOverlay } from './components/OrientationLockOverlay';
 import { TacticalHudOverlay } from './components/TacticalHudOverlay';
 import { applyGraphicsToEngine } from './graphics/applyGraphicsToEngine';
 import {
+  FpsLimit,
   GameSettings,
   getDefaultSettings,
   loadGameSettings,
@@ -16,14 +17,7 @@ import {
 } from './graphics/graphicsSettings';
 import { mobileHardware } from './mobile/nativeHardware';
 import { TacticalFPSEngine } from './three/fpsEngine';
-import {
-  DrillMode,
-  GyroMode,
-  HudState,
-  OpticType,
-  QualityPreset,
-  WeaponId,
-} from './types/game';
+import { DrillMode, HudState, OpticType, WeaponId } from './types/game';
 
 const INITIAL_HUD_STATE: HudState = {
   screen: 'INTRO',
@@ -113,16 +107,22 @@ export default function App() {
   const engineRef = useRef<TacticalFPSEngine | null>(null);
   const [hud, setHud] = useState<HudState>(INITIAL_HUD_STATE);
   const [preloadProgress, setPreloadProgress] = useState(0);
-  const [preloadStatus, setPreloadStatus] = useState('INICIALIZANDO GERENCIADOR...');
-  const [gameSettings, setGameSettings] = useState<GameSettings>(() => loadGameSettings());
+  const [preloadStatus, setPreloadStatus] = useState(
+    'INICIALIZANDO GERENCIADOR...'
+  );
+  const [gameSettings, setGameSettings] = useState<GameSettings>(() =>
+    loadGameSettings()
+  );
+  const gameSettingsRef = useRef<GameSettings>(gameSettings);
+  gameSettingsRef.current = gameSettings;
 
   useEffect(() => {
-    // Inicializa sistema de áudio
-    initAudioSystem(gameSettings);
-    applyAudioSettings(gameSettings);
+    initAudioSystem(gameSettingsRef.current);
+    applyAudioSettings(gameSettingsRef.current);
   }, []);
 
   const handleUpdateSettings = (newSettings: GameSettings) => {
+    gameSettingsRef.current = newSettings;
     setGameSettings(newSettings);
     saveGameSettings(newSettings);
     applyAudioSettings(newSettings);
@@ -136,6 +136,18 @@ export default function App() {
     handleUpdateSettings(defaults);
   };
 
+  const handleStartMatch = (mode?: DrillMode) => {
+    if (!engineRef.current) return;
+    engineRef.current.startGame(mode);
+    applyGraphicsToEngine(engineRef.current, gameSettingsRef.current);
+  };
+
+  const handleSelectWeapon = (weaponId: WeaponId) => {
+    if (!engineRef.current) return;
+    engineRef.current.selectWeapon(weaponId);
+    applyGraphicsToEngine(engineRef.current, gameSettingsRef.current);
+  };
+
   useEffect(() => {
     const container = canvasMountRef.current;
     if (!container) return;
@@ -145,8 +157,8 @@ export default function App() {
     });
     engineRef.current = engine;
 
-    // Aplica gráficos iniciais
-    applyGraphicsToEngine(engine, gameSettings);
+    // Aplica gráficos iniciais na instância recém-criada do motor
+    applyGraphicsToEngine(engine, gameSettingsRef.current);
 
     const onUserGesture = () => {
       void mobileHardware.enterFullscreenLandscape();
@@ -172,9 +184,17 @@ export default function App() {
           setPreloadProgress(pct);
           setPreloadStatus(status);
         })
+        .then(() => {
+          if (engineRef.current) {
+            applyGraphicsToEngine(engineRef.current, gameSettingsRef.current);
+          }
+        })
         .catch((err) => {
           console.warn('Asset preloader finished with fallback:', err);
           setPreloadProgress(100);
+          if (engineRef.current) {
+            applyGraphicsToEngine(engineRef.current, gameSettingsRef.current);
+          }
         });
     }
   }, [hud.screen]);
@@ -194,10 +214,12 @@ export default function App() {
 
       {/* Realtime In-Game FPS HUD Pill */}
       {gameSettings.showFpsCounter && hud.screen === 'PLAYING' && (
-        <div className="absolute top-2 left-2 z-50 pointer-events-none px-2 py-0.5 rounded bg-black/80 border border-amber-500/50 backdrop-blur-sm font-mono text-[10px] text-amber-400 flex items-center gap-2 shadow-lg">
+        <div className="absolute top-2 left-2 z-50 pointer-events-none px-2 py-0.5 rounded bg-black/80 border border-amber-500/50 font-mono text-[10px] text-amber-400 flex items-center gap-2 shadow-lg">
           <span className="font-bold">{hud.liveFps} FPS</span>
           <span className="text-zinc-500">|</span>
-          <span className="text-zinc-400">{(1000 / Math.max(1, hud.liveFps)).toFixed(1)}ms</span>
+          <span className="text-zinc-400">
+            {(1000 / Math.max(1, hud.liveFps)).toFixed(1)}ms
+          </span>
           <span className="text-zinc-500">|</span>
           <span className="text-zinc-400">DPI {hud.renderScalePercent}%</span>
         </div>
@@ -225,12 +247,10 @@ export default function App() {
 
       {(hud.screen === 'MAIN_MENU' || hud.screen === 'TITLE') && (
         <MainMenu
-          onStartTraining={() => engineRef.current?.startGame('FREE_RANGE')}
-          onStartDrill={(mode) => engineRef.current?.startGame(mode)}
+          onStartTraining={() => handleStartMatch('FREE_RANGE')}
+          onStartDrill={(mode) => handleStartMatch(mode)}
           activeWeapon={hud.activeWeapon}
-          onSelectStartingWeapon={(weaponId) => engineRef.current?.selectWeapon(weaponId)}
-          qualityPreset={hud.qualityPreset}
-          onSetQualityPreset={(preset) => engineRef.current?.setQualityPreset(preset)}
+          onSelectStartingWeapon={handleSelectWeapon}
           gameSettings={gameSettings}
           onUpdateGameSettings={handleUpdateSettings}
           onResetGameSettings={handleResetSettings}
@@ -241,8 +261,12 @@ export default function App() {
         <>
           <MobileTouchControls
             hud={hud}
-            onMove={(mx, my, sprint) => engineRef.current?.setTouchMovement(mx, my, sprint)}
-            onLookDelta={(dx, dy) => engineRef.current?.applyTouchLookDelta(dx, dy)}
+            onMove={(mx, my, sprint) =>
+              engineRef.current?.setTouchMovement(mx, my, sprint)
+            }
+            onLookDelta={(dx, dy) =>
+              engineRef.current?.applyTouchLookDelta(dx, dy)
+            }
             onFireHeld={(held) => engineRef.current?.setTouchFireHeld(held)}
             onToggleAds={() => engineRef.current?.toggleAds()}
             onToggleWeaponSlot={() => engineRef.current?.toggleWeaponSlot()}
@@ -260,35 +284,24 @@ export default function App() {
 
           <TacticalHudOverlay
             hud={hud}
-            onSelectWeapon={(weaponId: WeaponId) => engineRef.current?.selectWeapon(weaponId)}
+            onSelectWeapon={handleSelectWeapon}
             onToggleWeaponSlot={() => engineRef.current?.toggleWeaponSlot()}
             onInspectWeapon={() => engineRef.current?.triggerWeaponInspect()}
-            onSelectOptic={(optic: OpticType) => engineRef.current?.setOptic(optic)}
+            onSelectOptic={(optic: OpticType) =>
+              engineRef.current?.setOptic(optic)
+            }
             onToggleCanted={() => engineRef.current?.toggleCantedSight()}
             onToggleSuppressor={() => engineRef.current?.toggleSuppressor()}
             onCycleCharm={() => engineRef.current?.cycleWeaponCharm()}
             onToggleLaser={() => engineRef.current?.toggleLaser()}
             onCycleFireMode={() => engineRef.current?.cycleFireMode()}
-            onTriggerReload={(speed: boolean) => engineRef.current?.triggerReload(speed)}
-            onTriggerMagCheck={() => engineRef.current?.triggerMagCheck()}
             onResupply={() => engineRef.current?.resupplyAmmo()}
             onThrowGrenade={(type) => engineRef.current?.throwGrenade(type)}
-            onSelectDrill={(mode: DrillMode) => engineRef.current?.setDrillMode(mode)}
             onToggleMute={() => engineRef.current?.toggleMute()}
             onToggleDock={() => engineRef.current?.toggleDockCollapsed()}
-            onToggleTouchControls={() => engineRef.current?.toggleTouchControlsVisible()}
-            onSetQualityPreset={(preset: QualityPreset) => engineRef.current?.setQualityPreset(preset)}
-            onToggleDrs={() => engineRef.current?.toggleDynamicResolution()}
-            onSetGyroMode={(mode: GyroMode) => {
-              void engineRef.current?.setGyroMode(mode);
-            }}
-            onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
-            onToggleHaptics={() => engineRef.current?.toggleHaptics()}
             onToggleFullscreen={() => {
               void engineRef.current?.toggleFullscreenLandscape();
             }}
-            onSetGraphicQuality={(quality) => engineRef.current?.setGraphicQuality(quality)}
-            onSetFpsLimit={(fps) => engineRef.current?.setFpsLimit(fps)}
             onPause={() => engineRef.current?.pauseGame()}
           />
         </>
@@ -296,29 +309,38 @@ export default function App() {
 
       <GameShellModals
         hud={hud}
-        onStartGame={(mode?: DrillMode) => engineRef.current?.startGame(mode)}
+        onStartGame={(mode?: DrillMode) => handleStartMatch(mode)}
         onResumeGame={() => engineRef.current?.resumeGame()}
-        onRestartDrill={() => engineRef.current?.startGame(hud.drillMode)}
+        onRestartDrill={() => handleStartMatch(hud.drillMode)}
         onReturnToTitle={() => {
           engineRef.current?.returnToMainMenu();
           setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
         }}
-        onSelectDrillMode={(mode: DrillMode) => engineRef.current?.setDrillMode(mode)}
-        onSetQualityPreset={(preset: QualityPreset) => engineRef.current?.setQualityPreset(preset)}
-        onToggleDrs={() => engineRef.current?.toggleDynamicResolution()}
-        onSetGyroMode={(mode: GyroMode) => {
-          void engineRef.current?.setGyroMode(mode);
-        }}
-        onSetGyroSensitivity={(sens: number) => engineRef.current?.setGyroSensitivity(sens)}
-        onSetLookSensitivity={(sens: number) => engineRef.current?.setLookSensitivity(sens)}
-        onSetAdsSensitivity={(sens: number) => engineRef.current?.setAdsSensitivity(sens)}
-        onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
-        onToggleHaptics={() => engineRef.current?.toggleHaptics()}
+        onSelectDrillMode={(mode: DrillMode) =>
+          engineRef.current?.setDrillMode(mode)
+        }
+        onSetLookSensitivity={(sens: number) =>
+          engineRef.current?.setLookSensitivity(sens)
+        }
+        onSetAdsSensitivity={(sens: number) =>
+          engineRef.current?.setAdsSensitivity(sens)
+        }
+        onToggleHaptics={() =>
+          handleUpdateSettings({
+            ...gameSettingsRef.current,
+            vibration: !gameSettingsRef.current.vibration,
+          })
+        }
         onToggleFullscreen={() => {
           void engineRef.current?.toggleFullscreenLandscape();
         }}
-        onSetGraphicQuality={(quality) => engineRef.current?.setGraphicQuality(quality)}
-        onSetFpsLimit={(fps) => engineRef.current?.setFpsLimit(fps)}
+        onSetFpsLimit={(fps: number) =>
+          handleUpdateSettings({
+            ...gameSettingsRef.current,
+            fpsLimit: fps as FpsLimit,
+            preset: 'CUSTOM',
+          })
+        }
       />
     </main>
   );

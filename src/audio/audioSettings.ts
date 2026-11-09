@@ -1,6 +1,6 @@
-import { GameSettings } from '../graphics/graphicsSettings';
+import { GameSettings, loadGameSettings } from '../graphics/graphicsSettings';
 
-// Intercepta e gerencia o áudio sem tocar em soundEngine.ts
+// Intercepta e gerencia o áudio sem modificar soundEngine.ts
 let masterGainNode: GainNode | null = null;
 let dynamicsCompressorNode: DynamicsCompressorNode | null = null;
 let activeAudioContext: AudioContext | null = null;
@@ -8,117 +8,214 @@ let activeAudioContext: AudioContext | null = null;
 let currentSettings: GameSettings | null = null;
 let isAudioInitialized = false;
 
-// Subclasse ou patch de AudioContext
-export function initAudioSystem(initialSettings: GameSettings): void {
-  if (isAudioInitialized || typeof window === 'undefined') return;
-  isAudioInitialized = true;
-  currentSettings = initialSettings;
+const requestedVolumes = new WeakMap<HTMLMediaElement, number>();
+const seenMediaElements = new Set<HTMLMediaElement>();
+let nativeVolumeDescriptor: PropertyDescriptor | undefined;
+let nativeLoopDescriptor: PropertyDescriptor | undefined;
 
-  const NativeAudioContext = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  if (!NativeAudioContext) return;
+function getWebAudioMasterGainValue(settings: GameSettings | null): number {
+  const master = (settings?.volumeMaster ?? 100) / 100;
+  const effects = (settings?.volumeEffects ?? 100) / 100;
+  return Math.max(0, Math.min(1, master * effects));
+}
 
-  class ManagedAudioContext extends NativeAudioContext {
-    private localMasterGain: GainNode;
-    private localCompressor: DynamicsCompressorNode;
+function applyScaledVolumeToElement(
+  el: HTMLMediaElement,
+  settings: GameSettings | null
+): void {
+  if (!nativeVolumeDescriptor?.set) return;
+  const requested = requestedVolumes.has(el)
+    ? requestedVolumes.get(el)!
+    : nativeVolumeDescriptor.get
+      ? Number(nativeVolumeDescriptor.get.call(el))
+      : 1;
 
-    constructor(options?: AudioContextOptions) {
-      // Ajusta latência e sampleRate se qualidade for BAIXA (para poupar bateria/RAM em mobile)
-      const tunedOptions: AudioContextOptions = { ...options };
-      if (currentSettings?.audioQuality === 'LOW') {
-        tunedOptions.latencyHint = 'playback';
-      } else if (currentSettings?.audioQuality === 'HIGH') {
-        tunedOptions.latencyHint = 'interactive';
-      }
-
-      super(tunedOptions);
-      activeAudioContext = this;
-
-      // Cria nó compressor (limitador de picos)
-      this.localCompressor = this.createDynamicsCompressor();
-      this.localCompressor.threshold.setValueAtTime(-1.0, this.currentTime);
-      this.localCompressor.knee.setValueAtTime(6.0, this.currentTime);
-      this.localCompressor.ratio.setValueAtTime(12.0, this.currentTime);
-      this.localCompressor.attack.setValueAtTime(0.003, this.currentTime);
-      this.localCompressor.release.setValueAtTime(0.15, this.currentTime);
-
-      // Cria nó de ganho master
-      this.localMasterGain = this.createGain();
-      const masterVol = (currentSettings?.volumeMaster ?? 100) / 100;
-      this.localMasterGain.gain.setValueAtTime(masterVol, this.currentTime);
-
-      // Encadeamento: localMasterGain -> localCompressor -> super.destination
-      this.localMasterGain.connect(this.localCompressor);
-      this.localCompressor.connect(super.destination);
-
-      masterGainNode = this.localMasterGain;
-      dynamicsCompressorNode = this.localCompressor;
-    }
-
-    // Sobrescreve destination para que nós de som se conectem ao masterGain
-    override get destination(): AudioDestinationNode {
-      return (this.localMasterGain as unknown as AudioDestinationNode) || super.destination;
-    }
+  if (!requestedVolumes.has(el)) {
+    requestedVolumes.set(el, requested);
   }
 
-  // Substitui no escopo global antes de qualquer inicialização do soundEngine
-  window.AudioContext = ManagedAudioContext as unknown as typeof AudioContext;
-  if ('webkitAudioContext' in window) {
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext =
-      ManagedAudioContext as unknown as typeof AudioContext;
-  }
+  const master = (settings?.volumeMaster ?? 100) / 100;
+  const isMusic = Boolean(el.loop || el.dataset?.role === 'music');
+  const categoryScale = isMusic
+    ? (settings?.volumeMusic ?? 80) / 100
+    : (settings?.volumeEffects ?? 100) / 100;
 
-  // Intercepta elementos HTMLMediaElement (músicas/efeitos HTML5)
-  interceptMediaElements();
+  const finalVolume = Math.max(0, Math.min(1, requested * master * categoryScale));
+  nativeVolumeDescriptor.set.call(el, finalVolume);
 }
 
 function interceptMediaElements(): void {
   if (typeof HTMLMediaElement === 'undefined') return;
 
-  const originalPlay = HTMLMediaElement.prototype.play;
-  HTMLMediaElement.prototype.play = function (...args: unknown[]) {
-    if (currentSettings) {
-      applyVolumeToMediaElement(this, currentSettings);
-    }
-    return originalPlay.apply(this, args as []);
-  };
+  nativeVolumeDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLMediaElement.prototype,
+    'volume'
+  );
+  nativeLoopDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLMediaElement.prototype,
+    'loop'
+  );
+
+  if (nativeVolumeDescriptor?.set && nativeVolumeDescriptor?.get) {
+    Object.defineProperty(HTMLMediaElement.prototype, 'volume', {
+      configurable: true,
+      enumerable: true,
+      get(this: HTMLMediaElement): number {
+        return requestedVolumes.has(this)
+          ? requestedVolumes.get(this)!
+          : nativeVolumeDescriptor!.get!.call(this);
+      },
+      set(this: HTMLMediaElement, value: number) {
+        const clamped = Math.max(0, Math.min(1, Number(value) || 0));
+        requestedVolumes.set(this, clamped);
+        seenMediaElements.add(this);
+        applyScaledVolumeToElement(this, currentSettings);
+      },
+    });
+  }
+
+  if (nativeLoopDescriptor?.set && nativeLoopDescriptor?.get) {
+    Object.defineProperty(HTMLMediaElement.prototype, 'loop', {
+      configurable: true,
+      enumerable: true,
+      get(this: HTMLMediaElement): boolean {
+        return nativeLoopDescriptor!.get!.call(this);
+      },
+      set(this: HTMLMediaElement, value: boolean) {
+        nativeLoopDescriptor!.set!.call(this, Boolean(value));
+        seenMediaElements.add(this);
+        applyScaledVolumeToElement(this, currentSettings);
+      },
+    });
+  }
 }
 
-function applyVolumeToMediaElement(el: HTMLMediaElement, settings: GameSettings): void {
-  const master = settings.volumeMaster / 100;
-  // Elementos em loop geralmente são trilha sonora / música de fundo
-  const isMusic = el.loop || el.dataset.role === 'music';
-  const specificVol = isMusic ? settings.volumeMusic / 100 : settings.volumeEffects / 100;
-  el.volume = Math.max(0, Math.min(1, master * specificVol));
+export function initAudioSystem(initialSettings: GameSettings): void {
+  currentSettings = initialSettings;
+  if (isAudioInitialized || typeof window === 'undefined') return;
+  isAudioInitialized = true;
+
+  const NativeAudioContext =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext })
+      .webkitAudioContext;
+
+  if (NativeAudioContext) {
+    class ManagedAudioContext extends NativeAudioContext {
+      private localMasterGain: GainNode;
+      private localCompressor: DynamicsCompressorNode;
+
+      constructor(options?: AudioContextOptions) {
+        const tunedOptions: AudioContextOptions = { ...options };
+        const quality = currentSettings?.audioQuality ?? 'HIGH';
+
+        if (quality === 'LOW') {
+          tunedOptions.latencyHint = 'balanced';
+          tunedOptions.sampleRate = 22050;
+        } else if (quality === 'MEDIUM') {
+          tunedOptions.latencyHint = 'interactive';
+          tunedOptions.sampleRate = 32000;
+        } else {
+          tunedOptions.latencyHint = 'interactive';
+          delete tunedOptions.sampleRate;
+        }
+
+        super(tunedOptions);
+        activeAudioContext = this;
+
+        const limiterOn = currentSettings?.peakLimiter ?? true;
+        this.localCompressor = this.createDynamicsCompressor();
+        this.localCompressor.threshold.setValueAtTime(
+          limiterOn ? -1.0 : 0.0,
+          this.currentTime
+        );
+        this.localCompressor.knee.setValueAtTime(6.0, this.currentTime);
+        this.localCompressor.ratio.setValueAtTime(
+          limiterOn ? 12.0 : 1.0,
+          this.currentTime
+        );
+        this.localCompressor.attack.setValueAtTime(0.003, this.currentTime);
+        this.localCompressor.release.setValueAtTime(0.15, this.currentTime);
+
+        this.localMasterGain = this.createGain();
+        this.localMasterGain.gain.setValueAtTime(
+          getWebAudioMasterGainValue(currentSettings),
+          this.currentTime
+        );
+
+        this.localMasterGain.connect(this.localCompressor);
+        this.localCompressor.connect(super.destination);
+
+        masterGainNode = this.localMasterGain;
+        dynamicsCompressorNode = this.localCompressor;
+      }
+
+      override get destination(): AudioDestinationNode {
+        return (
+          (this.localMasterGain as unknown as AudioDestinationNode) ||
+          super.destination
+        );
+      }
+    }
+
+    window.AudioContext = ManagedAudioContext as unknown as typeof AudioContext;
+    if ('webkitAudioContext' in window) {
+      (
+        window as unknown as { webkitAudioContext: typeof AudioContext }
+      ).webkitAudioContext = ManagedAudioContext as unknown as typeof AudioContext;
+    }
+  }
+
+  interceptMediaElements();
 }
 
 export function applyAudioSettings(settings: GameSettings): void {
   currentSettings = settings;
 
-  // Atualiza ganho master no AudioContext ativo
+  // Todos os sons Web Audio são efeitos: volumeMaster/100 * volumeEffects/100
   if (masterGainNode && activeAudioContext) {
-    const targetMaster = Math.max(0, Math.min(1, settings.volumeMaster / 100));
-    masterGainNode.gain.setTargetAtTime(targetMaster, activeAudioContext.currentTime, 0.05);
+    const targetGain = getWebAudioMasterGainValue(settings);
+    masterGainNode.gain.setTargetAtTime(
+      targetGain,
+      activeAudioContext.currentTime,
+      0.05
+    );
   }
 
-  // Habilita ou desabilita compressão de picos
+  // Atualiza limitador de picos
   if (dynamicsCompressorNode && activeAudioContext) {
     if (settings.peakLimiter) {
-      dynamicsCompressorNode.threshold.setTargetAtTime(-1.0, activeAudioContext.currentTime, 0.05);
-      dynamicsCompressorNode.ratio.setTargetAtTime(12.0, activeAudioContext.currentTime, 0.05);
+      dynamicsCompressorNode.threshold.setTargetAtTime(
+        -1.0,
+        activeAudioContext.currentTime,
+        0.05
+      );
+      dynamicsCompressorNode.ratio.setTargetAtTime(
+        12.0,
+        activeAudioContext.currentTime,
+        0.05
+      );
     } else {
-      // Deixa neutro se desabilitado
-      dynamicsCompressorNode.threshold.setTargetAtTime(0.0, activeAudioContext.currentTime, 0.05);
-      dynamicsCompressorNode.ratio.setTargetAtTime(1.0, activeAudioContext.currentTime, 0.05);
+      dynamicsCompressorNode.threshold.setTargetAtTime(
+        0.0,
+        activeAudioContext.currentTime,
+        0.05
+      );
+      dynamicsCompressorNode.ratio.setTargetAtTime(
+        1.0,
+        activeAudioContext.currentTime,
+        0.05
+      );
     }
   }
 
-  // Atualiza elementos de áudio existentes no DOM
-  if (typeof document !== 'undefined') {
-    const audios = document.querySelectorAll('audio, video');
-    audios.forEach((media) => {
-      if (media instanceof HTMLMediaElement) {
-        applyVolumeToMediaElement(media, settings);
-      }
-    });
-  }
+  // Reaplica escala a todos os HTMLMediaElement vistos (inclusive new Audio())
+  seenMediaElements.forEach((el) => {
+    applyScaledVolumeToElement(el, settings);
+  });
+}
+
+// Inicializa imediatamente ao carregar o módulo para interceptar new Audio() antes do soundEngine
+if (typeof window !== 'undefined') {
+  initAudioSystem(loadGameSettings());
 }

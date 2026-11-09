@@ -1,11 +1,8 @@
 import React from 'react';
 import {
-  DrillMode,
   GrenadeType,
-  GyroMode,
   HudState,
   OpticType,
-  QualityPreset,
   WeaponId,
 } from '../types/game';
 import { HudBottomWeaponDock } from './HudBottomWeaponDock';
@@ -24,22 +21,11 @@ interface TacticalHudOverlayProps {
   onCycleCharm: () => void;
   onToggleLaser: () => void;
   onCycleFireMode: () => void;
-  onTriggerReload: (speed: boolean) => void;
-  onTriggerMagCheck: () => void;
   onResupply: () => void;
   onThrowGrenade: (type: GrenadeType) => void;
-  onSelectDrill: (mode: DrillMode) => void;
   onToggleMute: () => void;
   onToggleDock: () => void;
-  onToggleTouchControls: () => void;
-  onSetQualityPreset: (preset: QualityPreset) => void;
-  onToggleDrs: () => void;
-  onSetGyroMode: (mode: GyroMode) => void;
-  onRecalibrateGyro: () => void;
-  onToggleHaptics: () => void;
   onToggleFullscreen: () => void;
-  onSetGraphicQuality: (quality: 'HIGH' | 'LOW') => void;
-  onSetFpsLimit: (fps: number) => void;
   onPause: () => void;
 }
 
