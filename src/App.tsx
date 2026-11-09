@@ -17,7 +17,7 @@ import {
 } from './graphics/graphicsSettings';
 import { mobileHardware } from './mobile/nativeHardware';
 import { TacticalFPSEngine } from './three/fpsEngine';
-import { DrillMode, HudState, OpticType, WeaponId } from './types/game';
+import { DrillMode, GyroMode, HudState, OpticType, WeaponId } from './types/game';
 
 const INITIAL_HUD_STATE: HudState = {
   screen: 'INTRO',
@@ -309,6 +309,8 @@ export default function App() {
 
       <GameShellModals
         hud={hud}
+        fpsLimit={gameSettings.fpsLimit}
+        vibration={gameSettings.vibration}
         onStartGame={(mode?: DrillMode) => handleStartMatch(mode)}
         onResumeGame={() => engineRef.current?.resumeGame()}
         onRestartDrill={() => handleStartMatch(hud.drillMode)}
@@ -319,12 +321,19 @@ export default function App() {
         onSelectDrillMode={(mode: DrillMode) =>
           engineRef.current?.setDrillMode(mode)
         }
+        onSetGyroMode={(mode: GyroMode) => {
+          void engineRef.current?.setGyroMode(mode);
+        }}
+        onSetGyroSensitivity={(sens: number) =>
+          engineRef.current?.setGyroSensitivity(sens)
+        }
         onSetLookSensitivity={(sens: number) =>
           engineRef.current?.setLookSensitivity(sens)
         }
         onSetAdsSensitivity={(sens: number) =>
           engineRef.current?.setAdsSensitivity(sens)
         }
+        onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
         onToggleHaptics={() =>
           handleUpdateSettings({
             ...gameSettingsRef.current,

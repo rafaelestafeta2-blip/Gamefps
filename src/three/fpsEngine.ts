@@ -84,7 +84,6 @@ export class TacticalFPSEngine {
   private drsAccumTime = 0;
   private drsFrameCount = 0;
   private currentRenderScale = 1.0;
-  private fpsLimiterAccumulator = 0;
   private aimRaycastTimer = 0;
   private aimRaycastInitialized = false;
   private cachedAimHits: THREE.Intersection[] = [];
@@ -1583,7 +1582,6 @@ export class TacticalFPSEngine {
   private onWindowFocus = () => {
     this.isWindowFocused = true;
     this.lastTime = performance.now();
-    this.fpsLimiterAccumulator = 0;
   };
 
   private onVisibilityChange = () => {
@@ -1593,7 +1591,6 @@ export class TacticalFPSEngine {
     } else {
       this.isWindowFocused = true;
       this.lastTime = performance.now();
-      this.fpsLimiterAccumulator = 0;
     }
   };
 
@@ -2309,29 +2306,24 @@ export class TacticalFPSEngine {
     if (this.disposed) return;
 
     const now = performance.now();
-    const rawDt = (now - this.lastTime) / 1000;
-    this.lastTime = now;
+    const elapsed = (now - this.lastTime) / 1000;
 
     if (!this.isWindowFocused) {
+      this.lastTime = now;
       this.frameId = requestAnimationFrame(this.tick);
       return;
     }
 
-    if (this.state.fpsLimit > 0) {
-      const targetInterval = 1 / this.state.fpsLimit;
-      this.fpsLimiterAccumulator += rawDt;
-      if (this.fpsLimiterAccumulator < targetInterval - 0.0015) {
-        this.frameId = requestAnimationFrame(this.tick);
-        return;
-      }
-      this.fpsLimiterAccumulator = Math.max(
-        0,
-        this.fpsLimiterAccumulator - targetInterval
-      );
-      if (this.fpsLimiterAccumulator > targetInterval) {
-        this.fpsLimiterAccumulator = 0;
-      }
+    if (
+      this.state.fpsLimit > 0 &&
+      elapsed < 1 / this.state.fpsLimit - 0.0015
+    ) {
+      this.frameId = requestAnimationFrame(this.tick);
+      return;
     }
+
+    this.lastTime = now;
+    const rawDt = elapsed;
 
     // Clamp delta time to prevent physics tunneling on tab switch
     const dt = Math.min(Math.max(rawDt, 0.001), 0.05);

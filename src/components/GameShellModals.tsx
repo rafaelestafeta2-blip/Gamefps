@@ -1,42 +1,54 @@
 import React, { useState } from 'react';
-import { DrillMode, HudState } from '../types/game';
+import { DrillMode, GyroMode, HudState } from '../types/game';
 import { ApkInstructionsModal } from './ApkInstructionsModal';
 
 interface GameShellModalsProps {
   hud: HudState;
+  fpsLimit: number;
+  vibration: boolean;
   onStartGame: (mode?: DrillMode) => void;
   onResumeGame: () => void;
   onRestartDrill: () => void;
   onReturnToTitle: () => void;
   onSelectDrillMode: (mode: DrillMode) => void;
+  onSetGyroMode: (mode: GyroMode) => void;
+  onSetGyroSensitivity: (sens: number) => void;
   onSetLookSensitivity: (sens: number) => void;
   onSetAdsSensitivity: (sens: number) => void;
+  onRecalibrateGyro: () => void;
   onToggleHaptics: () => void;
   onToggleFullscreen: () => void;
   onSetFpsLimit: (fps: number) => void;
 }
 
+const DRILL_PROTOCOLS: { mode: DrillMode; title: string; desc: string }[] = [
+  { mode: 'FREE_RANGE', title: '01. Estande Livre', desc: 'Raias de 15m a 55m, gongos AR500 e telemetria balística.' },
+  { mode: 'KILLHOUSE_BLITZ', title: '02. Incursão CQB', desc: 'Percurso cronometrado no Killhouse com alvos blindados.' },
+  { mode: 'TACTICAL_WAVE', title: '03. Combate Hostil', desc: 'Unidades táticas patrulham, miram com laser e revidam.' },
+];
+
+const SENS_PRESETS: [string, number, number][] = [
+  ['Baixa', 0.6, 0.7],
+  ['Padrão', 1.0, 1.0],
+  ['Alta', 1.5, 1.2],
+  ['Pró', 2.2, 1.5],
+];
+
+const GYRO_MODES: [GyroMode, string][] = [
+  ['OFF', 'Desligado'],
+  ['ADS_ONLY', 'Só na Mira (ADS)'],
+  ['ALWAYS', 'Sempre'],
+];
+
 export const GameShellModals: React.FC<GameShellModalsProps> = ({
-  hud,
-  onStartGame,
-  onResumeGame,
-  onRestartDrill,
-  onReturnToTitle,
-  onSelectDrillMode,
-  onSetLookSensitivity,
-  onSetAdsSensitivity,
-  onToggleHaptics,
-  onToggleFullscreen,
-  onSetFpsLimit,
+  hud, fpsLimit, vibration, onStartGame, onResumeGame, onRestartDrill,
+  onReturnToTitle, onSelectDrillMode, onSetGyroMode, onSetGyroSensitivity,
+  onSetLookSensitivity, onSetAdsSensitivity, onRecalibrateGyro,
+  onToggleHaptics, onToggleFullscreen, onSetFpsLimit,
 }) => {
   const [showApkModal, setShowApkModal] = useState(false);
 
-  if (
-    hud.screen === 'PLAYING' ||
-    hud.screen === 'INTRO' ||
-    hud.screen === 'LOADING' ||
-    hud.screen === 'MAIN_MENU'
-  ) {
+  if (hud.screen === 'PLAYING' || hud.screen === 'INTRO' || hud.screen === 'LOADING' || hud.screen === 'MAIN_MENU') {
     return null;
   }
 
@@ -51,7 +63,7 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
             SENSIBILIDADE DA MIRA, CÂMERA &amp; DESEMPENHO
           </div>
           <div className="text-[11px] text-slate-400">
-            Ajuste a velocidade de rotação da câmera e da mira aberta (ADS)
+            Ajuste a velocidade de rotação da câmera, mira aberta (ADS) e giroscópio
           </div>
         </div>
         <button
@@ -59,9 +71,7 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
           onClick={onToggleFullscreen}
           className="px-3 py-1.5 text-xs font-mono font-semibold rounded-lg bg-amber-500/20 border border-amber-500/50 text-amber-300 hover:bg-amber-500/30 transition-colors cursor-pointer"
         >
-          {hud.isFullscreen
-            ? 'Sair da Tela Cheia'
-            : 'Ativar Tela Cheia Horizontal'}
+          {hud.isFullscreen ? 'Sair da Tela Cheia' : 'Ativar Tela Cheia Horizontal'}
         </button>
       </div>
 
@@ -72,14 +82,7 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
             SENSIBILIDADE DA MIRA (TOQUE NA TELA)
           </span>
           <div className="flex items-center gap-1.5">
-            {(
-              [
-                ['Baixa', 0.6, 0.7],
-                ['Padrão', 1.0, 1.0],
-                ['Alta', 1.5, 1.2],
-                ['Pró', 2.2, 1.5],
-              ] as [string, number, number][]
-            ).map(([label, lookVal, adsVal]) => {
+            {SENS_PRESETS.map(([label, lookVal, adsVal]) => {
               const isSelected =
                 Math.abs(hud.lookSensitivity - lookVal) < 0.08 &&
                 Math.abs(hud.adsSensitivity - adsVal) < 0.08;
@@ -105,7 +108,6 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {/* Free Look Camera Sensitivity */}
           <div className="bg-[#0d121b] border border-white/10 rounded-lg p-2.5">
             <div className="flex items-center justify-between text-xs font-mono text-slate-200 mb-1.5">
               <span>Câmera / Giro Livre</span>
@@ -124,7 +126,6 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
             />
           </div>
 
-          {/* ADS Scope Sensitivity */}
           <div className="bg-[#0d121b] border border-white/10 rounded-lg p-2.5">
             <div className="flex items-center justify-between text-xs font-mono text-slate-200 mb-1.5">
               <span>Mira Aberta (ADS / Luneta)</span>
@@ -145,12 +146,63 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
         </div>
       </div>
 
+      {/* Gyroscope Controls (Mode, Sensitivity, Recalibrate) */}
+      <div className="bg-[#090c12] border border-white/10 rounded-lg p-3 space-y-2.5 font-mono text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-slate-200 font-bold">
+            GIROSCÓPIO (MIRA POR INCLINAÇÃO):
+          </span>
+          <div className="flex items-center gap-1.5">
+            {GYRO_MODES.map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onSetGyroMode(mode)}
+                className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${
+                  hud.gyroMode === mode
+                    ? 'bg-amber-500 text-slate-950 border-amber-300 font-bold'
+                    : 'bg-slate-900 border-white/15 text-slate-300 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <div className="flex-1 min-w-[180px] bg-[#0d121b] border border-white/10 rounded-lg p-2">
+            <div className="flex items-center justify-between text-xs text-slate-200 mb-1">
+              <span>Sensibilidade do Giroscópio</span>
+              <span className="text-amber-400 font-bold tabular-nums">
+                {Math.round(hud.gyroSensitivity * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.2"
+              max="3.0"
+              step="0.05"
+              value={hud.gyroSensitivity}
+              onChange={(e) => onSetGyroSensitivity(parseFloat(e.target.value))}
+              className="w-full accent-amber-500 cursor-pointer"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={onRecalibrateGyro}
+            className="px-3 py-2 rounded-lg text-xs font-mono font-semibold bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
+          >
+            Recalibrar Centro
+          </button>
+        </div>
+      </div>
+
       {/* FPS Limit & Haptics Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
         <div className="bg-[#090c12] border border-white/10 rounded-lg p-2.5">
-          <div className="text-slate-300 font-bold mb-1.5">
-            LIMITE DE FPS:
-          </div>
+          <div className="text-slate-300 font-bold mb-1.5">LIMITE DE FPS:</div>
           <div className="grid grid-cols-4 gap-1.5">
             {[30, 60, 120, 0].map((fps) => (
               <button
@@ -158,7 +210,7 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
                 type="button"
                 onClick={() => onSetFpsLimit(fps)}
                 className={`py-1.5 rounded-lg font-bold border text-[11px] transition-colors cursor-pointer ${
-                  hud.fpsLimit === fps
+                  fpsLimit === fps
                     ? 'bg-amber-500 text-slate-950 border-amber-300'
                     : 'bg-slate-900 border-white/15 text-slate-300 hover:text-white'
                 }`}
@@ -178,12 +230,12 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
               type="button"
               onClick={onToggleHaptics}
               className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-semibold border transition-colors cursor-pointer ${
-                hud.hapticsEnabled
+                vibration
                   ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
                   : 'bg-slate-900 border-white/10 text-slate-400'
               }`}
             >
-              Vibração: {hud.hapticsEnabled ? 'ATIVADA' : 'DESATIVADA'}
+              Vibração: {vibration ? 'ATIVADA' : 'DESATIVADA'}
             </button>
             <button
               type="button"
@@ -201,10 +253,7 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
   if (hud.screen === 'TITLE') {
     return (
       <div className="fixed inset-0 z-20 flex flex-col justify-between p-4 sm:p-7 md:p-10 pointer-events-none bg-gradient-to-r from-[#090b0e]/95 via-[#090b0e]/75 to-transparent overflow-y-auto">
-        <ApkInstructionsModal
-          visible={showApkModal}
-          onClose={() => setShowApkModal(false)}
-        />
+        <ApkInstructionsModal visible={showApkModal} onClose={() => setShowApkModal(false)} />
 
         <div className="flex flex-wrap items-center justify-between gap-2 pointer-events-auto">
           <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
@@ -214,7 +263,6 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
             <span aria-hidden="true">·</span>
             <span>Haptics</span>
           </div>
-
           <button
             type="button"
             onClick={() => setShowApkModal(true)}
@@ -230,56 +278,21 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
               SELECIONE O PROTOCOLO DE TREINAMENTO
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => onSelectDrillMode('FREE_RANGE')}
-                className={`text-left p-2.5 rounded-xl border transition-colors cursor-pointer ${
-                  hud.drillMode === 'FREE_RANGE'
-                    ? 'bg-amber-500/15 border-amber-500 text-slate-100'
-                    : 'bg-[#0d1118]/90 border-white/10 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <div className="font-display font-bold text-sm text-slate-100">
-                  01. Estande Livre
-                </div>
-                <div className="text-xs text-slate-400 mt-0.5">
-                  Raias de 15m a 55m, gongos AR500 e telemetria balística.
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onSelectDrillMode('KILLHOUSE_BLITZ')}
-                className={`text-left p-2.5 rounded-xl border transition-colors cursor-pointer ${
-                  hud.drillMode === 'KILLHOUSE_BLITZ'
-                    ? 'bg-amber-500/15 border-amber-500 text-slate-100'
-                    : 'bg-[#0d1118]/90 border-white/10 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <div className="font-display font-bold text-sm text-slate-100">
-                  02. Incursão CQB
-                </div>
-                <div className="text-xs text-slate-400 mt-0.5">
-                  Percurso cronometrado no Killhouse com alvos blindados.
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onSelectDrillMode('TACTICAL_WAVE')}
-                className={`text-left p-2.5 rounded-xl border transition-colors cursor-pointer ${
-                  hud.drillMode === 'TACTICAL_WAVE'
-                    ? 'bg-amber-500/15 border-amber-500 text-slate-100'
-                    : 'bg-[#0d1118]/90 border-white/10 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <div className="font-display font-bold text-sm text-slate-100">
-                  03. Combate Hostil
-                </div>
-                <div className="text-xs text-slate-400 mt-0.5">
-                  Unidades táticas patrulham, miram com laser e revidam.
-                </div>
-              </button>
+              {DRILL_PROTOCOLS.map(({ mode, title, desc }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onSelectDrillMode(mode)}
+                  className={`text-left p-2.5 rounded-xl border transition-colors cursor-pointer ${
+                    hud.drillMode === mode
+                      ? 'bg-amber-500/15 border-amber-500 text-slate-100'
+                      : 'bg-[#0d1118]/90 border-white/10 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="font-display font-bold text-sm text-slate-100">{title}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">{desc}</div>
+                </button>
+              ))}
             </div>
           </div>
 
@@ -301,10 +314,7 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#090b0e]/88 p-4 sm:p-6 overflow-y-auto pointer-events-auto">
-      <ApkInstructionsModal
-        visible={showApkModal}
-        onClose={() => setShowApkModal(false)}
-      />
+      <ApkInstructionsModal visible={showApkModal} onClose={() => setShowApkModal(false)} />
 
       <div className="bg-[#0e131b] border border-white/15 rounded-2xl p-5 sm:p-7 max-w-2xl w-full shadow-2xl space-y-4 my-auto">
         <div className="flex items-center justify-between">
@@ -314,7 +324,6 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
               {hud.screen === 'VICTORY' && 'PERCURSO TÁTICO CONCLUÍDO'}
               {hud.screen === 'GAME_OVER' && 'OPERADOR NEUTRALIZADO'}
             </div>
-
             <h2 className="font-display text-xl sm:text-2xl font-bold text-slate-100">
               {hud.screen === 'PAUSED' && 'Central Tática & GPU Mobile'}
               {hud.screen === 'VICTORY' && 'Killhouse Limpo com Sucesso'}
@@ -323,12 +332,8 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
           </div>
 
           <div className="text-right font-mono">
-            <div className="text-xs text-emerald-400 font-semibold">
-              {hud.liveFps} FPS
-            </div>
-            <div className="text-[11px] text-slate-400">
-              Escala DRS: {hud.renderScalePercent}%
-            </div>
+            <div className="text-xs text-emerald-400 font-semibold">{hud.liveFps} FPS</div>
+            <div className="text-[11px] text-slate-400">Escala DRS: {hud.renderScalePercent}%</div>
           </div>
         </div>
 
@@ -344,15 +349,11 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
           </div>
           <div>
             <div className="text-[11px] text-slate-400">HEADSHOTS</div>
-            <div className="text-lg font-bold text-emerald-400">
-              {hud.headshots}
-            </div>
+            <div className="text-lg font-bold text-emerald-400">{hud.headshots}</div>
           </div>
           <div>
             <div className="text-[11px] text-slate-400">TEMPO</div>
-            <div className="text-lg font-bold text-cyan-400">
-              {hud.courseTimerSec.toFixed(1)}s
-            </div>
+            <div className="text-lg font-bold text-cyan-400">{hud.courseTimerSec.toFixed(1)}s</div>
           </div>
         </div>
 

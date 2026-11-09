@@ -136,7 +136,9 @@ export function applyGraphicsToEngine(
 
   engine.state.dynamicResolutionEnabled = enableDrs;
   engine.currentRenderScale = resolvedScale;
-  renderer.setPixelRatio(resolvedScale);
+  if (Math.abs(renderer.getPixelRatio() - resolvedScale) > 0.001) {
+    renderer.setPixelRatio(resolvedScale);
+  }
   engine.state.renderScalePercent = Math.round((resolvedScale / maxDpr) * 100);
 
   let forceAllMaterialsNeedsUpdate = false;
