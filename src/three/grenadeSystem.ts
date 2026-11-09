@@ -794,7 +794,10 @@ export class TacticalGrenadeSystem {
       .add(new THREE.Vector3(0, 3.3, 0));
   }
 
-  private updateTrajectoryPreview(colliders: ColliderBox[]): void {
+  private updateTrajectoryPreview(
+    colliders: ColliderBox[],
+    getGroundHeight?: (x: number, y: number, z: number) => number
+  ): void {
     if (!this.heldGrenadeType && !this.throwSequenceActive) {
       this.trajectoryGroup.visible = false;
       return;
@@ -864,16 +867,19 @@ export class TacticalGrenadeSystem {
         _simPos.z = nextZ;
       }
 
-      if (nextY <= 0.065) {
-        _simPos.y = 0.065;
+      const floorY = getGroundHeight ? getGroundHeight(_simPos.x, nextY, _simPos.z) : 0;
+      const groundThreshold = floorY + 0.065;
+
+      if (nextY <= groundThreshold) {
+        _simPos.y = groundThreshold;
         landedX = _simPos.x;
-        landedY = 0.025;
+        landedY = floorY + 0.025;
         landedZ = _simPos.z;
         stopped = true;
       } else {
         _simPos.y = nextY;
         landedX = _simPos.x;
-        landedY = Math.max(0.025, _simPos.y);
+        landedY = Math.max(floorY + 0.025, _simPos.y);
         landedZ = _simPos.z;
       }
     }
@@ -942,8 +948,13 @@ export class TacticalGrenadeSystem {
       (Math.random() - 0.5) * 6
     );
 
-    // 2. Play real throw sound!
+    // 2. Play real throw sound and character battle chatter voice for grenades!
     soundEngine.playGrenadeThrow();
+    if (type === 'SMOKE') {
+      soundEngine.playSmokeGrenadeVoice();
+    } else if (type === 'FRAG') {
+      soundEngine.playFragGrenadeVoice();
+    }
 
     this.projectiles.push({
       type,
@@ -1077,13 +1088,18 @@ export class TacticalGrenadeSystem {
     this.trajectoryGroup.visible = false;
   }
 
-  public update(dt: number, colliders: ColliderBox[], walkBobAmp = 0): void {
+  public update(
+    dt: number,
+    colliders: ColliderBox[],
+    walkBobAmp = 0,
+    getGroundHeight?: (x: number, y: number, z: number) => number
+  ): void {
     if (this.equipCooldownTimer > 0) {
       this.equipCooldownTimer = Math.max(0, this.equipCooldownTimer - dt);
     }
 
     // 1. Update Trajectory Arc Preview when holding a grenade
-    this.updateTrajectoryPreview(colliders);
+    this.updateTrajectoryPreview(colliders, getGroundHeight);
 
     // 2. Update First-Person Articulated Hand Pose OR Pin-Pull, Wind-Up & Throw Sequence
     if (this.throwSequenceActive) {
@@ -1172,9 +1188,12 @@ export class TacticalGrenadeSystem {
           proj.group.position.z = nextZ;
         }
 
-        // Floor bounce at y = 0.065m
-        if (nextY <= 0.065) {
-          proj.group.position.y = 0.065;
+        // Floor bounce with 3D map ground elevation support
+        const floorY = getGroundHeight ? getGroundHeight(nextX, nextY, nextZ) : 0;
+        const groundThreshold = floorY + 0.065;
+
+        if (nextY <= groundThreshold) {
+          proj.group.position.y = groundThreshold;
           if (Math.abs(proj.vel.y) > 1.1) {
             proj.vel.y = Math.abs(proj.vel.y) * 0.36;
             proj.vel.x *= 0.68;

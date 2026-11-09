@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
+import { ControlSettings } from '../controls/hudLayoutSettings';
 import { GameSettings } from '../graphics/graphicsSettings';
 import { mobileHardware } from '../mobile/nativeHardware';
 import {
   getNextRank,
   getRankForXp,
+  loadSavedPlayerCash,
   loadSavedPlayerXp,
 } from '../progression/ranks';
 import { DrillMode, WeaponId } from '../types/game';
 import { GraphicsSettingsPanel } from './GraphicsSettingsPanel';
+import { MainMenuPlayPanel } from './MainMenuPlayPanel';
 import { MainMenuRanksModal } from './MainMenuRanksModal';
 import { MenuBackground } from './MenuBackground';
 import { WarfaceRankIcon } from './WarfaceRankIcon';
@@ -22,6 +25,9 @@ interface MainMenuProps {
   gameSettings?: GameSettings;
   onUpdateGameSettings?: (settings: GameSettings) => void;
   onResetGameSettings?: () => void;
+  controlSettings?: ControlSettings;
+  onUpdateControlSettings?: (next: ControlSettings) => void;
+  onRecalibrateGyro?: () => void;
 }
 
 const WEAPON_DISPLAY_NAMES: Record<
@@ -47,13 +53,24 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   gameSettings,
   onUpdateGameSettings,
   onResetGameSettings,
+  controlSettings,
+  onUpdateControlSettings,
+  onRecalibrateGyro,
 }) => {
   const [activeTab, setActiveTab] = useState<
     'PLAY' | 'WEAPON' | 'RANKS' | 'BATTLE_PASS' | 'SETTINGS'
   >('PLAY');
   const [showNewsModal, setShowNewsModal] = useState(false);
 
-  // Live Warface Progression State
+  // Inicia a música tema ao entrar no Menu Principal e para ao sair para a partida
+  useEffect(() => {
+    soundEngine.playMenuMusic();
+    return () => {
+      soundEngine.stopMenuMusic();
+    };
+  }, []);
+
+  // Live Warface Progression & Tactical Cash Balance
   const playerXp = loadSavedPlayerXp();
   const currentRank = getRankForXp(playerXp);
   const nextRank = getNextRank(currentRank.level);
@@ -66,6 +83,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       ((playerXp - xpCurrentLevelBase) / (xpForNextLevel - xpCurrentLevelBase)) * 100
     )
   );
+  const playerCashBalance = 15000 + playerXp * 2 + loadSavedPlayerCash();
 
   const handleHover = () => {
     soundEngine.playMenuHover();
@@ -90,32 +108,34 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   return (
     <div
       onClick={() => {
+        soundEngine.playMenuMusic();
         void mobileHardware.enterFullscreenLandscape();
       }}
       className="fixed inset-0 z-40 bg-[#06080c] select-none text-white flex flex-col justify-between overflow-hidden font-sans"
     >
-      {/* 1. BACKGROUND */}
+      {/* 1. BACKGROUND (Soldado + Fumaça Volumétrica + Fagulhas) */}
       <MenuBackground />
 
-      {/* 2. TOP NAVIGATION BAR */}
-      <header className="relative z-20 w-full h-11 sm:h-12 px-3 sm:px-6 bg-[#0a0d13]/92 border-b border-white/15 flex items-center justify-between gap-2 shrink-0 backdrop-blur-md">
-        <div className="flex items-center gap-3 sm:gap-5 min-w-0 overflow-x-auto no-scrollbar">
+      {/* 2. TOP NAVIGATION BAR (Minimalista com Saldo de Dinheiro + Patente Compacta) */}
+      <header className="relative z-20 w-full h-10 sm:h-11 px-3 sm:px-5 bg-[#0a0d13]/90 border-b border-white/10 flex items-center justify-between gap-2 shrink-0 backdrop-blur-md">
+        <div className="flex items-center gap-2.5 sm:gap-4 min-w-0 overflow-x-auto no-scrollbar">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               soundEngine.playMenuSelect();
+              soundEngine.playMenuMusic();
               setActiveTab('PLAY');
             }}
-            className="flex items-center gap-1.5 cursor-pointer shrink-0 pr-2 border-r border-white/15"
+            className="flex items-center gap-1.5 cursor-pointer shrink-0 pr-2.5 border-r border-white/15"
           >
-            <span className="w-2 h-4 bg-amber-500 rounded-xs shadow-[0_0_8px_rgba(245,158,11,0.8)]" />
-            <span className="text-sm sm:text-base font-display font-black tracking-widest uppercase text-white">
+            <span className="w-2 h-4 bg-amber-500 rounded-xs shadow-[0_0_10px_rgba(245,158,11,0.95)]" />
+            <span className="text-sm sm:text-base font-display font-black tracking-[0.12em] uppercase text-white">
               KINETIC
             </span>
           </button>
 
-          <nav className="flex items-center gap-0.5 sm:gap-1.5 shrink-0">
+          <nav className="flex items-center gap-0.5 sm:gap-1 shrink-0">
             {[
               { id: 'PLAY', label: 'JOGAR' },
               { id: 'WEAPON', label: 'ARSENAL 3D' },
@@ -132,17 +152,18 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                   onClick={(e) => {
                     e.stopPropagation();
                     soundEngine.playMenuSelect();
+                    soundEngine.playMenuMusic();
                     setActiveTab(tab.id as typeof activeTab);
                   }}
-                  className={`relative px-2.5 sm:px-3 py-1.5 font-display font-bold text-[11px] sm:text-xs tracking-wider uppercase whitespace-nowrap transition-colors cursor-pointer rounded-lg ${
+                  className={`relative px-2 sm:px-3 py-1 font-display font-bold text-[10px] sm:text-xs tracking-wider uppercase whitespace-nowrap transition-all cursor-pointer rounded-lg ${
                     isSelected
-                      ? 'text-amber-300 bg-amber-500/10'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                      ? 'text-amber-400 bg-amber-500/15'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-white/5'
                   }`}
                 >
                   <span>{tab.label}</span>
                   {isSelected && (
-                    <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.9)]" />
+                    <div className="absolute -bottom-[1px] left-2 right-2 h-[2px] rounded-full bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,1)]" />
                   )}
                 </button>
               );
@@ -150,8 +171,22 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           </nav>
         </div>
 
-        {/* Right: Rank Pill */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Right: Minimalist Cash Balance + Compact Rank Pill */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Saldo de Dinheiro Tático */}
+          <div
+            title="Saldo de Créditos Táticos"
+            className="flex items-center gap-1.5 bg-white/[0.04] border border-emerald-500/30 rounded-full px-2.5 py-0.5"
+          >
+            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500/20 border border-emerald-400/60 flex items-center justify-center text-[9px] font-mono font-black text-emerald-400">
+              $
+            </span>
+            <span className="text-[10px] sm:text-[11px] font-mono font-bold text-emerald-300 tabular-nums whitespace-nowrap">
+              {playerCashBalance.toLocaleString('pt-BR')}
+            </span>
+          </div>
+
+          {/* Barra de Patente Minimalista */}
           <button
             type="button"
             onClick={(e) => {
@@ -159,23 +194,23 @@ export const MainMenu: React.FC<MainMenuProps> = ({
               soundEngine.playMenuSelect();
               setActiveTab('RANKS');
             }}
-            title="Ver Tabela Completa de 70 Patentes Warface"
-            className="flex items-center gap-2 bg-black/75 hover:bg-black/90 border border-amber-500/40 hover:border-amber-400 rounded-xl px-2.5 py-1 cursor-pointer transition-all shadow-md max-w-[185px] sm:max-w-[230px]"
+            title={`Patente: Nív. ${currentRank.level} · ${currentRank.title} (${Math.round(xpLevelProgress)}%)`}
+            className="flex items-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-amber-500/35 hover:border-amber-400 rounded-full pl-1.5 pr-2.5 py-0.5 cursor-pointer transition-all"
           >
-            <WarfaceRankIcon level={currentRank.level} className="w-6 h-6" />
-            <div className="flex flex-col text-left min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] font-mono font-black tracking-wide text-amber-300 truncate">
-                  NÍV. {currentRank.level} · {currentRank.title}
+            <WarfaceRankIcon level={currentRank.level} className="w-5 h-5 shrink-0" />
+            <div className="flex flex-col text-left">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-amber-300 whitespace-nowrap tabular-nums">
+                  NÍV. {currentRank.level}
                 </span>
-                <span className="text-[8px] font-mono text-slate-400 shrink-0">
+                <span className="text-[8px] font-mono text-slate-400 tabular-nums">
                   {Math.round(xpLevelProgress)}%
                 </span>
               </div>
-              <div className="w-full bg-slate-800/80 h-1 rounded-full overflow-hidden mt-0.5">
+              <div className="w-12 sm:w-14 bg-slate-800 h-1 rounded-full overflow-hidden mt-0.5">
                 <div
-                  className="bg-amber-400 h-full rounded-full transition-all duration-300 shadow-[0_0_6px_rgba(245,158,11,0.8)]"
-                  style={{ width: `${xpLevelProgress}%` }}
+                  className="bg-gradient-to-r from-amber-500 to-yellow-300 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${Math.max(6, xpLevelProgress)}%` }}
                 />
               </div>
             </div>
@@ -183,96 +218,26 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         </div>
       </header>
 
-      {/* 3. CENTER DYNAMIC CONTENT */}
-      <main className="relative z-10 flex-1 flex items-center justify-center p-3 sm:p-5 pointer-events-none overflow-hidden">
-        {/* PLAY TAB */}
+      {/* 3. DYNAMIC CONTENT (Alinhado à esquerda na aba JOGAR sem cobrir o Soldado no centro) */}
+      <main
+        className={`relative z-10 flex-1 flex items-center px-3 sm:px-6 py-2 pointer-events-none overflow-hidden ${
+          activeTab === 'PLAY' ? 'justify-start' : 'justify-center'
+        }`}
+      >
         {activeTab === 'PLAY' && (
-          <div className="flex flex-col gap-2.5 max-w-sm w-full pointer-events-auto">
-            {/* ACTIVE WEAPON CARD */}
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playMenuSelect();
-                setActiveTab('WEAPON');
-              }}
-              className="group relative w-full bg-black/75 hover:bg-black/90 border border-white/20 hover:border-amber-400/80 rounded-xl p-2.5 flex items-center justify-between gap-3 text-left transition-all duration-150 cursor-pointer shadow-lg backdrop-blur-md"
-            >
-              <div className="flex flex-col min-w-0">
-                <span className="text-[9px] font-mono font-bold tracking-widest uppercase text-amber-400">
-                  ARMA SELECIONADA
-                </span>
-                <span className="text-xs sm:text-sm font-display font-black text-white group-hover:text-amber-200 transition-colors truncate">
-                  {activeWeaponMeta.name}
-                </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                  {activeWeaponMeta.category} · {activeWeaponMeta.caliber}
-                </span>
-              </div>
-              <span className="px-2 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-[10px] font-mono font-bold text-amber-300 group-hover:bg-amber-500 group-hover:text-slate-950 transition-colors shrink-0">
-                TROCAR &gt;
-              </span>
-            </button>
-
-            {/* ESTANDE LIVRE */}
-            <button
-              type="button"
-              onMouseEnter={handleHover}
-              onClick={handleLaunchTraining}
-              className="group relative w-full h-11 bg-gradient-to-r from-amber-500/20 via-black/65 to-black/40 hover:from-amber-500/35 border-l-4 border-l-amber-400 border-y border-r border-white/15 rounded-r-xl flex items-center justify-between px-3.5 text-left transition-all duration-150 cursor-pointer shadow-md backdrop-blur-sm"
-            >
-              <div>
-                <div className="text-xs sm:text-sm font-display font-black tracking-wider uppercase text-amber-300 group-hover:text-white transition-colors">
-                  ESTANDE DE TIRO (LIVRE)
-                </div>
-                <div className="text-[9px] font-mono text-slate-400">
-                  Treino balístico, alvos móveis e armas liberadas
-                </div>
-              </div>
-              <span className="text-xs font-mono font-bold text-amber-400 group-hover:translate-x-0.5 transition-transform">
-                ▶
-              </span>
-            </button>
-
-            {/* KILLHOUSE */}
-            <button
-              type="button"
-              onMouseEnter={handleHover}
-              onClick={() => handleLaunchDrill('KILLHOUSE_BLITZ')}
-              className="group relative w-full h-11 bg-gradient-to-r from-white/10 via-black/65 to-black/40 hover:from-white/20 border-l-4 border-l-sky-400 border-y border-r border-white/15 rounded-r-xl flex items-center justify-between px-3.5 text-left transition-all duration-150 cursor-pointer shadow-md backdrop-blur-sm"
-            >
-              <div>
-                <div className="text-xs sm:text-sm font-display font-black tracking-wider uppercase text-slate-100 group-hover:text-white transition-colors">
-                  INCURSÃO KILLHOUSE
-                </div>
-                <div className="text-[9px] font-mono text-slate-400">
-                  Percurso CQB cronometrado de alta precisão
-                </div>
-              </div>
-              <span className="text-xs font-mono font-bold text-sky-400 group-hover:translate-x-0.5 transition-transform">
-                ▶
-              </span>
-            </button>
-
-            {/* COMBATE IA */}
-            <button
-              type="button"
-              onMouseEnter={handleHover}
-              onClick={() => handleLaunchDrill('TACTICAL_WAVE')}
-              className="group relative w-full h-11 bg-gradient-to-r from-red-500/20 via-black/65 to-black/40 hover:from-red-500/35 border-l-4 border-l-red-500 border-y border-r border-white/15 rounded-r-xl flex items-center justify-between px-3.5 text-left transition-all duration-150 cursor-pointer shadow-md backdrop-blur-sm"
-            >
-              <div>
-                <div className="text-xs sm:text-sm font-display font-black tracking-wider uppercase text-red-400 group-hover:text-red-200 transition-colors">
-                  COMBATE CONTRA IA
-                </div>
-                <div className="text-[9px] font-mono text-slate-400">
-                  Incursão hostil com patrulhas armadas
-                </div>
-              </div>
-              <span className="text-xs font-mono font-bold text-red-400 group-hover:translate-x-0.5 transition-transform">
-                ▶
-              </span>
-            </button>
-          </div>
+          <MainMenuPlayPanel
+            activeWeapon={activeWeapon}
+            weaponName={activeWeaponMeta.name}
+            weaponCategory={activeWeaponMeta.category}
+            weaponCaliber={activeWeaponMeta.caliber}
+            onOpenWeaponSelect={() => {
+              soundEngine.playMenuSelect();
+              setActiveTab('WEAPON');
+            }}
+            onStartTraining={handleLaunchTraining}
+            onStartDrill={handleLaunchDrill}
+            onHover={handleHover}
+          />
         )}
 
         {/* WEAPON INSPECTION MODAL */}
@@ -302,6 +267,9 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             onUpdateSettings={onUpdateGameSettings}
             onResetDefaults={() => onResetGameSettings && onResetGameSettings()}
             onClose={() => setActiveTab('PLAY')}
+            controlSettings={controlSettings}
+            onUpdateControlSettings={onUpdateControlSettings}
+            onRecalibrateGyro={onRecalibrateGyro}
           />
         )}
 
@@ -336,13 +304,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           soundEngine.playMenuSelect();
           setShowNewsModal((prev) => !prev);
         }}
-        className="absolute top-1/2 -translate-y-1/2 right-0 z-30 bg-[#12161f]/90 hover:bg-[#1c222f] border-l border-y border-amber-500/50 rounded-l-lg px-1.5 py-3 flex flex-col items-center gap-1.5 cursor-pointer shadow-lg transition-colors group"
+        className="absolute top-1/2 -translate-y-1/2 right-0 z-30 bg-[#12161f]/90 hover:bg-[#1c222f] border-l border-y border-white/20 hover:border-amber-500/60 rounded-l-xl px-1.5 py-3 flex flex-col items-center gap-1.5 cursor-pointer shadow-xl transition-colors group"
       >
         <div className="w-3 h-3 border border-amber-400 rounded-xs flex items-center justify-center text-[8px] text-amber-400 font-bold">
           ★
         </div>
         <span
-          className="font-black text-[9px] tracking-[0.2em] text-slate-200 group-hover:text-amber-300 uppercase"
+          className="font-display font-bold text-[9px] tracking-[0.2em] text-slate-200 group-hover:text-amber-300 uppercase"
           style={{ writingMode: 'vertical-lr' }}
         >
           NEWS
@@ -374,9 +342,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       )}
 
       {/* 5. FOOTER */}
-      <footer className="relative z-20 w-full px-4 sm:px-8 py-1.5 flex items-center justify-between pointer-events-none text-[9px] font-mono text-slate-400/80">
-        <span>MOTOR 3D MOBILE OTIMIZADO · {gameSettings?.fpsLimit ? `${gameSettings.fpsLimit} FPS` : '60 FPS'}</span>
-        <span>SISTEMA DE PATENTES WARFACE ATIVO · V0.0.6</span>
+      <footer className="relative z-20 w-full px-4 sm:px-6 py-1.5 flex items-center justify-between pointer-events-none text-[9px] font-mono tracking-wider text-slate-400/90 uppercase">
+        <span>
+          MOTOR 3D MOBILE OTIMIZADO ·{' '}
+          {gameSettings?.fpsLimit ? `${gameSettings.fpsLimit} FPS` : '60 FPS'}
+        </span>
+        <span>SISTEMA DE PATENTES ATIVO · V0.0.7</span>
       </footer>
     </div>
   );

@@ -63,6 +63,26 @@ export const SMOKE_GRENADE_GAS_LOCAL_URL =
 export const SMOKE_GRENADE_GAS_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/Granada/freesound_community-gas-grenade-95255.mp3';
 
+export const SMOKE_GRENADE_VOICE_LOCAL_URL =
+  '/sounds/smoke_grenade_voice.mp3';
+export const SMOKE_GRENADE_VOICE_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/62bf5097fa01d6eb6b0fdb200d20d33c6a5c49b7/Sound/Granada/modern-warfare-2-militia-multiplayer-voices-battle-chatter-mp3cut.mp3';
+
+export const FRAG_GRENADE_VOICE_LOCAL_URL =
+  '/sounds/frag_grenade_voice.mp3';
+export const FRAG_GRENADE_VOICE_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/efe9334d41557046768e0c78c2ba8793153609f1/Sound/Granada/call_of_duty_grenada.mp3';
+
+export const HEADSHOT_DEATH_LOCAL_URL =
+  '/sounds/headshot_death.mp3';
+export const HEADSHOT_DEATH_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/79adf217e4f9868da4701fdefecfe3f4d0a8cd9d/Sound/apex-legends-knockdown-sound-effect_0xqJePf.mp3';
+
+export const PLANT_BOMB_TUTORIAL_LOCAL_URL =
+  '/sounds/plant_bomb_tutorial.mp3';
+export const PLANT_BOMB_TUTORIAL_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/9c5bf058e7e941f0749228c504289f9a5d22b4d3/Sound/ElevenLabs_2026-11-09T22_57_58_Will%20-%20Slow%2C%20Confident%20and%20Distant_pvc_s50_m2.mp3';
+
 export const WEAPON_SWAP_LOCAL_URL = '/audio/weapon_swap.mp3';
 export const WEAPON_SWAP_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/cf32fb142ec4e96c6f4dfd7c2a07079868411bcc/Sound/159450__twisterman__weaponswap-custom-sound-effect.mp3';
@@ -180,6 +200,27 @@ class TacticalSoundEngine {
   private smokeGasDecoding = false;
   private smokeGasPool: HTMLAudioElement[] = [];
   private smokeGasPoolIdx = 0;
+
+  private smokeVoiceRawData: ArrayBuffer | null = null;
+  private smokeVoiceBuffer: AudioBuffer | null = null;
+  private smokeVoiceDecoding = false;
+  private smokeVoicePool: HTMLAudioElement[] = [];
+  private smokeVoicePoolIdx = 0;
+
+  private fragVoiceRawData: ArrayBuffer | null = null;
+  private fragVoiceBuffer: AudioBuffer | null = null;
+  private fragVoiceDecoding = false;
+  private fragVoicePool: HTMLAudioElement[] = [];
+  private fragVoicePoolIdx = 0;
+
+  private headshotDeathRawData: ArrayBuffer | null = null;
+  private headshotDeathBuffer: AudioBuffer | null = null;
+  private headshotDeathDecoding = false;
+  private headshotDeathPool: HTMLAudioElement[] = [];
+  private headshotDeathPoolIdx = 0;
+
+  // Plant the Bomb voice tutorial
+  private plantBombTutorialAudio: HTMLAudioElement | null = null;
 
   // Real Character Movement & Weapon Swap Audio Samples (Swap, Jump, Slide, Footsteps)
   private weaponSwapRawData: ArrayBuffer | null = null;
@@ -828,6 +869,75 @@ class TacticalSoundEngine {
         if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
       })
       .catch(() => {});
+
+    // 5. Smoke grenade character battle chatter voice audio pool + raw buffer
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(SMOKE_GRENADE_VOICE_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = SMOKE_GRENADE_VOICE_GITHUB_RAW_URL;
+      };
+      this.smokeVoicePool.push(audio);
+    }
+    fetch(SMOKE_GRENADE_VOICE_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local smoke voice fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(SMOKE_GRENADE_VOICE_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.smokeVoiceRawData = buf;
+        if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 6. Frag grenade character battle chatter voice audio pool + raw buffer
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(FRAG_GRENADE_VOICE_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = FRAG_GRENADE_VOICE_GITHUB_RAW_URL;
+      };
+      this.fragVoicePool.push(audio);
+    }
+    fetch(FRAG_GRENADE_VOICE_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local frag voice fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(FRAG_GRENADE_VOICE_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.fragVoiceRawData = buf;
+        if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
+      })
+      .catch(() => {});
+
+    // 7. Headshot death sound effect audio pool + raw buffer
+    for (let i = 0; i < 3; i++) {
+      const audio = new Audio(HEADSHOT_DEATH_LOCAL_URL);
+      audio.preload = 'auto';
+      audio.onerror = () => {
+        audio.src = HEADSHOT_DEATH_GITHUB_RAW_URL;
+      };
+      this.headshotDeathPool.push(audio);
+    }
+    fetch(HEADSHOT_DEATH_LOCAL_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error('Local headshot death fetch failed');
+        return res.arrayBuffer();
+      })
+      .catch(() =>
+        fetch(HEADSHOT_DEATH_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
+      )
+      .then((buf) => {
+        this.headshotDeathRawData = buf;
+        if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
+      })
+      .catch(() => {});
   }
 
   private tryDecodeGrenadeSamples(ctx: AudioContext): void {
@@ -884,6 +994,49 @@ class TacticalSoundEngine {
         })
         .catch(() => {
           this.smokeGasDecoding = false;
+        });
+    }
+
+    if (!this.smokeVoiceBuffer && !this.smokeVoiceDecoding && this.smokeVoiceRawData) {
+      this.smokeVoiceDecoding = true;
+      ctx
+        .decodeAudioData(this.smokeVoiceRawData.slice(0))
+        .then((decoded) => {
+          this.smokeVoiceBuffer = decoded;
+          this.smokeVoiceDecoding = false;
+        })
+        .catch(() => {
+          this.smokeVoiceDecoding = false;
+        });
+    }
+
+    if (!this.fragVoiceBuffer && !this.fragVoiceDecoding && this.fragVoiceRawData) {
+      this.fragVoiceDecoding = true;
+      ctx
+        .decodeAudioData(this.fragVoiceRawData.slice(0))
+        .then((decoded) => {
+          this.fragVoiceBuffer = decoded;
+          this.fragVoiceDecoding = false;
+        })
+        .catch(() => {
+          this.fragVoiceDecoding = false;
+        });
+    }
+
+    if (
+      !this.headshotDeathBuffer &&
+      !this.headshotDeathDecoding &&
+      this.headshotDeathRawData
+    ) {
+      this.headshotDeathDecoding = true;
+      ctx
+        .decodeAudioData(this.headshotDeathRawData.slice(0))
+        .then((decoded) => {
+          this.headshotDeathBuffer = decoded;
+          this.headshotDeathDecoding = false;
+        })
+        .catch(() => {
+          this.headshotDeathDecoding = false;
         });
     }
   }
@@ -2038,6 +2191,84 @@ class TacticalSoundEngine {
     }
   }
 
+  public playSmokeGrenadeVoice(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.smokeVoiceBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.smokeVoiceBuffer;
+      src.playbackRate.setValueAtTime(0.99 + Math.random() * 0.03, ctx.currentTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(1.0, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.smokeVoicePool.length > 0) {
+      const el = this.smokeVoicePool[this.smokeVoicePoolIdx];
+      this.smokeVoicePoolIdx =
+        (this.smokeVoicePoolIdx + 1) % this.smokeVoicePool.length;
+      el.currentTime = 0;
+      el.volume = 1.0;
+      el.play().catch(() => {});
+    }
+  }
+
+  public playFragGrenadeVoice(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.fragVoiceBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.fragVoiceBuffer;
+      src.playbackRate.setValueAtTime(0.99 + Math.random() * 0.03, ctx.currentTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(1.0, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.fragVoicePool.length > 0) {
+      const el = this.fragVoicePool[this.fragVoicePoolIdx];
+      this.fragVoicePoolIdx =
+        (this.fragVoicePoolIdx + 1) % this.fragVoicePool.length;
+      el.currentTime = 0;
+      el.volume = 1.0;
+      el.play().catch(() => {});
+    }
+  }
+
+  public playHeadshotDeath(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+
+    if (ctx && this.headshotDeathBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.headshotDeathBuffer;
+      src.playbackRate.setValueAtTime(1.0, ctx.currentTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(1.0, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    if (this.headshotDeathPool.length > 0) {
+      const el = this.headshotDeathPool[this.headshotDeathPoolIdx];
+      this.headshotDeathPoolIdx =
+        (this.headshotDeathPoolIdx + 1) % this.headshotDeathPool.length;
+      el.currentTime = 0;
+      el.volume = 1.0;
+      el.play().catch(() => {});
+    }
+  }
+
   // =========================================================================
   // REAL CHARACTER MOVEMENT & WEAPON SWAP AUDIO (SWAP, JUMP, SLIDE, FOOTSTEP)
   // =========================================================================
@@ -2325,6 +2556,36 @@ class TacticalSoundEngine {
       el.volume = volume;
       el.playbackRate = baseRate;
       el.play().catch(() => {});
+    }
+  }
+
+  public playPlantBombTutorial(): void {
+    if (this.muted) return;
+    try {
+      if (!this.plantBombTutorialAudio) {
+        this.plantBombTutorialAudio = new Audio(PLANT_BOMB_TUTORIAL_LOCAL_URL);
+        this.plantBombTutorialAudio.preload = 'auto';
+        this.plantBombTutorialAudio.volume = 1.0;
+        this.plantBombTutorialAudio.onerror = () => {
+          if (this.plantBombTutorialAudio) {
+            this.plantBombTutorialAudio.src = PLANT_BOMB_TUTORIAL_GITHUB_RAW_URL;
+            this.plantBombTutorialAudio.play().catch(() => {});
+          }
+        };
+      }
+      this.plantBombTutorialAudio.currentTime = 0;
+      this.plantBombTutorialAudio.play().catch(() => {});
+    } catch {
+      // Audio autoplay policy fallback
+    }
+  }
+
+  public stopPlantBombTutorial(): void {
+    if (this.plantBombTutorialAudio) {
+      try {
+        this.plantBombTutorialAudio.pause();
+        this.plantBombTutorialAudio.currentTime = 0;
+      } catch {}
     }
   }
 }

@@ -152,6 +152,7 @@ export const HudTopRightControls: React.FC<HudTopRightControlsProps> = ({
           playerX={hud.playerPos?.x || 0}
           playerZ={hud.playerPos?.z || 0}
           playerYaw={hud.playerYaw || 0}
+          drillMode={hud.drillMode}
           targets={hud.radarTargets}
         />
       </div>

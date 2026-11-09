@@ -10,11 +10,13 @@ import {
   GrenadeType,
   GyroMode,
   HudState,
+  KillfeedEntry,
   OpticType,
   QualityPreset,
   WeaponId,
 } from '../types/game';
 import {
+  addPlayerCash,
   getNextRank,
   getRankForXp,
   loadSavedPlayerXp,
@@ -25,6 +27,7 @@ import { TacticalGrenadeSystem } from './grenadeSystem';
 import {
   buildPreProductionLevel,
   ColliderBox,
+  TacticalLevelData,
   TacticalTargetEntity,
 } from './levelBuilder';
 import { createProceduralTextures, ProceduralTextures } from './textures';
@@ -34,8 +37,20 @@ import {
   TacticalWeaponRig,
 } from './weaponBuilder';
 import { AssetPreloader } from './preloader';
+import { buildYardLevel } from './yardLevelBuilder';
+import { YardBombSystem } from './yardBombSystem';
+import { YARD_ATTACKER_SPAWN } from './yardMapData';
+import { YardBotEntity } from './yardPropsBuilder';
+import {
+  buildDust2Level,
+  Dust2LevelBundle,
+  DUST2_T_SPAWN,
+  DUST2_T_SPAWN_YAW,
+} from './dust2LevelBuilder';
+import { TacticalSkySystem } from './skySystem';
 
 // Pre-allocated math helpers outside the frame loop (Zero GC)
+const _resolvedHoriz = { x: 0, z: 0 };
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
@@ -62,6 +77,10 @@ export class TacticalFPSEngine {
 
   private textures: ProceduralTextures;
   private weaponRig: TacticalWeaponRig;
+  private facilityLevelData: TacticalLevelData;
+  private yardLevelData: TacticalLevelData;
+  private dust2LevelData: Dust2LevelBundle;
+  private yardBombSystem: YardBombSystem;
   private colliders: ColliderBox[] = [];
   private targets: TacticalTargetEntity[] = [];
   private targetMap = new Map<string, TacticalTargetEntity>();
@@ -72,6 +91,7 @@ export class TacticalFPSEngine {
   private raycaster = new THREE.Raycaster();
   private laserDotMesh: THREE.Mesh;
   private keyLight!: THREE.DirectionalLight;
+  private skySystem: TacticalSkySystem;
 
   // Loop, Timing & Dynamic Resolution Governor (DRS)
   private frameId = 0;
@@ -118,6 +138,8 @@ export class TacticalFPSEngine {
   private leanCurrent = 0;
   private walkBobPhase = 0;
   private walkBobAmp = 0;
+  private sprintPoseAlpha = 0;
+  private sprintExhausted = false;
   private landingDip = 0;
   private landingDipVel = 0;
 
@@ -157,6 +179,7 @@ export class TacticalFPSEngine {
     x: number;
     z: number;
     isDown: boolean;
+    isAlly?: boolean;
   }> = [];
 
   // Public HUD state mirror (All players start with M4_CARBINE as primary and P50_PISTOL as secondary)
@@ -218,6 +241,7 @@ export class TacticalFPSEngine {
     hitMarkerAlpha: 0,
     hitMarkerIsCrit: false,
     damageFlashAlpha: 0,
+    killfeed: [],
 
     // Warface Rank Progression System
     playerXp: 0,
@@ -332,6 +356,8 @@ export class TacticalFPSEngine {
     rimLight.position.set(-25, 18, -35);
     this.scene.add(rimLight);
 
+    this.skySystem = new TacticalSkySystem(this.scene, this.keyLight);
+
     // 4. First-Person Camera Hierarchy (Yaw -> Pitch -> Camera -> WeaponRig)
     this.camera = new THREE.PerspectiveCamera(
       72,
@@ -353,7 +379,31 @@ export class TacticalFPSEngine {
     this.camera.add(this.weaponRig.root);
 
     const levelData = buildPreProductionLevel(this.textures, this.isSoftwareGl);
+    this.facilityLevelData = levelData;
     this.scene.add(levelData.levelGroup);
+
+    this.yardLevelData = buildYardLevel(
+      this.textures,
+      this.isSoftwareGl
+    );
+    this.yardLevelData.levelGroup.visible = false;
+    this.scene.add(this.yardLevelData.levelGroup);
+
+    this.dust2LevelData = buildDust2Level(this.isSoftwareGl, () => {
+      if (this.state.drillMode === 'DUST2_BOMB_5V5') {
+        const gY = this.dust2LevelData.collider.getGroundHeight(
+          this.playerPos.x,
+          this.playerPos.y,
+          this.playerPos.z
+        );
+        this.playerPos.y = gY;
+      }
+    });
+    this.dust2LevelData.levelGroup.visible = false;
+    this.scene.add(this.dust2LevelData.levelGroup);
+
+    this.yardBombSystem = new YardBombSystem(this.scene);
+
     this.colliders = levelData.colliders;
     this.targets = levelData.targets;
     this.targetMap.clear();
@@ -414,6 +464,78 @@ export class TacticalFPSEngine {
     );
   }
 
+  /**
+   * Prepara o mapa 3D real em segundo plano durante a tela de loading da partida:
+   * 1. Ativa a geometria do mapa e o shader físico atmosférico Sky.js
+   * 2. Aguarda a malha .glb e o colisor espacial de 9.294 triângulos (se Dust2)
+   * 3. Faz upload das texturas PBR para a VRAM (initTexture)
+   * 4. Compila todos os shaders WebGL (compileAsync) e renderiza frame de aquecimento de sombras
+   */
+  public async prepareMapForMatch(
+    mode: DrillMode,
+    onProgress: (pct: number, statusLabel: string) => void
+  ): Promise<void> {
+    const isDust2 = mode === 'DUST2_BOMB_5V5';
+    const isYard = mode === 'YARD_BOMB_5V5';
+
+    onProgress(12, 'ATIVANDO GEOMETRIA 3D E SHADER FÍSICO ATMOSFÉRICO...');
+    this.facilityLevelData.levelGroup.visible = !isDust2 && !isYard;
+    this.yardLevelData.levelGroup.visible = isYard;
+    this.dust2LevelData.levelGroup.visible = isDust2;
+    this.skySystem.configureForMode(mode, this.scene.fog !== null);
+    await new Promise((r) => setTimeout(r, 90));
+
+    if (isDust2) {
+      onProgress(32, 'SINCRONIZANDO MALHA .GLB E COLISOR 3D (9.294 TRIÂNGULOS)...');
+      let waitMs = 0;
+      while (!this.dust2LevelData.collider.ready && waitMs < 5500) {
+        await new Promise((r) => setTimeout(r, 50));
+        waitMs += 50;
+      }
+    } else {
+      onProgress(35, 'SINCRONIZANDO GEOMETRIA 3D E SETORES TÁTICOS...');
+      await new Promise((r) => setTimeout(r, 110));
+    }
+
+    onProgress(62, 'ENVIANDO TEXTURAS PBR PARA A MEMÓRIA DA GPU (VRAM)...');
+    const activeGroup = isDust2
+      ? this.dust2LevelData.levelGroup
+      : isYard
+        ? this.yardLevelData.levelGroup
+        : this.facilityLevelData.levelGroup;
+    if (!this.isSoftwareGl) {
+      activeGroup.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          mats.forEach((m) => {
+            const std = m as THREE.MeshStandardMaterial;
+            if (std?.map) this.renderer.initTexture(std.map);
+            if (std?.normalMap) this.renderer.initTexture(std.normalMap);
+            if (std?.roughnessMap) this.renderer.initTexture(std.roughnessMap);
+          });
+        }
+      });
+    }
+    await new Promise((r) => setTimeout(r, 110));
+
+    onProgress(84, 'COMPILANDO SHADERS WEBGL E MAPA DE SOMBRAS SOLARES...');
+    if (!this.isSoftwareGl) {
+      try {
+        if ('compileAsync' in this.renderer && typeof this.renderer.compileAsync === 'function') {
+          await this.renderer.compileAsync(this.scene, this.camera);
+        } else {
+          this.renderer.compile(this.scene, this.camera);
+        }
+      } catch {
+        this.renderer.compile(this.scene, this.camera);
+      }
+      this.renderer.render(this.scene, this.camera);
+    }
+    await new Promise((r) => setTimeout(r, 120));
+    onProgress(100, 'PARTIDA PRONTA — INSERINDO ESQUADRÕES VANGUARD VS BLACKTHORN!');
+  }
+
   // =========================================================================
   // PUBLIC CONTROLS FOR UI OVERLAYS & KEYBOARD
   // =========================================================================
@@ -454,6 +576,23 @@ export class TacticalFPSEngine {
     this.emitHud();
   }
 
+  public getCurrentGroundHeight(x: number, y: number, z: number): number {
+    if (this.state.drillMode === 'DUST2_BOMB_5V5') {
+      return this.dust2LevelData.collider.getGroundHeight(x, y, z);
+    }
+    let groundHeight = 0;
+    const r = 0.15;
+    for (let i = 0; i < this.colliders.length; i++) {
+      const c = this.colliders[i];
+      if (x + r > c.minX && x - r < c.maxX && z + r > c.minZ && z - r < c.maxZ) {
+        if (y >= c.maxY - 0.46 && c.maxY > groundHeight && c.maxY <= 8.0) {
+          groundHeight = c.maxY;
+        }
+      }
+    }
+    return groundHeight;
+  }
+
   public setScreenState(screen: GameScreenState): void {
     this.state.screen = screen;
     if (screen !== 'PLAYING' && document.pointerLockElement) {
@@ -465,6 +604,42 @@ export class TacticalFPSEngine {
   public setDrillMode(mode: DrillMode): void {
     this.state.drillMode = mode;
     this.resetScenario(mode);
+    this.emitHud();
+  }
+
+  public triggerPlantBomb(): void {
+    if (
+      this.state.screen !== 'PLAYING' ||
+      (this.state.drillMode !== 'YARD_BOMB_5V5' &&
+        this.state.drillMode !== 'DUST2_BOMB_5V5')
+    ) {
+      return;
+    }
+    this.yardBombSystem?.triggerPlantBomb();
+    this.state.yardBomb = { ...this.yardBombSystem.info };
+    this.emitHud();
+  }
+
+  public registerKill(
+    killerName: string,
+    killerTeam: 'VANGUARD' | 'BLACKTHORN',
+    victimName: string,
+    victimTeam: 'VANGUARD' | 'BLACKTHORN',
+    weaponId: WeaponId | 'GRENADE' | 'KNIFE_TACTICAL',
+    isHeadshot: boolean
+  ): void {
+    const entry: KillfeedEntry = {
+      id: `kill_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      killerName,
+      killerTeam,
+      victimName,
+      victimTeam,
+      weaponId,
+      isHeadshot,
+      timestamp: Date.now(),
+    };
+
+    this.state.killfeed = [...this.state.killfeed.slice(-8), entry];
     this.emitHud();
   }
 
@@ -871,7 +1046,7 @@ export class TacticalFPSEngine {
 
     for (let i = 0; i < this.targets.length; i++) {
       const t = this.targets[i];
-      if (t.isDown) continue;
+      if (t.isDown || (t as YardBotEntity).isAlly) continue;
 
       const dist = t.root.position.distanceTo(blastCenter);
       if (dist > blastRadius) continue;
@@ -908,6 +1083,15 @@ export class TacticalFPSEngine {
         this.state.score += 150;
         this.addPlayerXp(120);
         this.state.lastHitZone = 'KILL';
+        const bot = t as YardBotEntity;
+        this.registerKill(
+          'VOCÊ',
+          'VANGUARD',
+          bot.callsign || 'INIMIGO-BT',
+          'BLACKTHORN',
+          'GRENADE',
+          false
+        );
       } else {
         this.state.score += 55;
         this.addPlayerXp(30);
@@ -926,14 +1110,23 @@ export class TacticalFPSEngine {
 
       if (
         this.state.drillMode === 'KILLHOUSE_BLITZ' ||
-        this.state.drillMode === 'TACTICAL_WAVE'
+        this.state.drillMode === 'TACTICAL_WAVE' ||
+        this.state.drillMode === 'YARD_BOMB_5V5' ||
+        this.state.drillMode === 'DUST2_BOMB_5V5'
       ) {
         const remaining = this.targets.filter(
-          (t) => t.sector === 'KILLHOUSE' && !t.isDown
+          (t) =>
+            t.sector === 'KILLHOUSE' &&
+            !t.isDown &&
+            !(t as YardBotEntity).isAlly
         ).length;
         this.state.targetsRemaining = remaining;
 
-        if (remaining === 0) {
+        if (
+          remaining === 0 &&
+          (this.state.drillMode === 'KILLHOUSE_BLITZ' ||
+            this.state.drillMode === 'TACTICAL_WAVE')
+        ) {
           if (
             this.state.bestCourseTimeSec === null ||
             this.state.courseTimerSec < this.state.bestCourseTimeSec
@@ -1275,15 +1468,19 @@ export class TacticalFPSEngine {
     }
   }
 
-  public resetScenario(mode: DrillMode): void {
+  public resetScenario(mode: DrillMode, keepMatchScore = false): void {
     this.state.drillMode = mode;
     this.state.health = 100;
     this.state.stamina = 100;
-    this.state.score = 0;
-    this.state.hits = 0;
-    this.state.shotsFired = 0;
-    this.state.headshots = 0;
-    this.state.courseTimerSec = 0;
+    this.sprintExhausted = false;
+    this.sprintPoseAlpha = 0;
+    if (!keepMatchScore) {
+      this.state.score = 0;
+      this.state.hits = 0;
+      this.state.shotsFired = 0;
+      this.state.headshots = 0;
+      this.state.courseTimerSec = 0;
+    }
     this.state.damageFlashAlpha = 0;
     const startingWeapon = this.state.activeWeapon || this.primaryWeapon || 'M4_CARBINE';
     this.selectWeapon(startingWeapon);
@@ -1295,18 +1492,73 @@ export class TacticalFPSEngine {
     this.state.boltLockedBack = false;
     this.state.reloadPhase = 'IDLE';
 
+    // Activate Warface YARD 5v5, Counter-Strike DE_DUST2 5v5, or standard Facility level
+    const isYard = mode === 'YARD_BOMB_5V5';
+    const isDust2 = mode === 'DUST2_BOMB_5V5';
+    const isBombMode = isYard || isDust2;
+
+    this.facilityLevelData.levelGroup.visible = !isBombMode;
+    this.yardLevelData.levelGroup.visible = isYard;
+    this.dust2LevelData.levelGroup.visible = isDust2;
+
+    const activeLevel = isDust2
+      ? this.dust2LevelData
+      : isYard
+        ? this.yardLevelData
+        : this.facilityLevelData;
+    this.colliders = activeLevel.colliders;
+    this.targets = activeLevel.targets;
+    this.targetMap.clear();
+    for (let i = 0; i < this.targets.length; i++) {
+      this.targetMap.set(this.targets[i].id, this.targets[i]);
+    }
+    this.shootableMeshes = activeLevel.shootableMeshes;
+    this.wallStandPositions = activeLevel.wallStandPositions;
+    this.cachedRadarTargets = [];
+    this.aimRaycastInitialized = false;
+
+    this.skySystem.configureForMode(mode, this.scene.fog !== null);
+
     // Position player according to drill sector
-    if (mode === 'FREE_RANGE') {
+    if (isDust2) {
+      const startY = this.dust2LevelData.collider.ready
+        ? this.dust2LevelData.collider.getGroundHeight(
+            DUST2_T_SPAWN.x,
+            DUST2_T_SPAWN.y,
+            DUST2_T_SPAWN.z
+          )
+        : DUST2_T_SPAWN.y;
+      this.playerPos.set(DUST2_T_SPAWN.x, startY, DUST2_T_SPAWN.z);
+      this.yaw = DUST2_T_SPAWN_YAW;
+      this.pitch = 0;
+      this.yardBombSystem.resetRound('DUST2_BOMB_5V5', keepMatchScore);
+      this.state.yardBomb = { ...this.yardBombSystem.info };
+    } else if (isYard) {
+      this.playerPos.set(
+        YARD_ATTACKER_SPAWN.x,
+        YARD_ATTACKER_SPAWN.y,
+        YARD_ATTACKER_SPAWN.z
+      );
+      this.yaw = 0;
+      this.pitch = 0;
+      this.yardBombSystem.resetRound('YARD_BOMB_5V5', keepMatchScore);
+      this.state.yardBomb = { ...this.yardBombSystem.info };
+    } else if (mode === 'FREE_RANGE') {
       this.playerPos.set(-6.8, 0, 2.8);
       this.yaw = 0;
       this.pitch = 0;
+      this.state.yardBomb = undefined;
     } else {
       // Spawn at Killhouse Breach Entry
       this.playerPos.set(12.2, 0, 4.5);
       this.yaw = 0;
       this.pitch = 0;
+      this.state.yardBomb = undefined;
     }
     this.playerVel.set(0, 0, 0);
+    this.isGrounded = true;
+    this.state.isCrouchingToggled = false;
+    this.state.isProneToggled = false;
 
     // Reset all targets
     let activeCount = 0;
@@ -1324,7 +1576,9 @@ export class TacticalFPSEngine {
       t.isTelegraphing = false;
       if (t.laserLine) t.laserLine.visible = false;
 
-      if (mode === 'KILLHOUSE_BLITZ' || mode === 'TACTICAL_WAVE') {
+      if (isBombMode) {
+        if (!(t as YardBotEntity).isAlly) activeCount++;
+      } else if (mode === 'KILLHOUSE_BLITZ' || mode === 'TACTICAL_WAVE') {
         if (t.sector === 'KILLHOUSE') activeCount++;
       } else {
         if (t.type !== 'STEEL_GONG') activeCount++;
@@ -1431,8 +1685,25 @@ export class TacticalFPSEngine {
       case 'KeyH':
         this.toggleDockCollapsed();
         break;
+      case 'KeyE':
+        if (
+          (this.state.drillMode === 'YARD_BOMB_5V5' ||
+            this.state.drillMode === 'DUST2_BOMB_5V5') &&
+          this.yardBombSystem.info.nearSite &&
+          this.yardBombSystem.info.bombStatus === 'CARRIED'
+        ) {
+          this.triggerPlantBomb();
+        }
+        break;
       case 'KeyF':
-        if (this.state.focusedWallWeapon) {
+        if (
+          (this.state.drillMode === 'YARD_BOMB_5V5' ||
+            this.state.drillMode === 'DUST2_BOMB_5V5') &&
+          this.yardBombSystem.info.nearSite &&
+          this.yardBombSystem.info.bombStatus === 'CARRIED'
+        ) {
+          this.triggerPlantBomb();
+        } else if (this.state.focusedWallWeapon) {
           this.selectWeapon(this.state.focusedWallWeapon);
         } else {
           this.triggerWeaponInspect();
@@ -1917,6 +2188,13 @@ export class TacticalFPSEngine {
       this.burstRemaining = 3;
     }
 
+    // Interrompe imediatamente o sprint para trazer a arma para a mira frontal e atirar no alvo
+    if (this.state.stance === 'SPRINT' || this.touchSprinting) {
+      this.touchSprinting = false;
+      this.sprintPoseAlpha = 0;
+      this.state.stance = 'STAND';
+    }
+
     this.executeSingleShot();
   }
 
@@ -2171,7 +2449,7 @@ export class TacticalFPSEngine {
     hitNormal: THREE.Vector3
   ): void {
     const target = this.targetMap.get(targetId);
-    if (!target || target.isDown) return;
+    if (!target || target.isDown || (target as YardBotEntity).isAlly) return;
 
     this.state.hits += 1;
     const velocityMs = Math.round(
@@ -2245,21 +2523,43 @@ export class TacticalFPSEngine {
       target.downTimer = this.state.drillMode === 'FREE_RANGE' ? 2.6 : 9999;
       target.isTelegraphing = false;
       if (target.laserLine) target.laserLine.visible = false;
+      if (isHead) {
+        soundEngine.playHeadshotDeath();
+      }
       this.state.score += isHead ? 150 : 100;
       this.addPlayerXp(100);
       this.state.lastHitZone = 'KILL';
 
+      const bot = target as YardBotEntity;
+      this.registerKill(
+        'VOCÊ',
+        'VANGUARD',
+        bot.callsign || 'INIMIGO-BT',
+        'BLACKTHORN',
+        this.state.activeWeapon,
+        isHead
+      );
+
       // Update remaining drill targets
       if (
         this.state.drillMode === 'KILLHOUSE_BLITZ' ||
-        this.state.drillMode === 'TACTICAL_WAVE'
+        this.state.drillMode === 'TACTICAL_WAVE' ||
+        this.state.drillMode === 'YARD_BOMB_5V5' ||
+        this.state.drillMode === 'DUST2_BOMB_5V5'
       ) {
         const remaining = this.targets.filter(
-          (t) => t.sector === 'KILLHOUSE' && !t.isDown
+          (t) =>
+            t.sector === 'KILLHOUSE' &&
+            !t.isDown &&
+            !(t as YardBotEntity).isAlly
         ).length;
         this.state.targetsRemaining = remaining;
 
-        if (remaining === 0) {
+        if (
+          remaining === 0 &&
+          (this.state.drillMode === 'KILLHOUSE_BLITZ' ||
+            this.state.drillMode === 'TACTICAL_WAVE')
+        ) {
           if (
             this.state.bestCourseTimeSec === null ||
             this.state.courseTimerSec < this.state.bestCourseTimeSec
@@ -2388,9 +2688,38 @@ export class TacticalFPSEngine {
     // 1. Course Timer & Decay Timers
     if (
       this.state.drillMode === 'KILLHOUSE_BLITZ' ||
-      this.state.drillMode === 'TACTICAL_WAVE'
+      this.state.drillMode === 'TACTICAL_WAVE' ||
+      this.state.drillMode === 'YARD_BOMB_5V5' ||
+      this.state.drillMode === 'DUST2_BOMB_5V5'
     ) {
       this.state.courseTimerSec += dt;
+    }
+
+    if (
+      this.state.drillMode === 'YARD_BOMB_5V5' ||
+      this.state.drillMode === 'DUST2_BOMB_5V5'
+    ) {
+      this.yardBombSystem.update(
+        dt,
+        this.playerPos,
+        this.targets,
+        this.fxPool,
+        (xp, cash) => {
+          this.addPlayerXp(xp);
+          addPlayerCash(cash);
+          this.state.score += xp;
+          this.emitHud();
+        },
+        () => {
+          this.resetScenario(this.state.drillMode, true);
+          this.emitHud();
+        },
+        () => {
+          this.returnToMainMenu();
+        },
+        this.registerKill.bind(this)
+      );
+      this.state.yardBomb = { ...this.yardBombSystem.info };
     }
 
     if (this.state.hitMarkerAlpha > 0) {
@@ -2495,7 +2824,13 @@ export class TacticalFPSEngine {
 
     // 7. Update Pooled Brass Casings, Dropped Magazines, Sparks, Tracers & 3D Grenades
     this.fxPool.update(dt);
-    this.grenadeSystem.update(dt, this.colliders, this.walkBobAmp);
+    this.grenadeSystem.update(
+      dt,
+      this.colliders,
+      this.walkBobAmp,
+      (x, y, z) => this.getCurrentGroundHeight(x, y, z)
+    );
+    this.skySystem.update(this.playerPos, dt);
     this.state.isThrowingGrenade = this.grenadeSystem.isThrowing();
     this.state.equippedGrenade = this.grenadeSystem.getHeldGrenade();
 
@@ -2637,18 +2972,55 @@ export class TacticalFPSEngine {
   }
 
   private updatePlayerMovementAndCollision(dt: number): void {
+    // Check if a low ceiling (such as Yard's crouch-only wall breaches or Dust2 tunnels) is directly above the player
+    let lowCeilingAbove = false;
+    const checkR = 0.32;
+    if (this.state.drillMode === 'DUST2_BOMB_5V5') {
+      lowCeilingAbove = this.dust2LevelData.collider.hasLowCeiling(
+        this.playerPos.x,
+        this.playerPos.y,
+        this.playerPos.z
+      );
+    } else {
+      for (let i = 0; i < this.colliders.length; i++) {
+        const c = this.colliders[i];
+        if (
+          c.minY >= this.playerPos.y + 0.4 &&
+          c.minY < this.playerPos.y + 1.68 &&
+          this.playerPos.x + checkR > c.minX &&
+          this.playerPos.x - checkR < c.maxX &&
+          this.playerPos.z + checkR > c.minZ &&
+          this.playerPos.z - checkR < c.maxZ
+        ) {
+          lowCeilingAbove = true;
+          break;
+        }
+      }
+    }
+
     // 1. Stance & Breath Stamina (Keyboard + Mobile Touch Controls)
     const crouchHeld =
+      lowCeilingAbove ||
       this.keysHeld.has('KeyC') ||
       this.keysHeld.has('ControlLeft') ||
       this.state.isCrouchingToggled;
-    const sprintHeld =
+    // Hysteresis latch prevents 60Hz SPRINT <-> STAND oscillation when stamina hits bottom
+    if (this.state.stamina <= 1) {
+      this.sprintExhausted = true;
+    } else if (this.state.stamina >= 26) {
+      this.sprintExhausted = false;
+    }
+
+    const wantsToSprint =
       ((this.keysHeld.has('ShiftLeft') && this.keysHeld.has('KeyW')) ||
         this.touchSprinting) &&
       !this.state.isAds &&
       !crouchHeld &&
       this.state.reloadPhase === 'IDLE' &&
-      this.state.stamina > 8;
+      !this.touchFireHeld &&
+      !this.mouseButtonsHeld.has(0);
+
+    const sprintHeld = wantsToSprint && !this.sprintExhausted;
 
     // Breath holding when ShiftLeft or Mobile Breath Button is held during ADS
     const holdBreath =
@@ -2772,43 +3144,85 @@ export class TacticalFPSEngine {
     // Gravity
     this.playerVel.y -= 15.5 * dt;
 
-    // 5. Move & Resolve AABB Colliders (X, then Z, then Y)
+    // 5. Move & Resolve Colliders (Dust2 3D Triangle Spatial Hash or AABB Boxes)
     const radius = 0.36;
-    const nextX = this.playerPos.x + this.playerVel.x * dt;
-    if (!this.checkHorizontalCollision(nextX, this.playerPos.z, this.playerPos.y, radius)) {
-      this.playerPos.x = nextX;
-    } else {
-      this.playerVel.x = 0;
-    }
+    const isDust2 = this.state.drillMode === 'DUST2_BOMB_5V5';
 
-    const nextZ = this.playerPos.z + this.playerVel.z * dt;
-    if (!this.checkHorizontalCollision(this.playerPos.x, nextZ, this.playerPos.y, radius)) {
-      this.playerPos.z = nextZ;
+    if (isDust2) {
+      const currentHeight =
+        this.state.stance === 'SLIDE'
+          ? 0.90
+          : this.state.stance === 'PRONE'
+            ? 0.45
+            : this.state.stance === 'CROUCH'
+              ? 1.10
+              : 1.72;
+      const candX = this.playerPos.x + this.playerVel.x * dt;
+      const candZ = this.playerPos.z + this.playerVel.z * dt;
+      this.dust2LevelData.collider.resolveHorizontal(
+        candX,
+        candZ,
+        this.playerPos.y,
+        currentHeight,
+        radius,
+        _resolvedHoriz
+      );
+      this.playerPos.x = _resolvedHoriz.x;
+      this.playerPos.z = _resolvedHoriz.z;
     } else {
-      this.playerVel.z = 0;
+      const nextX = this.playerPos.x + this.playerVel.x * dt;
+      if (!this.checkHorizontalCollision(nextX, this.playerPos.z, this.playerPos.y, radius)) {
+        this.playerPos.x = nextX;
+      } else {
+        this.playerVel.x = 0;
+      }
+
+      const nextZ = this.playerPos.z + this.playerVel.z * dt;
+      if (!this.checkHorizontalCollision(this.playerPos.x, nextZ, this.playerPos.y, radius)) {
+        this.playerPos.z = nextZ;
+      } else {
+        this.playerVel.z = 0;
+      }
     }
 
     const wasGrounded = this.isGrounded;
     this.playerPos.y += this.playerVel.y * dt;
 
-    // Find highest walkable ground underneath player (ground 0 or top surface of an obstacle)
+    // Find highest walkable ground underneath player
     let groundHeight = 0;
-    for (let i = 0; i < this.colliders.length; i++) {
-      const c = this.colliders[i];
-      if (
-        this.playerPos.x + radius > c.minX &&
-        this.playerPos.x - radius < c.maxX &&
-        this.playerPos.z + radius > c.minZ &&
-        this.playerPos.z - radius < c.maxZ
-      ) {
-        // If player is above or close to the top of collider and falling down onto it
-        if (this.playerPos.y >= c.maxY - 0.28 && c.maxY > groundHeight && c.maxY <= 1.6) {
-          groundHeight = c.maxY;
+    if (isDust2) {
+      groundHeight = this.dust2LevelData.collider.getGroundHeight(
+        this.playerPos.x,
+        this.playerPos.y,
+        this.playerPos.z
+      );
+    } else {
+      for (let i = 0; i < this.colliders.length; i++) {
+        const c = this.colliders[i];
+        if (
+          this.playerPos.x + radius > c.minX &&
+          this.playerPos.x - radius < c.maxX &&
+          this.playerPos.z + radius > c.minZ &&
+          this.playerPos.z - radius < c.maxZ
+        ) {
+          // Allow 0.45m step-up onto stairs/crates and landing onto roofs/balconies up to 8m
+          if (
+            this.playerPos.y >= c.maxY - 0.46 &&
+            c.maxY > groundHeight &&
+            c.maxY <= 8.0
+          ) {
+            groundHeight = c.maxY;
+          }
         }
       }
     }
 
-    if (this.playerPos.y <= groundHeight) {
+    if (
+      this.playerPos.y <= groundHeight ||
+      (wasGrounded &&
+        this.playerVel.y <= 0 &&
+        this.playerPos.y - groundHeight < 0.35)
+    ) {
       if (!wasGrounded && this.playerVel.y < -2.0) {
         this.landingDipVel = Math.max(this.playerVel.y * 0.03, -0.12);
         soundEngine.playFootstep(true, false);
@@ -2816,8 +3230,13 @@ export class TacticalFPSEngine {
       this.playerPos.y = groundHeight;
       this.playerVel.y = 0;
       this.isGrounded = true;
-    } else if (groundHeight > 0 && Math.abs(this.playerPos.y - groundHeight) < 0.05) {
+    } else if (
+      groundHeight > 0 &&
+      Math.abs(this.playerPos.y - groundHeight) < 0.05
+    ) {
       this.isGrounded = true;
+    } else if (this.playerPos.y > groundHeight + 0.06) {
+      this.isGrounded = false;
     }
 
     // Landing spring dip (critically damped physics)
@@ -2886,7 +3305,8 @@ export class TacticalFPSEngine {
     const playerTop = yBottom + currentHeight;
     for (let i = 0; i < this.colliders.length; i++) {
       const c = this.colliders[i];
-      if (playerTop <= c.minY || yBottom >= c.maxY - 0.04) continue;
+      // Allow smooth step-up onto stairs/crates up to 0.45m high
+      if (playerTop <= c.minY || yBottom >= c.maxY - 0.45) continue;
       if (
         x + r > c.minX &&
         x - r < c.maxX &&
@@ -3009,6 +3429,9 @@ export class TacticalFPSEngine {
           this.state.stance === 'CROUCH'
         );
       }
+      if (this.walkBobPhase > Math.PI * 64) {
+        this.walkBobPhase -= Math.PI * 64;
+      }
       this.walkBobAmp = THREE.MathUtils.damp(
         this.walkBobAmp,
         Math.min(1, horizSpeed / 5.0),
@@ -3076,13 +3499,19 @@ export class TacticalFPSEngine {
     this.recoilPitch = THREE.MathUtils.damp(this.recoilPitch, 0, 18, dt);
     this.recoilYaw = THREE.MathUtils.damp(this.recoilYaw, 0, 18, dt);
 
-    // Sprint / Mag Check / Wall-Tuck / CS2 Hip-Angle Pose Modifiers
+    // Sprint / Mag Check / Wall-Tuck / CS2 Hip-Angle Pose Modifiers (smoothly damped to prevent snap jitter)
     const isSprinting = this.state.stance === 'SPRINT' && this.state.adsAlpha < 0.2;
+    this.sprintPoseAlpha = THREE.MathUtils.damp(
+      this.sprintPoseAlpha,
+      isSprinting ? 1 : 0,
+      12,
+      dt
+    );
     const isAk47 = this.state.activeWeapon === 'AK47_RIFLE';
-    const sprintRotX = isSprinting ? (isAk47 ? -0.14 : -0.26) : 0;
-    const sprintRotY = isSprinting ? (isAk47 ? 0.08 : 0.48) : 0;
-    const sprintRotZ = isSprinting ? (isAk47 ? -0.08 : -0.24) : 0;
-    const sprintDropY = isSprinting && isAk47 ? -0.032 : 0;
+    const sprintRotX = (isAk47 ? -0.14 : -0.26) * this.sprintPoseAlpha;
+    const sprintRotY = (isAk47 ? 0.08 : 0.48) * this.sprintPoseAlpha;
+    const sprintRotZ = (isAk47 ? -0.08 : -0.24) * this.sprintPoseAlpha;
+    const sprintDropY = (isAk47 ? -0.032 : 0) * this.sprintPoseAlpha;
 
     // CS2 inward barrel angle in hipfire (smoothly zeroes out in ADS)
     const cs2HipRotY = (1 - this.state.adsAlpha) * 0.055;
@@ -3271,14 +3700,17 @@ export class TacticalFPSEngine {
       t.hitTiltVelocity *= Math.exp(-9 * dt);
       t.pivotGroup.rotation.x = t.hitTiltAngle;
 
-      // 3. Autonomous Combat Bot Telegraph & Return Fire (in TACTICAL_WAVE or KILLHOUSE_BLITZ)
+      // 3. Autonomous Combat Bot Telegraph & Return Fire (in TACTICAL_WAVE, KILLHOUSE_BLITZ, or YARD_BOMB_5V5)
       if (
         t.canShootBack &&
+        !(t as YardBotEntity).isAlly &&
         (this.state.drillMode === 'TACTICAL_WAVE' ||
-          this.state.drillMode === 'KILLHOUSE_BLITZ')
+          this.state.drillMode === 'KILLHOUSE_BLITZ' ||
+          this.state.drillMode === 'YARD_BOMB_5V5' ||
+          this.state.drillMode === 'DUST2_BOMB_5V5')
       ) {
         const distToPlayer = t.root.position.distanceTo(_worldPos);
-        if (distToPlayer < 26) {
+        if (distToPlayer < 34) {
           // Check line of sight from bot head to player eye position (throttled to ~10Hz per bot)
           t.root.userData = t.root.userData || {};
           t.root.userData.losTimer = (t.root.userData.losTimer || 0) + dt;
@@ -3337,17 +3769,55 @@ export class TacticalFPSEngine {
 
                 // Bot fires tracer at player!
                 this.fxPool.spawnTracer(_rayOrigin, _worldPos, 0xef4444);
-                soundEngine.playImpact('TORSO');
+                const isHeadshotHit = Math.random() < 0.35;
+                if (isHeadshotHit) {
+                  soundEngine.playImpact('HEADSHOT');
+                } else {
+                  soundEngine.playImpact('TORSO');
+                }
                 mobileHardware.vibrateDamage();
-                const dmg = this.state.drillMode === 'TACTICAL_WAVE' ? 16 : 9;
+                const baseDmg = this.state.drillMode === 'TACTICAL_WAVE' ? 16 : 9;
+                const dmg = isHeadshotHit ? Math.round(baseDmg * 2.4) : baseDmg;
                 this.state.health = Math.max(0, this.state.health - dmg);
-                this.state.damageFlashAlpha = 0.75;
-                this.cameraShake = 0.012;
+                this.state.damageFlashAlpha = isHeadshotHit ? 0.95 : 0.75;
+                this.cameraShake = isHeadshotHit ? 0.024 : 0.012;
 
                 if (this.state.health <= 0) {
-                  this.state.screen = 'GAME_OVER';
-                  if (document.pointerLockElement) {
-                    document.exitPointerLock();
+                  // O som de knockdown de headshot toca exclusivamente se a morte foi causada por headshot
+                  if (isHeadshotHit) {
+                    soundEngine.playHeadshotDeath();
+                  }
+                  const botEntity = t as YardBotEntity;
+                  this.registerKill(
+                    botEntity.callsign || 'KRAKEN-BT',
+                    'BLACKTHORN',
+                    'VOCÊ',
+                    'VANGUARD',
+                    botEntity.weaponId || 'AK47_RIFLE',
+                    isHeadshotHit
+                  );
+                  if (
+                    this.state.drillMode === 'YARD_BOMB_5V5' ||
+                    this.state.drillMode === 'DUST2_BOMB_5V5'
+                  ) {
+                    this.state.health = 100;
+                    this.yardBombSystem.finishCurrentRound(
+                      'BLACKTHORN',
+                      isHeadshotHit
+                        ? 'OPERADOR VANGUARD ELIMINADO COM HEADSHOT CRÍTICO!'
+                        : 'OPERADOR VANGUARD NEUTRALIZADO EM COMBATE!',
+                      (xp, cash) => {
+                        this.addPlayerXp(xp);
+                        addPlayerCash(cash);
+                        this.state.score += xp;
+                      }
+                    );
+                    this.state.yardBomb = { ...this.yardBombSystem.info };
+                  } else {
+                    this.state.screen = 'GAME_OVER';
+                    if (document.pointerLockElement) {
+                      document.exitPointerLock();
+                    }
                   }
                 }
                 this.emitHud();
@@ -3370,6 +3840,7 @@ export class TacticalFPSEngine {
         x: t.root.position.x,
         z: t.root.position.z,
         isDown: t.isDown,
+        isAlly: (t as YardBotEntity).isAlly,
       }));
     } else {
       for (let i = 0; i < this.targets.length; i++) {
@@ -3378,10 +3849,12 @@ export class TacticalFPSEngine {
         c.x = t.root.position.x;
         c.z = t.root.position.z;
         c.isDown = t.isDown;
+        c.isAlly = (t as YardBotEntity).isAlly;
       }
     }
 
     this.state.playerPos.x = this.playerPos.x;
+    this.state.playerPos.y = this.playerPos.y;
     this.state.playerPos.z = this.playerPos.z;
     this.state.playerYaw = this.yaw;
 
@@ -3441,6 +3914,7 @@ export class TacticalFPSEngine {
       }
     )?.dispose?.();
     this.grenadeSystem?.clearAll?.();
+    this.skySystem?.dispose();
 
     if (this.scene.environment) {
       this.scene.environment.dispose();

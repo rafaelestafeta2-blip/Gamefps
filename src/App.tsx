@@ -7,6 +7,12 @@ import { MainMenu } from './components/MainMenu';
 import { MobileTouchControls } from './components/MobileTouchControls';
 import { OrientationLockOverlay } from './components/OrientationLockOverlay';
 import { TacticalHudOverlay } from './components/TacticalHudOverlay';
+import { YardMatchLoadingModal } from './components/YardMatchLoadingModal';
+import {
+  ControlSettings,
+  loadControlSettings,
+  saveControlSettings,
+} from './controls/hudLayoutSettings';
 import { applyGraphicsToEngine } from './graphics/applyGraphicsToEngine';
 import {
   FpsLimit,
@@ -20,86 +26,31 @@ import { TacticalFPSEngine } from './three/fpsEngine';
 import { DrillMode, GyroMode, HudState, OpticType, WeaponId } from './types/game';
 
 const INITIAL_HUD_STATE: HudState = {
-  screen: 'INTRO',
-  pointerLocked: false,
-  activeWeapon: 'M4_CARBINE',
-  primaryWeapon: 'M4_CARBINE',
-  secondaryWeapon: 'P50_PISTOL',
-  nearWallStand: false,
-  focusedWallWeapon: null,
-  chambered: 1,
-  currentMagRounds: 30,
-  magCapacity: 30,
-  magazines: [30, 30, 30, 30],
-  fragGrenades: 3,
-  smokeGrenades: 3,
-  equippedGrenade: null,
-  isThrowingGrenade: false,
-  boltLockedBack: false,
-  fireMode: 'AUTO',
-  optic: 'iron',
-  lpvoZoom: 2.0,
-  cantedActive: false,
-  suppressorAttached: false,
-  muzzleDevice: 'NONE',
-  weaponCharm: 'NONE',
-  laserActive: false,
-  reloadPhase: 'IDLE',
-  reloadProgress: 0,
-  reloadTypeLabel: '',
-  magCheckVisible: false,
-  wallTuckAmount: 0,
-  health: 100,
-  maxHealth: 100,
-  stamina: 100,
-  isHoldingBreath: false,
-  isAds: false,
-  adsAlpha: 0,
-  stance: 'STAND',
-  leanDirection: 0,
-  playerPos: { x: -6.8, z: 3.2 },
-  playerYaw: 0,
-  radarTargets: [],
-  drillMode: 'FREE_RANGE',
-  score: 0,
-  hits: 0,
-  shotsFired: 0,
-  headshots: 0,
-  targetsRemaining: 6,
-  totalTargetsInDrill: 6,
-  courseTimerSec: 0,
-  bestCourseTimeSec: null,
-  lastHitZone: null,
-  lastShotTelemetry: null,
-  shotHistory: [],
-  hitMarkerAlpha: 0,
-  hitMarkerIsCrit: false,
-  damageFlashAlpha: 0,
-  playerXp: 0,
-  rankLevel: 1,
-  rankTitle: 'Recruta I',
-  rankBadge: '★',
-  rankBadgeColor: '#94a3b8',
-  nextRankXp: 250,
-  lastXpGained: 0,
-  rankUpNotification: null,
-  muted: false,
-  dockCollapsed: true,
-  touchControlsVisible: true,
-  isCrouchingToggled: false,
-  isProneToggled: false,
-  qualityPreset: 'BALANCED_60',
-  dynamicResolutionEnabled: true,
-  liveFps: 60,
-  renderScalePercent: 100,
-  gyroMode: 'OFF',
-  gyroSensitivity: 1.0,
-  lookSensitivity: 1.0,
-  adsSensitivity: 1.0,
-  hapticsEnabled: true,
-  isFullscreen: false,
-  graphicQuality: 'HIGH',
-  fpsLimit: 60,
+  screen: 'INTRO', pointerLocked: false, activeWeapon: 'M4_CARBINE',
+  primaryWeapon: 'M4_CARBINE', secondaryWeapon: 'P50_PISTOL',
+  nearWallStand: false, focusedWallWeapon: null, chambered: 1,
+  currentMagRounds: 30, magCapacity: 30, magazines: [30, 30, 30, 30],
+  fragGrenades: 3, smokeGrenades: 3, equippedGrenade: null,
+  isThrowingGrenade: false, boltLockedBack: false, fireMode: 'AUTO',
+  optic: 'iron', lpvoZoom: 2.0, cantedActive: false, suppressorAttached: false,
+  muzzleDevice: 'NONE', weaponCharm: 'NONE', laserActive: false,
+  reloadPhase: 'IDLE', reloadProgress: 0, reloadTypeLabel: '',
+  magCheckVisible: false, wallTuckAmount: 0, health: 100, maxHealth: 100,
+  stamina: 100, isHoldingBreath: false, isAds: false, adsAlpha: 0,
+  stance: 'STAND', leanDirection: 0, playerPos: { x: -6.8, z: 3.2 },
+  playerYaw: 0, radarTargets: [], drillMode: 'FREE_RANGE', score: 0, hits: 0,
+  shotsFired: 0, headshots: 0, targetsRemaining: 6, totalTargetsInDrill: 6,
+  courseTimerSec: 0, bestCourseTimeSec: null, lastHitZone: null,
+  lastShotTelemetry: null, shotHistory: [], hitMarkerAlpha: 0,
+  hitMarkerIsCrit: false, damageFlashAlpha: 0, killfeed: [], playerXp: 0, rankLevel: 1,
+  rankTitle: 'Recruta I', rankBadge: '★', rankBadgeColor: '#94a3b8',
+  nextRankXp: 250, lastXpGained: 0, rankUpNotification: null, muted: false,
+  dockCollapsed: true, touchControlsVisible: true, isCrouchingToggled: false,
+  isProneToggled: false, qualityPreset: 'BALANCED_60',
+  dynamicResolutionEnabled: true, liveFps: 60, renderScalePercent: 100,
+  gyroMode: 'OFF', gyroSensitivity: 1.0, lookSensitivity: 1.0,
+  adsSensitivity: 1.0, hapticsEnabled: true, isFullscreen: false,
+  graphicQuality: 'HIGH', fpsLimit: 60,
 };
 
 export default function App() {
@@ -107,19 +58,45 @@ export default function App() {
   const engineRef = useRef<TacticalFPSEngine | null>(null);
   const [hud, setHud] = useState<HudState>(INITIAL_HUD_STATE);
   const [preloadProgress, setPreloadProgress] = useState(0);
-  const [preloadStatus, setPreloadStatus] = useState(
-    'INICIALIZANDO GERENCIADOR...'
-  );
-  const [gameSettings, setGameSettings] = useState<GameSettings>(() =>
-    loadGameSettings()
-  );
+  const [preloadStatus, setPreloadStatus] = useState('INICIALIZANDO GERENCIADOR...');
+  const [loadingBombMode, setLoadingBombMode] = useState<DrillMode | null>(null);
+  const [gameSettings, setGameSettings] = useState<GameSettings>(() => loadGameSettings());
   const gameSettingsRef = useRef<GameSettings>(gameSettings);
   gameSettingsRef.current = gameSettings;
+
+  const [controlSettings, setControlSettings] = useState<ControlSettings>(() =>
+    loadControlSettings()
+  );
+  const controlSettingsRef = useRef<ControlSettings>(controlSettings);
+  controlSettingsRef.current = controlSettings;
 
   useEffect(() => {
     initAudioSystem(gameSettingsRef.current);
     applyAudioSettings(gameSettingsRef.current);
   }, []);
+
+  const applyControlsToEngine = (
+    engine: TacticalFPSEngine,
+    next: ControlSettings,
+    prev?: ControlSettings
+  ) => {
+    engine.setLookSensitivity(next.lookSensitivity);
+    engine.setAdsSensitivity(next.adsSensitivity);
+    engine.setGyroSensitivity(next.gyroSensitivity);
+    if (!prev || prev.gyroMode !== next.gyroMode) {
+      void engine.setGyroMode(next.gyroMode);
+    }
+  };
+
+  const handleUpdateControlSettings = (next: ControlSettings) => {
+    const prev = controlSettingsRef.current;
+    controlSettingsRef.current = next;
+    setControlSettings(next);
+    saveControlSettings(next);
+    if (engineRef.current) {
+      applyControlsToEngine(engineRef.current, next, prev);
+    }
+  };
 
   const handleUpdateSettings = (newSettings: GameSettings) => {
     gameSettingsRef.current = newSettings;
@@ -131,15 +108,25 @@ export default function App() {
     }
   };
 
-  const handleResetSettings = () => {
-    const defaults = getDefaultSettings();
-    handleUpdateSettings(defaults);
+  const handleResetSettings = () => handleUpdateSettings(getDefaultSettings());
+
+  const launchMatchNow = (mode?: DrillMode) => {
+    if (!engineRef.current) return;
+    engineRef.current.startGame(mode);
+    applyGraphicsToEngine(engineRef.current, gameSettingsRef.current);
+    applyControlsToEngine(engineRef.current, controlSettingsRef.current);
   };
 
   const handleStartMatch = (mode?: DrillMode) => {
     if (!engineRef.current) return;
-    engineRef.current.startGame(mode);
-    applyGraphicsToEngine(engineRef.current, gameSettingsRef.current);
+    if (
+      (mode === 'YARD_BOMB_5V5' || mode === 'DUST2_BOMB_5V5') &&
+      hud.screen !== 'PLAYING'
+    ) {
+      setLoadingBombMode(mode);
+      return;
+    }
+    launchMatchNow(mode);
   };
 
   const handleSelectWeapon = (weaponId: WeaponId) => {
@@ -152,13 +139,11 @@ export default function App() {
     const container = canvasMountRef.current;
     if (!container) return;
 
-    const engine = new TacticalFPSEngine(container, (nextHud) => {
-      setHud(nextHud);
-    });
+    const engine = new TacticalFPSEngine(container, (nextHud) => setHud(nextHud));
     engineRef.current = engine;
 
-    // Aplica gráficos iniciais na instância recém-criada do motor
     applyGraphicsToEngine(engine, gameSettingsRef.current);
+    applyControlsToEngine(engine, controlSettingsRef.current);
 
     const onUserGesture = () => {
       void mobileHardware.enterFullscreenLandscape();
@@ -212,14 +197,11 @@ export default function App() {
         aria-label="Viewport 3D do simulador tático KINETIC"
       />
 
-      {/* Realtime In-Game FPS HUD Pill */}
       {gameSettings.showFpsCounter && hud.screen === 'PLAYING' && (
         <div className="absolute top-2 left-2 z-50 pointer-events-none px-2 py-0.5 rounded bg-black/80 border border-amber-500/50 font-mono text-[10px] text-amber-400 flex items-center gap-2 shadow-lg">
           <span className="font-bold">{hud.liveFps} FPS</span>
           <span className="text-zinc-500">|</span>
-          <span className="text-zinc-400">
-            {(1000 / Math.max(1, hud.liveFps)).toFixed(1)}ms
-          </span>
+          <span className="text-zinc-400">{(1000 / Math.max(1, hud.liveFps)).toFixed(1)}ms</span>
           <span className="text-zinc-500">|</span>
           <span className="text-zinc-400">DPI {hud.renderScalePercent}%</span>
         </div>
@@ -245,7 +227,23 @@ export default function App() {
         />
       )}
 
-      {(hud.screen === 'MAIN_MENU' || hud.screen === 'TITLE') && (
+      {loadingBombMode && (
+        <YardMatchLoadingModal
+          mode={loadingBombMode}
+          onPrepareMap={(targetMode, onProg) =>
+            engineRef.current
+              ? engineRef.current.prepareMapForMatch(targetMode, onProg)
+              : Promise.resolve()
+          }
+          onComplete={() => {
+            const targetMode = loadingBombMode;
+            setLoadingBombMode(null);
+            launchMatchNow(targetMode);
+          }}
+        />
+      )}
+
+      {(hud.screen === 'MAIN_MENU' || hud.screen === 'TITLE') && !loadingBombMode && (
         <MainMenu
           onStartTraining={() => handleStartMatch('FREE_RANGE')}
           onStartDrill={(mode) => handleStartMatch(mode)}
@@ -254,6 +252,9 @@ export default function App() {
           gameSettings={gameSettings}
           onUpdateGameSettings={handleUpdateSettings}
           onResetGameSettings={handleResetSettings}
+          controlSettings={controlSettings}
+          onUpdateControlSettings={handleUpdateControlSettings}
+          onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
         />
       )}
 
@@ -261,12 +262,9 @@ export default function App() {
         <>
           <MobileTouchControls
             hud={hud}
-            onMove={(mx, my, sprint) =>
-              engineRef.current?.setTouchMovement(mx, my, sprint)
-            }
-            onLookDelta={(dx, dy) =>
-              engineRef.current?.applyTouchLookDelta(dx, dy)
-            }
+            controlSettings={controlSettings}
+            onMove={(mx, my, sprint) => engineRef.current?.setTouchMovement(mx, my, sprint)}
+            onLookDelta={(dx, dy) => engineRef.current?.applyTouchLookDelta(dx, dy)}
             onFireHeld={(held) => engineRef.current?.setTouchFireHeld(held)}
             onToggleAds={() => engineRef.current?.toggleAds()}
             onToggleWeaponSlot={() => engineRef.current?.toggleWeaponSlot()}
@@ -287,9 +285,7 @@ export default function App() {
             onSelectWeapon={handleSelectWeapon}
             onToggleWeaponSlot={() => engineRef.current?.toggleWeaponSlot()}
             onInspectWeapon={() => engineRef.current?.triggerWeaponInspect()}
-            onSelectOptic={(optic: OpticType) =>
-              engineRef.current?.setOptic(optic)
-            }
+            onSelectOptic={(optic: OpticType) => engineRef.current?.setOptic(optic)}
             onToggleCanted={() => engineRef.current?.toggleCantedSight()}
             onToggleSuppressor={() => engineRef.current?.toggleSuppressor()}
             onCycleCharm={() => engineRef.current?.cycleWeaponCharm()}
@@ -303,6 +299,11 @@ export default function App() {
               void engineRef.current?.toggleFullscreenLandscape();
             }}
             onPause={() => engineRef.current?.pauseGame()}
+            onPlantBomb={() => engineRef.current?.triggerPlantBomb()}
+            onReturnToMenu={() => {
+              engineRef.current?.returnToMainMenu();
+              setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
+            }}
           />
         </>
       )}
@@ -311,6 +312,8 @@ export default function App() {
         hud={hud}
         fpsLimit={gameSettings.fpsLimit}
         vibration={gameSettings.vibration}
+        controlSettings={controlSettings}
+        onUpdateControlSettings={handleUpdateControlSettings}
         onStartGame={(mode?: DrillMode) => handleStartMatch(mode)}
         onResumeGame={() => engineRef.current?.resumeGame()}
         onRestartDrill={() => handleStartMatch(hud.drillMode)}
@@ -318,20 +321,18 @@ export default function App() {
           engineRef.current?.returnToMainMenu();
           setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
         }}
-        onSelectDrillMode={(mode: DrillMode) =>
-          engineRef.current?.setDrillMode(mode)
+        onSelectDrillMode={(mode: DrillMode) => engineRef.current?.setDrillMode(mode)}
+        onSetGyroMode={(mode: GyroMode) =>
+          handleUpdateControlSettings({ ...controlSettingsRef.current, gyroMode: mode })
         }
-        onSetGyroMode={(mode: GyroMode) => {
-          void engineRef.current?.setGyroMode(mode);
-        }}
         onSetGyroSensitivity={(sens: number) =>
-          engineRef.current?.setGyroSensitivity(sens)
+          handleUpdateControlSettings({ ...controlSettingsRef.current, gyroSensitivity: sens })
         }
         onSetLookSensitivity={(sens: number) =>
-          engineRef.current?.setLookSensitivity(sens)
+          handleUpdateControlSettings({ ...controlSettingsRef.current, lookSensitivity: sens })
         }
         onSetAdsSensitivity={(sens: number) =>
-          engineRef.current?.setAdsSensitivity(sens)
+          handleUpdateControlSettings({ ...controlSettingsRef.current, adsSensitivity: sens })
         }
         onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
         onToggleHaptics={() =>

@@ -1,4 +1,4 @@
-// Mobile Native Hardware Layer: Haptics, Gyroscope Sensor Fusion & Fullscreen Landscape Lock
+// Mobile Native Hardware Layer: Haptics, Gyroscope Sensor Fusion & Fullscreen Immersive Landscape Lock
 
 export class MobileHardwareManager {
   public hapticsEnabled = true;
@@ -8,6 +8,18 @@ export class MobileHardwareManager {
   private filteredDx = 0;
   private filteredDy = 0;
   private onGyroDeltaCallback: ((dx: number, dy: number) => void) | null = null;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      const enforceImmersiveOnGesture = () => {
+        if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+          void this.enterFullscreenLandscape();
+        }
+      };
+      window.addEventListener('touchend', enforceImmersiveOnGesture, { passive: true });
+      window.addEventListener('click', enforceImmersiveOnGesture, { passive: true });
+    }
+  }
 
   // =========================================================================
   // 1. TACTICAL HAPTIC FEEDBACK (ANDROID NATIVE VIBRATE / CAPACITOR)
@@ -117,14 +129,23 @@ export class MobileHardwareManager {
   }
 
   // =========================================================================
-  // 3. FULLSCREEN IMMERSIVE MODE + LANDSCAPE ORIENTATION LOCK
+  // 3. FULLSCREEN IMMERSIVE MODE (HIDES ANDROID NAVIGATION & STATUS BARS)
   // =========================================================================
   public async enterFullscreenLandscape(): Promise<boolean> {
     try {
+      // If Android native bridge is exposed, trigger sticky immersive mode
+      const win = window as any;
+      if (win.AndroidFullScreen && typeof win.AndroidFullScreen.immersiveMode === 'function') {
+        win.AndroidFullScreen.immersiveMode();
+      }
+
       const docEl = document.documentElement as any;
       if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
         if (docEl.requestFullscreen) {
-          await docEl.requestFullscreen().catch(() => {});
+          // navigationUI: 'hide' hides Android system navigation bar (<, O, |||) and status bar
+          await docEl.requestFullscreen({ navigationUI: 'hide' }).catch(() => {
+            return docEl.requestFullscreen().catch(() => {});
+          });
         } else if (docEl.webkitRequestFullscreen) {
           await docEl.webkitRequestFullscreen().catch(() => {});
         } else if (docEl.msRequestFullscreen) {
@@ -136,7 +157,6 @@ export class MobileHardwareManager {
       };
       if (scrOrientation && typeof scrOrientation.lock === 'function') {
         await scrOrientation.lock('landscape').catch(() => {
-          // Fallback to landscape-primary if generic landscape is rejected
           return scrOrientation.lock?.('landscape-primary').catch(() => {});
         });
       }

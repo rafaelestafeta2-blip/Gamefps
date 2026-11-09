@@ -8,7 +8,9 @@ import {
 import { HudBottomWeaponDock } from './HudBottomWeaponDock';
 import { HudTopRightControls } from './HudTopRightControls';
 import { bindTap, WeaponSilhouette } from './hudTapUtils';
+import { WarfaceKillfeed } from './WarfaceKillfeed';
 import { WarfaceRankIcon } from './WarfaceRankIcon';
+import { YardBombHudBar } from './YardBombHudBar';
 
 interface TacticalHudOverlayProps {
   hud: HudState;
@@ -27,6 +29,8 @@ interface TacticalHudOverlayProps {
   onToggleDock: () => void;
   onToggleFullscreen: () => void;
   onPause: () => void;
+  onPlantBomb?: () => void;
+  onReturnToMenu?: () => void;
 }
 
 export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
@@ -46,6 +50,8 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
   onToggleDock,
   onToggleFullscreen,
   onPause,
+  onPlantBomb,
+  onReturnToMenu,
 }) => {
   const isSniperScopeActive =
     (hud.activeWeapon === 'SNIPER_BOLT' ||
@@ -163,32 +169,19 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
         </div>
       )}
 
-      {/* TOP-LEFT: WARFACE RANK BADGE + SCORE BAR */}
-      <div className="fixed top-2.5 left-2.5 flex items-center z-20 pointer-events-none select-none font-mono">
-        <div className="w-8 h-8 rounded-lg bg-black/80 border border-amber-500/40 flex items-center justify-center shadow-lg z-10">
-          <WarfaceRankIcon level={hud.rankLevel} className="w-6 h-6" />
-        </div>
+      {/* WARFACE TACTICAL 5V5 KILLFEED (Canto superior direito abaixo do radar) */}
+      <WarfaceKillfeed entries={hud.killfeed} />
 
-        <div className="-ml-2 pl-4 pr-3 py-1 bg-black/60 border border-white/20 rounded-r-lg flex items-center gap-3 font-mono tabular-nums text-xs">
-          <div className="flex flex-col gap-0.5">
-            <div className="text-[10px] font-bold text-amber-300 leading-none">
-              NÍV. {hud.rankLevel} · {hud.rankTitle.toUpperCase()}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sky-400 font-bold">{hud.hits}</span>
-              <div className="w-10 h-1 bg-white/15 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-sky-400"
-                  style={{
-                    width: `${Math.min(100, (hud.hits / Math.max(1, hud.totalTargetsInDrill)) * 100)}%`,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-          <span className="text-white/90 font-bold text-sm">{hud.score}</span>
-        </div>
-      </div>
+      {/* TOP-CENTER: 5v5 PLANT THE BOMB HUD BAR (YARD & DE_DUST2) */}
+      {(hud.drillMode === 'YARD_BOMB_5V5' ||
+        hud.drillMode === 'DUST2_BOMB_5V5') &&
+        hud.yardBomb && (
+          <YardBombHudBar
+            yardBomb={hud.yardBomb}
+            onPlantBomb={() => onPlantBomb?.()}
+            onReturnToMenu={onReturnToMenu}
+          />
+        )}
 
       {/* TOP-RIGHT: SQUARE MINIMAP + UTILITY BUTTONS + OPTICS POPOVER */}
       <HudTopRightControls

@@ -1,21 +1,37 @@
 import React, { useEffect, useRef } from 'react';
+import { DUST2_BOMB_SITE_A, DUST2_BOMB_SITE_B } from '../three/dust2LevelBuilder';
+import { YARD_BOMB_SITE_A, YARD_BOMB_SITE_B } from '../three/yardMapData';
+import { DrillMode } from '../types/game';
 
 interface MinimapRadarProps {
   playerX: number;
   playerZ: number;
   playerYaw: number;
+  drillMode?: DrillMode;
   targets?: Array<{
     id: string;
     sector: 'RANGE' | 'KILLHOUSE';
     x: number;
     z: number;
     isDown: boolean;
+    isAlly?: boolean;
   }>;
 }
 
+const YARD_RADAR_SRC = '/assets/aistudio/Yard_Map_Radar_7754e5f9.webp';
+
 export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
-  ({ playerX, playerZ, playerYaw, targets }) => {
+  ({ playerX, playerZ, playerYaw, drillMode, targets }) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const radarImgRef = useRef<HTMLImageElement | null>(null);
+
+    useEffect(() => {
+      const img = new Image();
+      img.src = YARD_RADAR_SRC;
+      img.onload = () => {
+        radarImgRef.current = img;
+      };
+    }, []);
 
     useEffect(() => {
       const canvas = canvasRef.current;
@@ -25,64 +41,97 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
 
       const size = 104;
       const center = size / 2;
-      const scale = 2.0;
+      const isYard = drillMode === 'YARD_BOMB_5V5';
+      const isDust2 = drillMode === 'DUST2_BOMB_5V5';
+      const isBombMode = isYard || isDust2;
+      const scale = isDust2 ? 1.05 : isYard ? 1.35 : 2.0;
       const maxRange = center - 6;
 
       ctx.clearRect(0, 0, size, size);
-
-      // Dark square tactical terrain background (COD Mobile style)
-      ctx.fillStyle = '#141c24';
+      ctx.fillStyle = isDust2 ? '#18140e' : '#0e141c';
       ctx.fillRect(0, 0, size, size);
 
-      // Save context to rotate world relative to player or keep north-up tactical blocks
       ctx.save();
       ctx.translate(center, center);
 
-      // Subtle tactical grid lines
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-      ctx.lineWidth = 1;
-      for (let g = -40; g <= 40; g += 20) {
-        ctx.beginPath();
-        ctx.moveTo(g, -center);
-        ctx.lineTo(g, center);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(-center, g);
-        ctx.lineTo(center, g);
-        ctx.stroke();
-      }
-
-      // Draw simplified map structures (Firing Range & Killhouse walls) relative to player
-      const drawStructure = (wx: number, wz: number, w: number, d: number, color: string) => {
+      const drawSectorRect = (wx: number, wz: number, w: number, d: number, fill: string, stroke = 'rgba(255,255,255,0.22)') => {
         const rx = (wx - playerX) * scale;
         const rz = (wz - playerZ) * scale;
-        ctx.fillStyle = color;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+        ctx.fillStyle = fill;
+        ctx.strokeStyle = stroke;
         ctx.lineWidth = 1;
         ctx.fillRect(rx - (w * scale) / 2, rz - (d * scale) / 2, w * scale, d * scale);
         ctx.strokeRect(rx - (w * scale) / 2, rz - (d * scale) / 2, w * scale, d * scale);
       };
 
-      // Range booth & Killhouse blocks for realistic COD minimap feel
-      drawStructure(-6, 0, 8, 18, '#25313d');
-      drawStructure(8, -10, 12, 16, '#2c3a47');
-      drawStructure(0, -18, 22, 6, '#1f2933');
-
-      // Wall Armory crate icon (-3.2, 0.0)
-      const armRelX = (-3.2 - playerX) * scale;
-      const armRelZ = (0.0 - playerZ) * scale;
-      const armDist = Math.hypot(armRelX, armRelZ);
-      let armX = armRelX;
-      let armZ = armRelZ;
-      if (armDist > maxRange) {
-        const ang = Math.atan2(armRelZ, armRelX);
-        armX = Math.cos(ang) * maxRange;
-        armZ = Math.sin(ang) * maxRange;
+      if (isYard && radarImgRef.current) {
+        const worldW = 78 * scale;
+        const worldH = 92 * scale;
+        const imgCenterX = (2 - playerX) * scale;
+        const imgCenterZ = (1 - playerZ) * scale;
+        ctx.drawImage(
+          radarImgRef.current,
+          imgCenterX - worldW / 2,
+          imgCenterZ - worldH / 2,
+          worldW,
+          worldH
+        );
+      } else if (isDust2) {
+        // Authentic Counter-Strike de_dust2 radar sectors in world coordinates
+        drawSectorRect(-18, 19, 56, 12, '#2d261c'); // T Spawn
+        drawSectorRect(22, 8, 28, 16, '#292218'); // Outside Long
+        drawSectorRect(35, -28, 14, 52, '#332a1e'); // Long A Street
+        drawSectorRect(28, -60, 22, 20, '#3d3020', 'rgba(248,113,113,0.45)'); // Site A
+        drawSectorRect(2, -38, 16, 26, '#2f271d'); // Short A / Catwalk
+        drawSectorRect(-11, -14, 12, 54, '#262017'); // Mid Alley & Doors
+        drawSectorRect(-4, -56, 26, 16, '#1f242d'); // CT Spawn Underpass
+        drawSectorRect(-38, -26, 22, 26, '#231d16'); // Upper B Tunnels
+        drawSectorRect(-22, -36, 16, 12, '#1c1812'); // Lower B Tunnels
+        drawSectorRect(-40, -64, 24, 24, '#2c251c', 'rgba(56,189,248,0.45)'); // Site B
+      } else {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+        ctx.lineWidth = 1;
+        for (let g = -40; g <= 40; g += 20) {
+          ctx.beginPath();
+          ctx.moveTo(g, -center);
+          ctx.lineTo(g, center);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(-center, g);
+          ctx.lineTo(center, g);
+          ctx.stroke();
+        }
+        drawSectorRect(-6, 0, 8, 18, '#25313d');
+        drawSectorRect(8, -10, 12, 16, '#2c3a47');
+        drawSectorRect(0, -18, 22, 6, '#1f2933');
       }
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillRect(armX - 2.5, armZ - 2.5, 5, 5);
 
-      // Target pings (Red enemy dots like COD Mobile)
+      // Draw Bomb Site A and B pins on minimap for both Yard and Dust2
+      if (isBombMode) {
+        const siteA = isDust2 ? DUST2_BOMB_SITE_A : YARD_BOMB_SITE_A;
+        const siteB = isDust2 ? DUST2_BOMB_SITE_B : YARD_BOMB_SITE_B;
+        const drawSitePin = (sx: number, sz: number, label: string, color: string) => {
+          let rx = (sx - playerX) * scale;
+          let rz = (sz - playerZ) * scale;
+          const dist = Math.hypot(rx, rz);
+          if (dist > maxRange) {
+            const ang = Math.atan2(rz, rx);
+            rx = Math.cos(ang) * maxRange;
+            rz = Math.sin(ang) * maxRange;
+          }
+          ctx.fillStyle = color;
+          ctx.fillRect(rx - 5, rz - 5, 10, 10);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, rx, rz + 0.5);
+        };
+        drawSitePin(siteA.x, siteA.z, 'A', '#dc2626');
+        drawSitePin(siteB.x, siteB.z, 'B', '#0284c7');
+      }
+
+      // Target & Ally pings
       if (targets && targets.length > 0) {
         for (let i = 0; i < targets.length; i++) {
           const t = targets[i];
@@ -100,7 +149,7 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
 
           ctx.beginPath();
           ctx.arc(tx, tz, 3.2, 0, Math.PI * 2);
-          ctx.fillStyle = '#ef4444';
+          ctx.fillStyle = t.isAlly ? '#38bdf8' : '#ef4444';
           ctx.fill();
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 0.8;
@@ -108,10 +157,9 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
         }
       }
 
-      // Rotate for player vision cone & yellow teardrop marker (exact COD Mobile style)
+      // Rotate for player vision cone & yellow teardrop marker
       ctx.rotate(-playerYaw);
 
-      // Bright white/amber FOV cone
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(-18, -32);
@@ -120,7 +168,6 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
       ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
       ctx.fill();
 
-      // Yellow/Gold Player Teardrop Pointer with white border
       ctx.beginPath();
       ctx.moveTo(0, -8);
       ctx.bezierCurveTo(6, -1, 6, 6, 0, 6);
@@ -133,7 +180,7 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
       ctx.stroke();
 
       ctx.restore();
-    }, [playerX, playerZ, playerYaw, targets]);
+    }, [playerX, playerZ, playerYaw, drillMode, targets]);
 
     return (
       <div className="relative w-24 h-24 sm:w-28 sm:h-28 bg-[#141c24]/90 border border-white/30 shadow-lg overflow-hidden shrink-0 pointer-events-none">
@@ -150,5 +197,6 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
     prev.playerX === next.playerX &&
     prev.playerZ === next.playerZ &&
     prev.playerYaw === next.playerYaw &&
+    prev.drillMode === next.drillMode &&
     prev.targets === next.targets
 );

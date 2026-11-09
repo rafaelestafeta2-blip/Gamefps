@@ -867,6 +867,7 @@ export const WARFACE_RANKS: RankDefinition[] = [
 ];
 
 const LOCAL_STORAGE_XP_KEY = 'kinetic_fps_warface_xp_v1';
+const LOCAL_STORAGE_CASH_KEY = 'kinetic_fps_warface_cash_v1';
 
 export function loadSavedPlayerXp(): number {
   try {
@@ -885,6 +886,27 @@ export function savePlayerXp(xp: number): void {
   } catch {
     // Ignore quota errors
   }
+}
+
+export function loadSavedPlayerCash(): number {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_CASH_KEY);
+    if (!raw) return 0;
+    const parsed = parseInt(raw, 10);
+    return isNaN(parsed) ? 0 : Math.max(0, parsed);
+  } catch {
+    return 0;
+  }
+}
+
+export function addPlayerCash(delta: number): number {
+  const next = Math.max(0, loadSavedPlayerCash() + Math.round(delta));
+  try {
+    localStorage.setItem(LOCAL_STORAGE_CASH_KEY, next.toString());
+  } catch {
+    // Ignore quota errors
+  }
+  return next;
 }
 
 export function getRankForXp(xp: number): RankDefinition {

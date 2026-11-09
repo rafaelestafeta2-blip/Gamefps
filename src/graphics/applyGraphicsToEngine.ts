@@ -205,16 +205,16 @@ export function applyGraphicsToEngine(
   }
 
   // 4. Distância de visão (camera.far)
-  let targetFar = 130;
+  let targetFar = 135;
   switch (settings.viewDistance) {
     case 'NEAR':
-      targetFar = 80;
+      targetFar = 115;
       break;
     case 'MEDIUM':
-      targetFar = 130;
+      targetFar = 145;
       break;
     case 'FAR':
-      targetFar = 180;
+      targetFar = 190;
       break;
     case 'ULTRA':
       targetFar = 260;
@@ -229,7 +229,14 @@ export function applyGraphicsToEngine(
   if (!settings.fog) {
     scene.fog = null;
   } else if (!scene.fog) {
-    scene.fog = new THREE.FogExp2(0x0d121a, 0.014);
+    const mode = (engine.state as { drillMode?: string }).drillMode;
+    if (mode === 'DUST2_BOMB_5V5') {
+      scene.fog = new THREE.FogExp2(0xdccbb1, 0.0038);
+    } else if (mode === 'YARD_BOMB_5V5') {
+      scene.fog = new THREE.FogExp2(0xcbd5e1, 0.0052);
+    } else {
+      scene.fog = new THREE.FogExp2(0x0d121a, 0.014);
+    }
   }
 
   // 6. Reflexos PBR (Environment map)

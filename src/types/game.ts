@@ -29,9 +29,50 @@ export type ReloadPhase =
   | 'CHARGING_PULL'
   | 'MAG_CHECK';
 
-export type DrillMode = 'FREE_RANGE' | 'KILLHOUSE_BLITZ' | 'TACTICAL_WAVE';
+export type DrillMode =
+  | 'FREE_RANGE'
+  | 'KILLHOUSE_BLITZ'
+  | 'TACTICAL_WAVE'
+  | 'YARD_BOMB_5V5'
+  | 'DUST2_BOMB_5V5';
 export type QualityPreset = 'COMPETITIVE_120' | 'BALANCED_60' | 'ULTRA_PBR';
 export type GyroMode = 'OFF' | 'ADS_ONLY' | 'ALWAYS';
+
+export interface KillfeedEntry {
+  id: string;
+  killerName: string;
+  killerTeam: 'VANGUARD' | 'BLACKTHORN';
+  victimName: string;
+  victimTeam: 'VANGUARD' | 'BLACKTHORN';
+  weaponId: WeaponId | 'GRENADE' | 'KNIFE_TACTICAL';
+  isHeadshot: boolean;
+  timestamp: number;
+}
+
+export interface YardBombHudInfo {
+  bombStatus: 'CARRIED' | 'PLANTING' | 'PLANTED' | 'DETONATED' | 'DEFUSED';
+  plantedSite: 'A' | 'B' | null;
+  nearSite: 'A' | 'B' | null;
+  plantProgress: number; // 0..1
+  roundTimerSec: number;
+  c4TimerSec: number;
+  alliesAlive: number; // 0..5 (includes player)
+  enemiesAlive: number; // 0..5
+  calloutLabel: string;
+  currentRound: number; // 1..6
+  maxRounds: number; // 6
+  vanguardScore: number;
+  blackthornScore: number;
+  roundState: 'PLAYING' | 'ROUND_OVER' | 'MATCH_OVER';
+  roundWinner: 'VANGUARD' | 'BLACKTHORN' | null;
+  roundWinReason: string;
+  roundTransitionSec: number;
+  matchWinner: 'VANGUARD' | 'BLACKTHORN' | null;
+  lastRoundXp: number;
+  lastRoundCash: number;
+  totalMatchXp: number;
+  totalMatchCash: number;
+}
 
 export interface BallisticShotTelemetry {
   id: number;
@@ -90,7 +131,7 @@ export interface HudState {
   adsAlpha: number; // 0..1 smooth interpolation
   stance: 'STAND' | 'CROUCH' | 'PRONE' | 'SPRINT' | 'SLIDE';
   leanDirection: -1 | 0 | 1; // -1 Left (Q), 0 Center, 1 Right (E)
-  playerPos: { x: number; z: number };
+  playerPos: { x: number; y?: number; z: number };
   playerYaw: number;
   radarTargets: Array<{
     id: string;
@@ -98,10 +139,12 @@ export interface HudState {
     x: number;
     z: number;
     isDown: boolean;
+    isAlly?: boolean;
   }>;
 
   // Combat & Drill Telemetry
   drillMode: DrillMode;
+  yardBomb?: YardBombHudInfo;
   score: number;
   hits: number;
   shotsFired: number;
@@ -116,6 +159,7 @@ export interface HudState {
   hitMarkerAlpha: number;
   hitMarkerIsCrit: boolean;
   damageFlashAlpha: number;
+  killfeed: KillfeedEntry[];
 
   // Warface Rank Progression System
   playerXp: number;
