@@ -80,6 +80,10 @@ export class TacticalFPSEngine {
   private drsAccumTime = 0;
   private drsFrameCount = 0;
   private currentRenderScale = 1.0;
+  private fpsLimiterAccumulator = 0;
+  private aimRaycastTimer = 0;
+  private cachedAimHits: THREE.Intersection[] = [];
+  private isWindowFocused = true;
 
   // Input State (Separated Held vs Edge-Triggered + Mobile Touch Analog State)
   private keysHeld = new Set<string>();
@@ -1360,7 +1364,11 @@ export class TacticalFPSEngine {
         this.triggerJump();
         break;
       case 'KeyZ':
-        this.triggerProne();
+        if (this.state.isAds && this.state.optic === 'lpvo') {
+          this.cycleLpvoZoom();
+        } else {
+          this.triggerProne();
+        }
         break;
       case 'KeyC':
       case 'ControlLeft':
@@ -1456,30 +1464,6 @@ export class TacticalFPSEngine {
         this.setOptic(nextOptic);
         break;
       }
-      case 'KeyZ':
-        if (this.state.optic === 'lpvo') {
-          this.state.lpvoZoom = this.state.lpvoZoom >= 3.5 ? 1.25 : this.state.lpvoZoom + 1.0;
-          soundEngine.playMechanicalSwitch(1.2);
-          this.emitHud();
-        }
-        break;
-      case 'KeyC':
-      case 'ControlLeft':
-        // If sprinting forward, trigger tactical slide!
-        if (
-          this.keysHeld.has('ShiftLeft') &&
-          this.keysHeld.has('KeyW') &&
-          this.isGrounded &&
-          this.slideTimer <= 0
-        ) {
-          this.slideTimer = 0.68;
-          this.camera.getWorldDirection(_forward);
-          _forward.y = 0;
-          _forward.normalize();
-          this.slideDir.copy(_forward);
-          soundEngine.playPlayerSlide();
-        }
-        break;
     }
   };
 
@@ -1571,6 +1555,7 @@ export class TacticalFPSEngine {
   };
 
   private onWindowBlur = () => {
+    this.isWindowFocused = false;
     this.keysHeld.clear();
     this.mouseButtonsHeld.clear();
     this.touchMoveX = 0;
@@ -1580,6 +1565,23 @@ export class TacticalFPSEngine {
     this.touchHoldBreath = false;
     this.canvasTouchLookId = null;
     this.emitHud();
+  };
+
+  private onWindowFocus = () => {
+    this.isWindowFocused = true;
+    this.lastTime = performance.now();
+    this.fpsLimiterAccumulator = 0;
+  };
+
+  private onVisibilityChange = () => {
+    if (document.hidden) {
+      this.isWindowFocused = false;
+      this.onWindowBlur();
+    } else {
+      this.isWindowFocused = true;
+      this.lastTime = performance.now();
+      this.fpsLimiterAccumulator = 0;
+    }
   };
 
   private onCanvasTouchStart = (e: TouchEvent) => {
@@ -1638,6 +1640,8 @@ export class TacticalFPSEngine {
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('wheel', this.onWheel, { passive: true });
     window.addEventListener('blur', this.onWindowBlur);
+    window.addEventListener('focus', this.onWindowFocus);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
     window.addEventListener('contextmenu', this.onContextMenu);
     window.addEventListener('resize', this.onResize);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
@@ -1760,7 +1764,7 @@ export class TacticalFPSEngine {
     if (this.state.reloadPhase !== 'IDLE') return;
     this.state.reloadPhase = 'MAG_CHECK';
     this.state.magCheckVisible = true;
-    this.state.reloadTypeLabel = `INSPEÇÃO: ${this.state.currentMagRounds}/30 NO CARREGADOR ${
+    this.state.reloadTypeLabel = `INSPEÇÃO: ${this.state.currentMagRounds}/${this.state.magCapacity} NO CARREGADOR ${
       this.state.chambered ? '+ 1 NA CÂMARA' : '(CÂMARA VAZIA)'
     }`;
     this.magCheckTimer = 1.85;
@@ -2293,16 +2297,26 @@ export class TacticalFPSEngine {
 
     const now = performance.now();
     const rawDt = (now - this.lastTime) / 1000;
+    this.lastTime = now;
+
+    if (!this.isWindowFocused) {
+      this.frameId = requestAnimationFrame(this.tick);
+      return;
+    }
 
     if (this.state.fpsLimit > 0) {
-      const minInterval = 1 / this.state.fpsLimit;
-      if (rawDt < minInterval * 0.9) {
+      const targetInterval = 1 / this.state.fpsLimit;
+      this.fpsLimiterAccumulator += rawDt;
+      if (this.fpsLimiterAccumulator < targetInterval) {
         this.frameId = requestAnimationFrame(this.tick);
         return;
       }
+      this.fpsLimiterAccumulator = Math.min(
+        this.fpsLimiterAccumulator % targetInterval,
+        targetInterval * 2
+      );
     }
 
-    this.lastTime = now;
     // Clamp delta time to prevent physics tunneling on tab switch
     const dt = Math.min(Math.max(rawDt, 0.001), 0.05);
     this.elapsedTime += dt;
@@ -2914,12 +2928,17 @@ export class TacticalFPSEngine {
       this.camera.updateProjectionMatrix();
     }
 
-    // Consolidated Single Forward Camera Raycast for Wall Avoidance, Aim Focus & Green PEQ Laser
-    this.camera.getWorldPosition(_rayOrigin);
-    this.camera.getWorldDirection(_rayDir);
-    this.raycaster.set(_rayOrigin, _rayDir);
-    this.raycaster.far = 65.0;
-    const aimHits = this.raycaster.intersectObjects(this.shootableMeshes, false);
+    // Consolidated Single Forward Camera Raycast for Wall Avoidance, Aim Focus & Green PEQ Laser (Throttled for Mobile Performance)
+    this.aimRaycastTimer += dt;
+    if (this.aimRaycastTimer >= 0.033 || this.cachedAimHits.length === 0) {
+      this.aimRaycastTimer = 0;
+      this.camera.getWorldPosition(_rayOrigin);
+      this.camera.getWorldDirection(_rayDir);
+      this.raycaster.set(_rayOrigin, _rayDir);
+      this.raycaster.far = 65.0;
+      this.cachedAimHits = this.raycaster.intersectObjects(this.shootableMeshes, false);
+    }
+    const aimHits = this.cachedAimHits;
 
     // 1. Wall avoidance tuck
     const firstWall = aimHits.find(
@@ -3253,27 +3272,33 @@ export class TacticalFPSEngine {
       ) {
         const distToPlayer = t.root.position.distanceTo(_worldPos);
         if (distToPlayer < 26) {
-          // Check line of sight from bot head to player eye position
-          _rayOrigin.set(
-            t.root.position.x,
-            t.root.position.y + 1.65,
-            t.root.position.z
-          );
-          _targetToPlayer.subVectors(_worldPos, _rayOrigin).normalize();
-          this.raycaster.set(_rayOrigin, _targetToPlayer);
-          this.raycaster.far = distToPlayer;
-          const envHits = this.raycaster.intersectObjects(
-            this.shootableMeshes,
-            false
-          );
-          const blockedByCover =
-            (envHits.length > 0 &&
-              envHits[0].object.userData.isEnvironment &&
-              envHits[0].distance < distToPlayer - 0.5) ||
-            this.grenadeSystem.isLineOfSightBlockedBySmoke(
-              _rayOrigin,
-              _worldPos
+          // Check line of sight from bot head to player eye position (throttled to ~10Hz per bot)
+          t.root.userData = t.root.userData || {};
+          t.root.userData.losTimer = (t.root.userData.losTimer || 0) + dt;
+          if (t.root.userData.losTimer >= 0.1 || t.root.userData.blockedByCover === undefined) {
+            t.root.userData.losTimer = 0;
+            _rayOrigin.set(
+              t.root.position.x,
+              t.root.position.y + 1.65,
+              t.root.position.z
             );
+            _targetToPlayer.subVectors(_worldPos, _rayOrigin).normalize();
+            this.raycaster.set(_rayOrigin, _targetToPlayer);
+            this.raycaster.far = distToPlayer;
+            const envHits = this.raycaster.intersectObjects(
+              this.shootableMeshes,
+              false
+            );
+            t.root.userData.blockedByCover =
+              (envHits.length > 0 &&
+                envHits[0].object.userData.isEnvironment &&
+                envHits[0].distance < distToPlayer - 0.5) ||
+              this.grenadeSystem.isLineOfSightBlockedBySmoke(
+                _rayOrigin,
+                _worldPos
+              );
+          }
+          const blockedByCover = Boolean(t.root.userData.blockedByCover);
 
           if (!blockedByCover) {
             // Rotate bot gently toward player
@@ -3357,11 +3382,9 @@ export class TacticalFPSEngine {
       ...this.state,
       primaryWeapon: this.primaryWeapon,
       secondaryWeapon: 'P50_PISTOL',
-      playerPos: { x: this.playerPos.x, z: this.playerPos.z },
+      playerPos: this.state.playerPos,
       playerYaw: this.yaw,
       radarTargets: this.cachedRadarTargets,
-      magazines: [...this.state.magazines],
-      shotHistory: [...this.state.shotHistory],
     });
   }
 
@@ -3377,9 +3400,26 @@ export class TacticalFPSEngine {
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('wheel', this.onWheel);
     window.removeEventListener('blur', this.onWindowBlur);
+    window.removeEventListener('focus', this.onWindowFocus);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     window.removeEventListener('contextmenu', this.onContextMenu);
     window.removeEventListener('resize', this.onResize);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+
+    this.scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        if (child.geometry) child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => {
+            if (m.map) m.map.dispose();
+            m.dispose();
+          });
+        } else if (child.material) {
+          if (child.material.map) child.material.map.dispose();
+          child.material.dispose();
+        }
+      }
+    });
 
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode) {

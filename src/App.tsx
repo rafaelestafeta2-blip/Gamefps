@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { applyAudioSettings, initAudioSystem } from './audio/audioSettings';
 import { GameShellModals } from './components/GameShellModals';
 import { IntroScreen } from './components/IntroScreen';
 import { LoadingScreen } from './components/LoadingScreen';
@@ -6,6 +7,13 @@ import { MainMenu } from './components/MainMenu';
 import { MobileTouchControls } from './components/MobileTouchControls';
 import { OrientationLockOverlay } from './components/OrientationLockOverlay';
 import { TacticalHudOverlay } from './components/TacticalHudOverlay';
+import { applyGraphicsToEngine } from './graphics/applyGraphicsToEngine';
+import {
+  GameSettings,
+  getDefaultSettings,
+  loadGameSettings,
+  saveGameSettings,
+} from './graphics/graphicsSettings';
 import { mobileHardware } from './mobile/nativeHardware';
 import { TacticalFPSEngine } from './three/fpsEngine';
 import {
@@ -73,7 +81,6 @@ const INITIAL_HUD_STATE: HudState = {
   hitMarkerAlpha: 0,
   hitMarkerIsCrit: false,
   damageFlashAlpha: 0,
-  // Warface Rank Progression System
   playerXp: 0,
   rankLevel: 1,
   rankTitle: 'Recruta I',
@@ -82,7 +89,6 @@ const INITIAL_HUD_STATE: HudState = {
   nextRankXp: 250,
   lastXpGained: 0,
   rankUpNotification: null,
-
   muted: false,
   dockCollapsed: true,
   touchControlsVisible: true,
@@ -107,7 +113,28 @@ export default function App() {
   const engineRef = useRef<TacticalFPSEngine | null>(null);
   const [hud, setHud] = useState<HudState>(INITIAL_HUD_STATE);
   const [preloadProgress, setPreloadProgress] = useState(0);
-  const [preloadStatus, setPreloadStatus] = useState('INICIALIZANDO GERENCIADOR DE RECURSOS (THREE.LoadingManager)...');
+  const [preloadStatus, setPreloadStatus] = useState('INICIALIZANDO GERENCIADOR...');
+  const [gameSettings, setGameSettings] = useState<GameSettings>(() => loadGameSettings());
+
+  useEffect(() => {
+    // Inicializa sistema de áudio
+    initAudioSystem(gameSettings);
+    applyAudioSettings(gameSettings);
+  }, []);
+
+  const handleUpdateSettings = (newSettings: GameSettings) => {
+    setGameSettings(newSettings);
+    saveGameSettings(newSettings);
+    applyAudioSettings(newSettings);
+    if (engineRef.current) {
+      applyGraphicsToEngine(engineRef.current, newSettings);
+    }
+  };
+
+  const handleResetSettings = () => {
+    const defaults = getDefaultSettings();
+    handleUpdateSettings(defaults);
+  };
 
   useEffect(() => {
     const container = canvasMountRef.current;
@@ -117,6 +144,9 @@ export default function App() {
       setHud(nextHud);
     });
     engineRef.current = engine;
+
+    // Aplica gráficos iniciais
+    applyGraphicsToEngine(engine, gameSettings);
 
     const onUserGesture = () => {
       void mobileHardware.enterFullscreenLandscape();
@@ -132,7 +162,6 @@ export default function App() {
     };
   }, []);
 
-  // Trigger AssetPreloader sequence whenever screen changes to LOADING
   useEffect(() => {
     if (hud.screen === 'LOADING' && engineRef.current) {
       setPreloadProgress(0);
@@ -155,17 +184,25 @@ export default function App() {
       className="relative w-screen h-screen overflow-hidden bg-[#090b0e]"
       style={{ touchAction: 'none' }}
     >
-      {/* Mandatory Landscape and Fullscreen Orientation Enforcer */}
       <OrientationLockOverlay />
 
-      {/* Isolated WebGL Canvas Mount Container */}
       <div
         ref={canvasMountRef}
         className="w-full h-full cursor-crosshair"
         aria-label="Viewport 3D do simulador tático KINETIC"
       />
 
-      {/* 1. Animated Studio Intro ("Rafael Games") */}
+      {/* Realtime In-Game FPS HUD Pill */}
+      {gameSettings.showFpsCounter && hud.screen === 'PLAYING' && (
+        <div className="absolute top-2 left-2 z-50 pointer-events-none px-2 py-0.5 rounded bg-black/80 border border-amber-500/50 backdrop-blur-sm font-mono text-[10px] text-amber-400 flex items-center gap-2 shadow-lg">
+          <span className="font-bold">{hud.liveFps} FPS</span>
+          <span className="text-zinc-500">|</span>
+          <span className="text-zinc-400">{(1000 / Math.max(1, hud.liveFps)).toFixed(1)}ms</span>
+          <span className="text-zinc-500">|</span>
+          <span className="text-zinc-400">DPI {hud.renderScalePercent}%</span>
+        </div>
+      )}
+
       {hud.screen === 'INTRO' && (
         <IntroScreen
           onComplete={() => {
@@ -175,7 +212,6 @@ export default function App() {
         />
       )}
 
-      {/* 2. Tactical Loading Screen with Artwork & Real Progress Bar */}
       {hud.screen === 'LOADING' && (
         <LoadingScreen
           progress={preloadProgress}
@@ -187,37 +223,26 @@ export default function App() {
         />
       )}
 
-      {/* 3. Main Menu (Call of Duty / Modern Warfare aesthetic matching attached screenshot) */}
       {(hud.screen === 'MAIN_MENU' || hud.screen === 'TITLE') && (
         <MainMenu
-          onStartTraining={() => {
-            engineRef.current?.startGame('FREE_RANGE');
-          }}
-          onStartDrill={(mode) => {
-            engineRef.current?.startGame(mode);
-          }}
+          onStartTraining={() => engineRef.current?.startGame('FREE_RANGE')}
+          onStartDrill={(mode) => engineRef.current?.startGame(mode)}
           activeWeapon={hud.activeWeapon}
-          onSelectStartingWeapon={(weaponId) => {
-            engineRef.current?.selectWeapon(weaponId);
-          }}
+          onSelectStartingWeapon={(weaponId) => engineRef.current?.selectWeapon(weaponId)}
           qualityPreset={hud.qualityPreset}
-          onSetQualityPreset={(preset) => {
-            engineRef.current?.setQualityPreset(preset);
-          }}
+          onSetQualityPreset={(preset) => engineRef.current?.setQualityPreset(preset)}
+          gameSettings={gameSettings}
+          onUpdateGameSettings={handleUpdateSettings}
+          onResetGameSettings={handleResetSettings}
         />
       )}
 
-      {/* 4. Active Playing HUD + On-Screen Mobile Multi-Touch Controls */}
       {hud.screen === 'PLAYING' && (
         <>
           <MobileTouchControls
             hud={hud}
-            onMove={(mx, my, sprint) =>
-              engineRef.current?.setTouchMovement(mx, my, sprint)
-            }
-            onLookDelta={(dx, dy) =>
-              engineRef.current?.applyTouchLookDelta(dx, dy)
-            }
+            onMove={(mx, my, sprint) => engineRef.current?.setTouchMovement(mx, my, sprint)}
+            onLookDelta={(dx, dy) => engineRef.current?.applyTouchLookDelta(dx, dy)}
             onFireHeld={(held) => engineRef.current?.setTouchFireHeld(held)}
             onToggleAds={() => engineRef.current?.toggleAds()}
             onToggleWeaponSlot={() => engineRef.current?.toggleWeaponSlot()}
@@ -235,36 +260,24 @@ export default function App() {
 
           <TacticalHudOverlay
             hud={hud}
-            onSelectWeapon={(weaponId: WeaponId) =>
-              engineRef.current?.selectWeapon(weaponId)
-            }
+            onSelectWeapon={(weaponId: WeaponId) => engineRef.current?.selectWeapon(weaponId)}
             onToggleWeaponSlot={() => engineRef.current?.toggleWeaponSlot()}
             onInspectWeapon={() => engineRef.current?.triggerWeaponInspect()}
-            onSelectOptic={(optic: OpticType) =>
-              engineRef.current?.setOptic(optic)
-            }
+            onSelectOptic={(optic: OpticType) => engineRef.current?.setOptic(optic)}
             onToggleCanted={() => engineRef.current?.toggleCantedSight()}
             onToggleSuppressor={() => engineRef.current?.toggleSuppressor()}
             onCycleCharm={() => engineRef.current?.cycleWeaponCharm()}
             onToggleLaser={() => engineRef.current?.toggleLaser()}
             onCycleFireMode={() => engineRef.current?.cycleFireMode()}
-            onTriggerReload={(speed: boolean) =>
-              engineRef.current?.triggerReload(speed)
-            }
+            onTriggerReload={(speed: boolean) => engineRef.current?.triggerReload(speed)}
             onTriggerMagCheck={() => engineRef.current?.triggerMagCheck()}
             onResupply={() => engineRef.current?.resupplyAmmo()}
             onThrowGrenade={(type) => engineRef.current?.throwGrenade(type)}
-            onSelectDrill={(mode: DrillMode) =>
-              engineRef.current?.setDrillMode(mode)
-            }
+            onSelectDrill={(mode: DrillMode) => engineRef.current?.setDrillMode(mode)}
             onToggleMute={() => engineRef.current?.toggleMute()}
             onToggleDock={() => engineRef.current?.toggleDockCollapsed()}
-            onToggleTouchControls={() =>
-              engineRef.current?.toggleTouchControlsVisible()
-            }
-            onSetQualityPreset={(preset: QualityPreset) =>
-              engineRef.current?.setQualityPreset(preset)
-            }
+            onToggleTouchControls={() => engineRef.current?.toggleTouchControlsVisible()}
+            onSetQualityPreset={(preset: QualityPreset) => engineRef.current?.setQualityPreset(preset)}
             onToggleDrs={() => engineRef.current?.toggleDynamicResolution()}
             onSetGyroMode={(mode: GyroMode) => {
               void engineRef.current?.setGyroMode(mode);
@@ -274,16 +287,13 @@ export default function App() {
             onToggleFullscreen={() => {
               void engineRef.current?.toggleFullscreenLandscape();
             }}
-            onSetGraphicQuality={(quality) =>
-              engineRef.current?.setGraphicQuality(quality)
-            }
+            onSetGraphicQuality={(quality) => engineRef.current?.setGraphicQuality(quality)}
             onSetFpsLimit={(fps) => engineRef.current?.setFpsLimit(fps)}
             onPause={() => engineRef.current?.pauseGame()}
           />
         </>
       )}
 
-      {/* 5. Pause, Victory & Game Over Modals */}
       <GameShellModals
         hud={hud}
         onStartGame={(mode?: DrillMode) => engineRef.current?.startGame(mode)}
@@ -293,33 +303,21 @@ export default function App() {
           engineRef.current?.returnToMainMenu();
           setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
         }}
-        onSelectDrillMode={(mode: DrillMode) =>
-          engineRef.current?.setDrillMode(mode)
-        }
-        onSetQualityPreset={(preset: QualityPreset) =>
-          engineRef.current?.setQualityPreset(preset)
-        }
+        onSelectDrillMode={(mode: DrillMode) => engineRef.current?.setDrillMode(mode)}
+        onSetQualityPreset={(preset: QualityPreset) => engineRef.current?.setQualityPreset(preset)}
         onToggleDrs={() => engineRef.current?.toggleDynamicResolution()}
         onSetGyroMode={(mode: GyroMode) => {
           void engineRef.current?.setGyroMode(mode);
         }}
-        onSetGyroSensitivity={(sens: number) =>
-          engineRef.current?.setGyroSensitivity(sens)
-        }
-        onSetLookSensitivity={(sens: number) =>
-          engineRef.current?.setLookSensitivity(sens)
-        }
-        onSetAdsSensitivity={(sens: number) =>
-          engineRef.current?.setAdsSensitivity(sens)
-        }
+        onSetGyroSensitivity={(sens: number) => engineRef.current?.setGyroSensitivity(sens)}
+        onSetLookSensitivity={(sens: number) => engineRef.current?.setLookSensitivity(sens)}
+        onSetAdsSensitivity={(sens: number) => engineRef.current?.setAdsSensitivity(sens)}
         onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
         onToggleHaptics={() => engineRef.current?.toggleHaptics()}
         onToggleFullscreen={() => {
           void engineRef.current?.toggleFullscreenLandscape();
         }}
-        onSetGraphicQuality={(quality) =>
-          engineRef.current?.setGraphicQuality(quality)
-        }
+        onSetGraphicQuality={(quality) => engineRef.current?.setGraphicQuality(quality)}
         onSetFpsLimit={(fps) => engineRef.current?.setFpsLimit(fps)}
       />
     </main>
