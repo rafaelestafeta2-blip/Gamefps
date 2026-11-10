@@ -27,6 +27,7 @@ export class AssetPreloader {
 
     onProgress(86, 'DESCOMPACTANDO ÁUDIOS TÁTICOS E SONS DE DISPARO...');
     soundEngine.init();
+    await soundEngine.prewarmGrenadeAudio();
     await delay(80);
 
     onProgress(94, 'COMPILANDO SHADERS WEBGL E MAPA DE SOMBRAS NA GPU...');

@@ -213,6 +213,9 @@ class TacticalSoundEngine {
   private fragVoicePool: HTMLAudioElement[] = [];
   private fragVoicePoolIdx = 0;
 
+  private grenadeBounceBuffer: AudioBuffer | null = null;
+  private samplesPreloaded = false;
+
   private headshotDeathRawData: ArrayBuffer | null = null;
   private headshotDeathBuffer: AudioBuffer | null = null;
   private headshotDeathDecoding = false;
@@ -274,17 +277,36 @@ class TacticalSoundEngine {
 
   public init(): void {
     if (typeof window === 'undefined') return;
-    this.preloadDesertEagleSample();
-    this.preloadPistolReloadSample();
-    this.preloadM4a1ReloadSample();
-    this.preloadM4a1ShotSample();
-    this.preloadDryFireSample();
-    this.preloadAk47Samples();
-    this.preloadSniperSamples();
-    this.preloadGrenadeSamples();
-    this.preloadMovementAndSwapSamples();
-    if (this.ctx && this.ctx.state === 'suspended') {
-      void this.ctx.resume();
+    if (!this.ctx) {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      if (AudioCtx) {
+        try {
+          this.ctx = new AudioCtx();
+        } catch {
+          // Ignore if AudioContext creation fails
+        }
+      }
+    }
+    if (!this.samplesPreloaded) {
+      this.samplesPreloaded = true;
+      this.preloadDesertEagleSample();
+      this.preloadPistolReloadSample();
+      this.preloadM4a1ReloadSample();
+      this.preloadM4a1ShotSample();
+      this.preloadDryFireSample();
+      this.preloadAk47Samples();
+      this.preloadSniperSamples();
+      this.preloadGrenadeSamples();
+      this.preloadMovementAndSwapSamples();
+    }
+    if (this.ctx) {
+      this.tryDecodeGrenadeSamples(this.ctx);
+      if (this.ctx.state === 'suspended') {
+        void this.ctx.resume().catch(() => {});
+      }
     }
   }
 
@@ -1038,6 +1060,50 @@ class TacticalSoundEngine {
         .catch(() => {
           this.headshotDeathDecoding = false;
         });
+    }
+
+    if (!this.grenadeBounceBuffer) {
+      const duration = 0.075;
+      const length = Math.floor(ctx.sampleRate * duration);
+      const buf = ctx.createBuffer(1, length, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      let phase = 0;
+      for (let i = 0; i < length; i++) {
+        const t = i / ctx.sampleRate;
+        const freq = 1420 * Math.pow(340 / 1420, Math.min(1, t / 0.055));
+        phase += (2 * Math.PI * freq) / ctx.sampleRate;
+        const tri = (2 / Math.PI) * Math.asin(Math.sin(phase));
+        const env = Math.exp(-t * 68);
+        data[i] = tri * env * 0.28;
+      }
+      this.grenadeBounceBuffer = buf;
+    }
+  }
+
+  /**
+   * Explicitly pre-decodes all grenade audio buffers (pin pull, throw, bounce,
+   * explosion, smoke gas, and battle chatter voices) during asset preloading.
+   */
+  public async prewarmGrenadeAudio(): Promise<void> {
+    this.init();
+    if (this.ctx) {
+      this.tryDecodeGrenadeSamples(this.ctx);
+    }
+    let waited = 0;
+    while (
+      waited < 400 &&
+      (this.grenadePinDecoding ||
+        this.grenadeThrowDecoding ||
+        this.grenadeExplosionDecoding ||
+        this.smokeGasDecoding ||
+        this.smokeVoiceDecoding ||
+        this.fragVoiceDecoding)
+    ) {
+      await new Promise((r) => setTimeout(r, 25));
+      waited += 25;
+      if (this.ctx) {
+        this.tryDecodeGrenadeSamples(this.ctx);
+      }
     }
   }
 
@@ -2087,10 +2153,24 @@ class TacticalSoundEngine {
     if (this.muted) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
-    const now = ctx.currentTime;
     const amp = Math.min(1, Math.max(0.15, intensity));
 
-    // Metallic clink + heavy body thud on concrete
+    if (this.grenadeBounceBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.grenadeBounceBuffer;
+      src.playbackRate.setValueAtTime(
+        0.92 + Math.random() * 0.16,
+        ctx.currentTime
+      );
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(amp, ctx.currentTime);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'triangle';

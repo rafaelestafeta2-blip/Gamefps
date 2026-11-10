@@ -104,6 +104,9 @@ export class TacticalFPSEngine {
   private drsAccumTime = 0;
   private drsFrameCount = 0;
   private currentRenderScale = 1.0;
+  private drsLowFpsStreak = 0;
+  private drsHighFpsStreak = 0;
+  private drsCooldownSec = 0;
   private aimRaycastTimer = 0;
   private aimRaycastInitialized = false;
   private cachedAimHits: THREE.Intersection[] = [];
@@ -462,6 +465,14 @@ export class TacticalFPSEngine {
       this.isSoftwareGl,
       onProgress
     );
+    await soundEngine.prewarmGrenadeAudio();
+    this.grenadeSystem.prewarmShadersAndTextures(
+      this.renderer,
+      this.isSoftwareGl
+    );
+    if (!this.isSoftwareGl) {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 
   /**
@@ -520,6 +531,7 @@ export class TacticalFPSEngine {
     await new Promise((r) => setTimeout(r, 110));
 
     onProgress(84, 'COMPILANDO SHADERS WEBGL E MAPA DE SOMBRAS SOLARES...');
+    await soundEngine.prewarmGrenadeAudio();
     if (!this.isSoftwareGl) {
       try {
         if ('compileAsync' in this.renderer && typeof this.renderer.compileAsync === 'function') {
@@ -530,6 +542,10 @@ export class TacticalFPSEngine {
       } catch {
         this.renderer.compile(this.scene, this.camera);
       }
+      this.grenadeSystem.prewarmShadersAndTextures(
+        this.renderer,
+        this.isSoftwareGl
+      );
       this.renderer.render(this.scene, this.camera);
     }
     await new Promise((r) => setTimeout(r, 120));
@@ -1427,6 +1443,10 @@ export class TacticalFPSEngine {
   }
 
   private updateDynamicResolutionGovernor(rawDt: number): void {
+    if (this.drsCooldownSec > 0) {
+      this.drsCooldownSec = Math.max(0, this.drsCooldownSec - rawDt);
+    }
+
     this.drsAccumTime += rawDt;
     this.drsFrameCount += 1;
 
@@ -1439,6 +1459,12 @@ export class TacticalFPSEngine {
 
     if (this.isSoftwareGl || !this.state.dynamicResolutionEnabled) return;
 
+    if (this.drsCooldownSec > 0) {
+      this.drsLowFpsStreak = 0;
+      this.drsHighFpsStreak = 0;
+      return;
+    }
+
     const maxDpr = Math.min(window.devicePixelRatio || 1, 2.0);
     const targetCeiling =
       this.state.qualityPreset === 'COMPETITIVE_120'
@@ -1447,24 +1473,36 @@ export class TacticalFPSEngine {
           ? Math.min(maxDpr, 1.4)
           : maxDpr;
 
-    let changed = false;
-    if (avgFps < 50 && this.currentRenderScale > 0.65) {
-      // Immediately step down internal resolution to keep 60 FPS butter-smooth
-      this.currentRenderScale = Math.max(0.65, this.currentRenderScale - 0.12);
-      changed = true;
-    } else if (avgFps >= 57 && this.currentRenderScale < targetCeiling - 0.04) {
-      this.currentRenderScale = Math.min(
-        targetCeiling,
-        this.currentRenderScale + 0.06
-      );
-      changed = true;
+    if (avgFps < 48) {
+      this.drsLowFpsStreak += 1;
+      this.drsHighFpsStreak = 0;
+    } else if (avgFps >= 58) {
+      this.drsHighFpsStreak += 1;
+      this.drsLowFpsStreak = 0;
+    } else {
+      this.drsLowFpsStreak = 0;
+      this.drsHighFpsStreak = 0;
     }
 
-    if (changed) {
+    let nextScale = this.currentRenderScale;
+    if (this.drsLowFpsStreak >= 2 && this.currentRenderScale > 0.65) {
+      nextScale = Math.max(0.65, this.currentRenderScale - 0.08);
+    } else if (
+      this.drsHighFpsStreak >= 6 &&
+      this.currentRenderScale < targetCeiling
+    ) {
+      nextScale = Math.min(targetCeiling, this.currentRenderScale + 0.08);
+    }
+
+    if (Math.abs(nextScale - this.currentRenderScale) >= 0.01) {
+      this.currentRenderScale = nextScale;
       this.renderer.setPixelRatio(this.currentRenderScale);
       this.state.renderScalePercent = Math.round(
         (this.currentRenderScale / maxDpr) * 100
       );
+      this.drsLowFpsStreak = 0;
+      this.drsHighFpsStreak = 0;
+      this.drsCooldownSec = 4.0;
     }
   }
 

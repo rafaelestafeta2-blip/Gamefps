@@ -40,7 +40,6 @@ interface ExplosionInstance {
   fireballMesh: THREE.Mesh;
   shockwaveRing: THREE.Mesh;
   scorchDecal: THREE.Mesh;
-  light: THREE.PointLight;
   debris: Array<{
     mesh: THREE.Mesh;
     vel: THREE.Vector3;
@@ -82,6 +81,7 @@ const _simPos = new THREE.Vector3();
 const _simVel = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
+const _THROW_UPWARD_IMPULSE = new THREE.Vector3(0, 3.3, 0);
 
 export class TacticalGrenadeSystem {
   private scene: THREE.Scene;
@@ -111,7 +111,7 @@ export class TacticalGrenadeSystem {
   private projectileLaunchedInSequence = false;
 
   // 3D Ballistic Aiming Trajectory Arc, Marching Beads & Landing Target Indicator
-  private trajectoryGroup = new THREE.Group();
+  public readonly trajectoryGroup = new THREE.Group();
   private trajectoryLine: THREE.Line;
   private trajectoryMat: THREE.LineBasicMaterial;
   private trajectoryBeads: THREE.Mesh[] = [];
@@ -119,10 +119,12 @@ export class TacticalGrenadeSystem {
   private landingRingGroup = new THREE.Group();
   private landingOuterRingMat: THREE.MeshBasicMaterial;
   private landingInnerDiscMat: THREE.MeshBasicMaterial;
+  private lastTrajectoryUpdateMs = 0;
 
   // Active World Projectiles, Explosions & Volumetric Smoke Clouds
   private projectiles: ActiveProjectile[] = [];
   private explosions: ExplosionInstance[] = [];
+  private sharedExplosionLight!: THREE.PointLight;
   private smokeClouds: SmokeCloudInstance[] = [];
   private softSmokeTexture: THREE.CanvasTexture;
 
@@ -228,27 +230,27 @@ export class TacticalGrenadeSystem {
 
   private createSoftSmokeTexture(): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
+    canvas.width = 128;
+    canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
 
-    ctx.clearRect(0, 0, 256, 256);
+    ctx.clearRect(0, 0, 128, 128);
 
-    // Draw overlapping soft volumetric cloud lobes for thick, natural smoke
+    // Draw overlapping soft volumetric cloud lobes at 128x128 for reduced mobile GPU overdraw
     const lobes = [
-      { x: 128, y: 128, r: 112, a: 0.95 },
-      { x: 96, y: 108, r: 82, a: 0.75 },
-      { x: 162, y: 114, r: 80, a: 0.75 },
-      { x: 108, y: 156, r: 84, a: 0.72 },
-      { x: 154, y: 152, r: 82, a: 0.72 },
-      { x: 128, y: 88, r: 74, a: 0.65 },
+      { x: 64, y: 64, r: 56, a: 0.95 },
+      { x: 48, y: 54, r: 41, a: 0.75 },
+      { x: 81, y: 57, r: 40, a: 0.75 },
+      { x: 54, y: 78, r: 42, a: 0.72 },
+      { x: 77, y: 76, r: 41, a: 0.72 },
+      { x: 64, y: 44, r: 37, a: 0.65 },
     ];
 
     for (const lobe of lobes) {
       const grad = ctx.createRadialGradient(
         lobe.x,
         lobe.y,
-        6,
+        3,
         lobe.x,
         lobe.y,
         lobe.r
@@ -546,6 +548,13 @@ export class TacticalGrenadeSystem {
   }
 
   private initExplosionsPool(): void {
+    // Single shared PointLight that stays permanently visible in the scene (intensity 0 when inactive)
+    // to prevent Three.js from recompiling lit material shaders on explosion start/end
+    this.sharedExplosionLight = new THREE.PointLight(0xff7b00, 0, 18);
+    this.sharedExplosionLight.visible = true;
+    this.sharedExplosionLight.position.set(0, 0.8, 0);
+    this.scene.add(this.sharedExplosionLight);
+
     const coreGeo = new THREE.SphereGeometry(0.55, 14, 12);
     const fireballGeo = new THREE.SphereGeometry(1.1, 16, 14);
     const ringGeo = new THREE.RingGeometry(0.4, 0.85, 24);
@@ -600,10 +609,6 @@ export class TacticalGrenadeSystem {
       scorchDecal.position.y = 0.015;
       group.add(scorchDecal);
 
-      const light = new THREE.PointLight(0xff7b00, 0, 18);
-      light.position.y = 0.8;
-      group.add(light);
-
       const debris: ExplosionInstance['debris'] = [];
       for (let d = 0; d < 18; d++) {
         const dMat = new THREE.MeshBasicMaterial({
@@ -623,7 +628,6 @@ export class TacticalGrenadeSystem {
         fireballMesh,
         shockwaveRing,
         scorchDecal,
-        light,
         debris,
         age: 0,
         maxAge: 2.2,
@@ -633,7 +637,7 @@ export class TacticalGrenadeSystem {
   }
 
   private initSmokeCloudsPool(): void {
-    const PUFF_COUNT = 44;
+    const PUFF_COUNT = 18;
 
     for (let i = 0; i < 3; i++) {
       const group = new THREE.Group();
@@ -660,22 +664,22 @@ export class TacticalGrenadeSystem {
         const sprite = new THREE.Sprite(mat);
         group.add(sprite);
 
-        // 3 concentric volumetric rings: dense core (0..13), middle dome (14..29), outer curtain (30..43)
+        // 3 concentric volumetric rings with 18 puffs scaled up to preserve full visual radius
         let ringDist = 0;
         let height = 0.6;
-        let baseScale = 3.2;
-        if (p < 14) {
-          ringDist = 0.2 + (p / 14) * 1.3;
-          height = 0.8 + (p % 4) * 0.55;
-          baseScale = 3.6 + (p % 3) * 0.9;
-        } else if (p < 30) {
-          ringDist = 1.4 + ((p - 14) / 16) * 2.1;
-          height = 0.9 + (p % 4) * 0.62;
-          baseScale = 3.9 + (p % 3) * 0.85;
+        let baseScale = 5.0;
+        if (p < 6) {
+          ringDist = 0.2 + (p / 6) * 1.3;
+          height = 0.85 + (p % 3) * 0.6;
+          baseScale = 5.2 + (p % 3) * 1.1;
+        } else if (p < 12) {
+          ringDist = 1.4 + ((p - 6) / 6) * 2.1;
+          height = 0.95 + (p % 3) * 0.65;
+          baseScale = 5.6 + (p % 3) * 1.05;
         } else {
-          ringDist = 2.8 + ((p - 30) / 14) * 1.9;
-          height = 0.75 + (p % 3) * 0.65;
-          baseScale = 3.5 + (p % 2) * 0.9;
+          ringDist = 2.8 + ((p - 12) / 6) * 1.9;
+          height = 0.8 + (p % 3) * 0.65;
+          baseScale = 5.0 + (p % 2) * 1.1;
         }
 
         const angle = (p * 2.39996) % (Math.PI * 2); // Golden angle distribution for zero gaps
@@ -711,6 +715,78 @@ export class TacticalGrenadeSystem {
     }
   }
 
+  /**
+   * Pre-warms GPU shaders and textures for grenade viewmodels, trajectory arc,
+   * explosion meshes, and smoke sprites by rendering a single hidden warm-up pass.
+   */
+  public prewarmShadersAndTextures(
+    renderer: THREE.WebGLRenderer,
+    isSoftwareGl: boolean
+  ): void {
+    if (isSoftwareGl) return;
+
+    renderer.initTexture(this.softSmokeTexture);
+    this.viewmodelGroup.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const mesh = obj as THREE.Mesh;
+        const mats = Array.isArray(mesh.material)
+          ? mesh.material
+          : [mesh.material];
+        for (let i = 0; i < mats.length; i++) {
+          const std = mats[i] as THREE.MeshStandardMaterial;
+          if (std?.map) renderer.initTexture(std.map);
+          if (std?.normalMap) renderer.initTexture(std.normalMap);
+          if (std?.roughnessMap) renderer.initTexture(std.roughnessMap);
+          if (std?.metalnessMap) renderer.initTexture(std.metalnessMap);
+          if (std?.emissiveMap) renderer.initTexture(std.emissiveMap);
+        }
+      }
+    });
+
+    const prevVmVis = this.viewmodelGroup.visible;
+    const prevSocketVis = this.handRig.grenadeSocket.visible;
+    const prevFragVis = this.vmFragVisual.visible;
+    const prevSmokeVis = this.vmSmokeVisual.visible;
+    const prevTrajVis = this.trajectoryGroup.visible;
+
+    const exp0 = this.explosions[0];
+    const cloud0 = this.smokeClouds[0];
+    const prevExpVis = exp0 ? exp0.group.visible : false;
+    const prevCloudVis = cloud0 ? cloud0.group.visible : false;
+
+    this.viewmodelGroup.visible = true;
+    this.handRig.grenadeSocket.visible = true;
+    this.vmFragVisual.visible = true;
+    this.vmSmokeVisual.visible = true;
+    this.trajectoryGroup.visible = true;
+
+    if (exp0) {
+      exp0.group.visible = true;
+      exp0.coreMesh.visible = true;
+      exp0.fireballMesh.visible = true;
+      exp0.shockwaveRing.visible = true;
+      exp0.scorchDecal.visible = true;
+    }
+    if (cloud0) {
+      cloud0.group.visible = true;
+    }
+
+    try {
+      renderer.compile(this.scene, this.camera);
+      renderer.render(this.scene, this.camera);
+    } catch {
+      // Ignore software/context fallback
+    }
+
+    this.viewmodelGroup.visible = prevVmVis;
+    this.handRig.grenadeSocket.visible = prevSocketVis;
+    this.vmFragVisual.visible = prevFragVis;
+    this.vmSmokeVisual.visible = prevSmokeVis;
+    this.trajectoryGroup.visible = prevTrajVis;
+    if (exp0) exp0.group.visible = prevExpVis;
+    if (cloud0) cloud0.group.visible = prevCloudVis;
+  }
+
   // =========================================================================
   // STEP 1: EQUIP GRENADE IN HAND (HOLDING & AIMING TRAJECTORY)
   // =========================================================================
@@ -738,6 +814,7 @@ export class TacticalGrenadeSystem {
     this.landingOuterRingMat.color.setHex(indicatorColor);
     this.landingInnerDiscMat.color.setHex(indicatorColor);
     this.trajectoryGroup.visible = true;
+    this.lastTrajectoryUpdateMs = 0;
 
     soundEngine.playWeaponSwap();
   }
@@ -791,7 +868,7 @@ export class TacticalGrenadeSystem {
     outVel
       .copy(_camDir)
       .multiplyScalar(15.5)
-      .add(new THREE.Vector3(0, 3.3, 0));
+      .add(_THROW_UPWARD_IMPULSE);
   }
 
   private updateTrajectoryPreview(
@@ -806,6 +883,15 @@ export class TacticalGrenadeSystem {
       this.trajectoryGroup.visible = false;
       return;
     }
+
+    const nowMs = performance.now();
+    if (
+      this.trajectoryGroup.visible &&
+      nowMs - this.lastTrajectoryUpdateMs < 33
+    ) {
+      return;
+    }
+    this.lastTrajectoryUpdateMs = nowMs;
 
     this.trajectoryGroup.visible = true;
     this.getThrowOriginAndVelocity(_simPos, _simVel);
@@ -998,7 +1084,12 @@ export class TacticalGrenadeSystem {
     exp.scorchDecal.visible = pos.y < 0.45;
     (exp.scorchDecal.material as THREE.MeshBasicMaterial).opacity = 0.8;
 
-    exp.light.intensity = 18.0;
+    this.sharedExplosionLight.position.set(
+      pos.x,
+      Math.max(0.05, pos.y) + 0.8,
+      pos.z
+    );
+    this.sharedExplosionLight.intensity = 18.0;
 
     for (let i = 0; i < exp.debris.length; i++) {
       const d = exp.debris[i];
@@ -1076,6 +1167,7 @@ export class TacticalGrenadeSystem {
       this.explosions[i].active = false;
       this.explosions[i].group.visible = false;
     }
+    this.sharedExplosionLight.intensity = 0;
     for (let i = 0; i < this.smokeClouds.length; i++) {
       this.smokeClouds[i].active = false;
       this.smokeClouds[i].group.visible = false;
@@ -1238,7 +1330,8 @@ export class TacticalGrenadeSystem {
       }
     }
 
-    // 4. Update Active Frag Explosions
+    // 4. Update Active Frag Explosions & Shared PointLight Intensity
+    let maxExplosionLightIntensity = 0;
     for (let i = 0; i < this.explosions.length; i++) {
       const exp = this.explosions[i];
       if (!exp.active) continue;
@@ -1247,7 +1340,6 @@ export class TacticalGrenadeSystem {
       if (exp.age >= exp.maxAge) {
         exp.active = false;
         exp.group.visible = false;
-        exp.light.intensity = 0;
         continue;
       }
 
@@ -1277,7 +1369,12 @@ export class TacticalGrenadeSystem {
         exp.shockwaveRing.visible = false;
       }
 
-      exp.light.intensity = Math.max(0, 18.0 * (1 - exp.age / 0.38));
+      if (exp.age < 0.38) {
+        maxExplosionLightIntensity = Math.max(
+          maxExplosionLightIntensity,
+          18.0 * (1 - exp.age / 0.38)
+        );
+      }
 
       if (exp.age > 1.4) {
         (exp.scorchDecal.material as THREE.MeshBasicMaterial).opacity =
@@ -1300,6 +1397,7 @@ export class TacticalGrenadeSystem {
         }
       }
     }
+    this.sharedExplosionLight.intensity = maxExplosionLightIntensity;
 
     // 5. Update Dense, Long-Lasting Volumetric Smoke Clouds (25s duration, 44 puffs, no floating suppressor tube)
     for (let i = 0; i < this.smokeClouds.length; i++) {
