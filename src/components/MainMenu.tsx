@@ -20,6 +20,7 @@ import { WeaponInspectionModal } from './WeaponInspectionModal';
 interface MainMenuProps {
   onStartTraining: () => void;
   onStartDrill: (mode: DrillMode) => void;
+  onStartMatchmaking: (targetMode: DrillMode) => void;
   activeWeapon: WeaponId;
   onSelectStartingWeapon: (weaponId: WeaponId) => void;
   gameSettings?: GameSettings;
@@ -48,6 +49,7 @@ const WEAPON_DISPLAY_NAMES: Record<
 export const MainMenu: React.FC<MainMenuProps> = ({
   onStartTraining,
   onStartDrill,
+  onStartMatchmaking,
   activeWeapon,
   onSelectStartingWeapon,
   gameSettings,
@@ -101,6 +103,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     soundEngine.stopMenuMusic();
     await mobileHardware.enterFullscreenLandscape();
     onStartDrill(mode);
+  };
+
+  const handleLaunchMatchmaking = async (targetMode: DrillMode) => {
+    soundEngine.playMenuSelect();
+    soundEngine.stopMenuMusic();
+    await mobileHardware.enterFullscreenLandscape();
+    onStartMatchmaking(targetMode);
   };
 
   const activeWeaponMeta = WEAPON_DISPLAY_NAMES[activeWeapon];
@@ -236,6 +245,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             }}
             onStartTraining={handleLaunchTraining}
             onStartDrill={handleLaunchDrill}
+            onStartMatchmaking={handleLaunchMatchmaking}
             onHover={handleHover}
           />
         )}

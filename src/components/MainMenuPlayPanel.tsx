@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { DrillMode, WeaponId } from '../types/game';
-import { MatchmakingModal } from './MatchmakingModal';
 
 interface MainMenuPlayPanelProps {
   activeWeapon: WeaponId;
@@ -10,6 +9,7 @@ interface MainMenuPlayPanelProps {
   onOpenWeaponSelect: () => void;
   onStartTraining: () => void;
   onStartDrill: (mode: DrillMode) => void;
+  onStartMatchmaking: (targetMode: DrillMode) => void;
   onHover: () => void;
 }
 
@@ -99,28 +99,18 @@ export const MainMenuPlayPanel: React.FC<MainMenuPlayPanelProps> = ({
   onOpenWeaponSelect,
   onStartTraining,
   onStartDrill,
+  onStartMatchmaking,
   onHover,
 }) => {
-  const [isSearchingMatch, setIsSearchingMatch] = useState(false);
+  const [preferredArena, setPreferredArena] =
+    useState<DrillMode>('DUST2_BOMB_5V5');
 
   const handleStartMatchmaking = () => {
-    setIsSearchingMatch(true);
-  };
-
-  const handleMatchFound = () => {
-    setIsSearchingMatch(false);
-    onStartDrill('DUST2_BOMB_5V5');
+    onStartMatchmaking(preferredArena);
   };
 
   return (
     <>
-      {isSearchingMatch && (
-        <MatchmakingModal
-          onMatchFound={handleMatchFound}
-          onCancel={() => setIsSearchingMatch(false)}
-        />
-      )}
-
       <div className="flex flex-col gap-1.5 w-full max-w-[245px] sm:max-w-[270px] pointer-events-auto">
         {/* 1. ARMA SELECIONADA CARD */}
         <div
@@ -160,34 +150,70 @@ export const MainMenuPlayPanel: React.FC<MainMenuPlayPanelProps> = ({
           </button>
         </div>
 
-        {/* 2. BOTÃO JOGAR · MATCHMAKING RÁPIDO ESTILO WARFACE (SEM NOMES DE MAPA EXPOSTOS) */}
-        <button
-          type="button"
-          onMouseEnter={onHover}
-          onClick={handleStartMatchmaking}
-          className="group relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-amber-500/30 via-amber-600/25 to-[#2a1e12]/85 hover:from-amber-500/40 hover:via-amber-600/35 border-2 border-amber-400 hover:border-amber-300 px-3 py-2 flex items-center justify-between gap-2 text-left transition-all duration-150 cursor-pointer shadow-[0_0_24px_rgba(245,158,11,0.35)] backdrop-blur-md animate-pulse"
-        >
-          <div className="flex items-center gap-2.5 min-w-0 relative z-10">
-            <Play5v5Icon />
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-display font-black tracking-wider uppercase text-amber-300 group-hover:text-white transition-colors truncate drop-shadow-[0_0_8px_rgba(251,191,36,0.8)]">
-                  JOGAR
-                </span>
-                <span className="px-1.5 py-[1px] text-[8px] font-mono font-black rounded bg-amber-400 text-slate-950 tracking-wider">
-                  5 VS 5
-                </span>
-              </div>
-              <div className="text-[9px] font-mono text-slate-300 truncate">
-                Partida Rápida · Plant the Bomb
+        {/* 2. BOTÃO JOGAR · BUSCAR PARTIDA ESTILO WARFACE (ENTRA DIRETO NO STANDER DE TIRO ENQUANTO BUSCA EM SEGUNDO PLANO) */}
+        <div className="rounded-xl bg-gradient-to-r from-amber-500/30 via-amber-600/25 to-[#2a1e12]/90 border-2 border-amber-400 shadow-[0_0_24px_rgba(245,158,11,0.35)] backdrop-blur-md overflow-hidden">
+          <button
+            type="button"
+            onMouseEnter={onHover}
+            onClick={handleStartMatchmaking}
+            className="group relative w-full px-3 py-2 flex items-center justify-between gap-2 text-left transition-all duration-150 cursor-pointer hover:bg-amber-500/15"
+          >
+            <div className="flex items-center gap-2.5 min-w-0 relative z-10">
+              <Play5v5Icon />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-display font-black tracking-wider uppercase text-amber-300 group-hover:text-white transition-colors truncate drop-shadow-[0_0_8px_rgba(251,191,36,0.8)]">
+                    BUSCAR PARTIDA
+                  </span>
+                  <span className="px-1.5 py-[1px] text-[8px] font-mono font-black rounded bg-amber-400 text-slate-950 tracking-wider">
+                    5 VS 5
+                  </span>
+                </div>
+                <div className="text-[9px] font-mono text-slate-200 truncate">
+                  Aqueça no Stander de Tiro na fila
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="relative z-10 flex items-center">
-            <DoubleChevronIcon colorClass="text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.95)]" />
+            <div className="relative z-10 flex items-center">
+              <DoubleChevronIcon colorClass="text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.95)]" />
+            </div>
+          </button>
+
+          {/* Seletor rápido de Arena 5v5 */}
+          <div className="px-2.5 py-1 bg-black/45 border-t border-amber-400/25 flex items-center justify-between gap-1">
+            <span className="text-[8px] font-mono uppercase tracking-wider text-slate-400">
+              MAPA:
+            </span>
+            <div className="flex items-center gap-1">
+              {(
+                [
+                  { id: 'DUST2_BOMB_5V5', label: 'DE_DUST2' },
+                  { id: 'ASSAULT_BOMB_5V5', label: 'CS_ASSAULT' },
+                ] as const
+              ).map((arena) => {
+                const isSelected = preferredArena === arena.id;
+                return (
+                  <button
+                    key={arena.id}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPreferredArena(arena.id);
+                    }}
+                    className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold uppercase tracking-wider cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-amber-400 text-slate-950'
+                        : 'bg-white/5 text-slate-300 hover:bg-white/15'
+                    }`}
+                  >
+                    {arena.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </button>
+        </div>
 
         {/* 3. ESTANDE DE TIRO (LIVRE) */}
         <button

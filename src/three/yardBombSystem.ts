@@ -4,16 +4,13 @@ import { mobileHardware } from '../mobile/nativeHardware';
 import { DrillMode, WeaponId, YardBombHudInfo } from '../types/game';
 import { BallisticsFXPool } from './ballisticsPool';
 import {
-  DUST2_BOMB_SITE_A,
-  DUST2_BOMB_SITE_B,
-  getDust2CalloutForPos,
-} from './dust2LevelBuilder';
+  triggerBotFireAnimation,
+  triggerBotHitAnimation,
+} from './botCharacterSystem';
+import { ASSAULT_BOMB_SITE_A, ASSAULT_BOMB_SITE_B, getAssaultCalloutForPos } from './assaultLevelBuilder';
+import { DUST2_BOMB_SITE_A, DUST2_BOMB_SITE_B, getDust2CalloutForPos } from './dust2LevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
-import {
-  getYardCalloutForPos,
-  YARD_BOMB_SITE_A,
-  YARD_BOMB_SITE_B,
-} from './yardMapData';
+import { getYardCalloutForPos, YARD_BOMB_SITE_A, YARD_BOMB_SITE_B } from './yardMapData';
 import { YardBotEntity } from './yardPropsBuilder';
 
 const _allyOrigin = new THREE.Vector3();
@@ -103,7 +100,9 @@ export class YardBombSystem {
       calloutLabel:
         mode === 'DUST2_BOMB_5V5'
           ? 'BASE VANGUARD (TR SPAWN · SUL)'
-          : 'BASE VANGUARD (SUL · RUA DO HOTEL)',
+          : mode === 'ASSAULT_BOMB_5V5'
+            ? 'BASE VANGUARD (CT STREET SPAWN)'
+            : 'BASE VANGUARD (SUL · RUA DO HOTEL)',
       currentRound: prevRound,
       maxRounds: 6,
       vanguardScore: prevVg,
@@ -229,13 +228,24 @@ export class YardBombSystem {
     }
 
     const isDust2 = this.activeMode === 'DUST2_BOMB_5V5';
-    const siteA = isDust2 ? DUST2_BOMB_SITE_A : YARD_BOMB_SITE_A;
-    const siteB = isDust2 ? DUST2_BOMB_SITE_B : YARD_BOMB_SITE_B;
+    const isAssault = this.activeMode === 'ASSAULT_BOMB_5V5';
+    const siteA = isDust2
+      ? DUST2_BOMB_SITE_A
+      : isAssault
+        ? ASSAULT_BOMB_SITE_A
+        : YARD_BOMB_SITE_A;
+    const siteB = isDust2
+      ? DUST2_BOMB_SITE_B
+      : isAssault
+        ? ASSAULT_BOMB_SITE_B
+        : YARD_BOMB_SITE_B;
 
     // 1. Update Callout Label
     this.info.calloutLabel = isDust2
       ? getDust2CalloutForPos(playerPos.x, playerPos.y, playerPos.z)
-      : getYardCalloutForPos(playerPos.x, playerPos.y, playerPos.z);
+      : isAssault
+        ? getAssaultCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
+        : getYardCalloutForPos(playerPos.x, playerPos.y, playerPos.z);
 
     // 2. Count alive enemies & allies
     let enemies = 0;
@@ -297,7 +307,7 @@ export class YardBombSystem {
         const sitePos = this.info.plantedSite === 'A' ? siteA : siteB;
         this.c4MeshGroup.position.set(
           sitePos.x,
-          isDust2 ? sitePos.y + 0.12 : 1.02,
+          isDust2 || isAssault ? sitePos.y + 0.12 : 1.02,
           sitePos.z
         );
         this.c4MeshGroup.visible = true;
@@ -360,10 +370,12 @@ export class YardBombSystem {
           enemy.root.position.z + (Math.random() - 0.5) * 0.6
         );
         fxPool.spawnTracer(_allyOrigin, _enemyPos, 0x38bdf8);
+        triggerBotFireAnimation(ally);
 
         if (Math.random() < 0.26 && !enemy.isDown) {
           enemy.health -= 55;
           enemy.hitTiltVelocity = -12.0;
+          triggerBotHitAnimation(enemy);
           if (enemy.health <= 0) {
             enemy.isDown = true;
             enemy.downTimer = 9999;
@@ -374,8 +386,10 @@ export class YardBombSystem {
             );
           }
         } else if (Math.random() < 0.16 && !ally.isDown) {
+          triggerBotFireAnimation(enemy);
           ally.health -= 55;
           ally.hitTiltVelocity = -12.0;
+          triggerBotHitAnimation(ally);
           if (ally.health <= 0) {
             ally.isDown = true;
             ally.downTimer = 9999;

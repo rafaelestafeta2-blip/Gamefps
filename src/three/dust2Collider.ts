@@ -13,18 +13,34 @@ export interface Dust2TriEntry {
   maxZ: number;
 }
 
+export interface LadderZone {
+  id: string;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  minZ: number;
+  maxZ: number;
+}
+
 const _tri = new THREE.Triangle();
 const _pt = new THREE.Vector3();
 const _closest = new THREE.Vector3();
+const _ray = new THREE.Ray();
+const _hitPt = new THREE.Vector3();
 
 /**
- * High-performance 2D Spatial Hash Triangle Collider for CS de_dust2 (.glb).
+ * High-performance 2D Spatial Hash Triangle Collider for CS de_dust2 & cs_assault (.glb).
  * Zero per-frame GC allocations — designed for 60 FPS Android mobile WebGL.
  */
 export class Dust2TriangleCollider {
   private readonly cellSize = 3.0;
   private floorGrid = new Map<string, Dust2TriEntry[]>();
   private wallGrid = new Map<string, Dust2TriEntry[]>();
+  public boundingBoxes: THREE.Box3[] = [];
+  public worldBounds = new THREE.Box3();
+  public ladders: LadderZone[] = [];
+  public triangleCount = 0;
   public ready = false;
   public radarDataUrl = '';
 
@@ -32,19 +48,40 @@ export class Dust2TriangleCollider {
     return `${cx},${cz}`;
   }
 
-  public buildFromGroup(rootGroup: THREE.Object3D): void {
+  public clear(): void {
     this.floorGrid.clear();
     this.wallGrid.clear();
+    this.boundingBoxes.length = 0;
+    this.ladders.length = 0;
+    this.worldBounds.makeEmpty();
+    this.triangleCount = 0;
+    this.ready = false;
+    this.radarDataUrl = '';
+  }
+
+  public buildFromGroup(rootGroup: THREE.Object3D, customLadders: LadderZone[] = []): void {
+    this.clear();
+    this.ladders = customLadders.map((l) => ({ ...l }));
     rootGroup.updateMatrixWorld(true);
 
     const allFloors: Dust2TriEntry[] = [];
     const allWalls: Dust2TriEntry[] = [];
+    let totalTris = 0;
 
     rootGroup.traverse((child) => {
       if (!(child instanceof THREE.Mesh) || !child.geometry) return;
-      if (child.userData.targetId) return; // Ignore dynamic bot hitboxes
+      if (child.userData.targetId || child.userData.ignoreCollider) return;
 
       const geom = child.geometry as THREE.BufferGeometry;
+      if (!geom.boundingBox) {
+        geom.computeBoundingBox();
+      }
+      if (geom.boundingBox) {
+        const worldBox = geom.boundingBox.clone().applyMatrix4(child.matrixWorld);
+        this.boundingBoxes.push(worldBox);
+        this.worldBounds.union(worldBox);
+      }
+
       const posAttr = geom.attributes.position;
       if (!posAttr) return;
 
@@ -53,6 +90,7 @@ export class Dust2TriangleCollider {
       const triCount = indexAttr
         ? Math.floor(indexAttr.count / 3)
         : Math.floor(posAttr.count / 3);
+      totalTris += triCount;
 
       for (let i = 0; i < triCount; i++) {
         const i0 = indexAttr ? indexAttr.getX(i * 3) : i * 3;
@@ -68,19 +106,34 @@ export class Dust2TriangleCollider {
         const normal = new THREE.Vector3().crossVectors(e1, e2);
         const areaSq = normal.lengthSq();
         if (areaSq < 1e-6) continue;
+        const area = Math.sqrt(areaSq) * 0.5;
         normal.normalize();
+
+        const minX = Math.min(a.x, b.x, c.x);
+        const maxX = Math.max(a.x, b.x, c.x);
+        const minY = Math.min(a.y, b.y, c.y);
+        const maxY = Math.max(a.y, b.y, c.y);
+        const minZ = Math.min(a.z, b.z, c.z);
+        const maxZ = Math.max(a.z, b.z, c.z);
+
+        // Skip tiny 3D ladder rungs & thin ladder side-rails inside ladder zones so they never block climbing
+        const spanX = maxX - minX;
+        const spanZ = maxZ - minZ;
+        if (area < 0.26 && spanX < 1.05 && spanZ < 1.05 && this.isBoxInLadderZone(minX, maxX, minY, maxY, minZ, maxZ)) {
+          continue;
+        }
 
         const entry: Dust2TriEntry = {
           a,
           b,
           c,
           normal,
-          minX: Math.min(a.x, b.x, c.x),
-          maxX: Math.max(a.x, b.x, c.x),
-          minY: Math.min(a.y, b.y, c.y),
-          maxY: Math.max(a.y, b.y, c.y),
-          minZ: Math.min(a.z, b.z, c.z),
-          maxZ: Math.max(a.z, b.z, c.z),
+          minX,
+          maxX,
+          minY,
+          maxY,
+          minZ,
+          maxZ,
         };
 
         const absNy = Math.abs(normal.y);
@@ -121,13 +174,55 @@ export class Dust2TriangleCollider {
       }
     });
 
+    this.triangleCount = totalTris;
     this.generateTopDownRadarDataUrl(allFloors, allWalls);
     this.ready = true;
   }
 
+  private isBoxInLadderZone(
+    minX: number,
+    maxX: number,
+    minY: number,
+    maxY: number,
+    minZ: number,
+    maxZ: number
+  ): boolean {
+    for (let i = 0; i < this.ladders.length; i++) {
+      const l = this.ladders[i];
+      if (
+        maxX >= l.minX &&
+        minX <= l.maxX &&
+        maxZ >= l.minZ &&
+        minZ <= l.maxZ &&
+        maxY >= l.minY &&
+        minY <= l.maxY
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public getActiveLadder(x: number, yBottom: number, z: number): LadderZone | null {
+    if (!this.ready || this.ladders.length === 0) return null;
+    for (let i = 0; i < this.ladders.length; i++) {
+      const l = this.ladders[i];
+      if (
+        x >= l.minX &&
+        x <= l.maxX &&
+        z >= l.minZ &&
+        z <= l.maxZ &&
+        yBottom >= l.minY - 0.5 &&
+        yBottom <= l.maxY + 0.35
+      ) {
+        return l;
+      }
+    }
+    return null;
+  }
+
   /**
    * Computes exact barycentric Y height on floor/ramp/stair triangles under (x, z).
-   * Handles multi-level geometry (Underpass vs Short A bridge, T-Spawn vs Lower Tunnel).
    */
   public getGroundHeight(x: number, yBottom: number, z: number): number {
     if (!this.ready) return yBottom;
@@ -153,8 +248,8 @@ export class Dust2TriangleCollider {
         fallbackLowestY = yOnTri;
       }
 
-      // Walkable floor or step/ramp up to 0.54m above current feet
-      if (yOnTri <= yBottom + 0.54 && yOnTri > bestY) {
+      // Walkable floor or step/ramp up to 0.56m above current feet
+      if (yOnTri <= yBottom + 0.56 && yOnTri > bestY) {
         bestY = yOnTri;
       }
     }
@@ -165,7 +260,7 @@ export class Dust2TriangleCollider {
   }
 
   /**
-   * Checks if there is a low ceiling / tunnel roof directly above the player.
+   * Checks if there is a low ceiling / air vent duct roof directly above the player.
    */
   public hasLowCeiling(x: number, yBottom: number, z: number): boolean {
     if (!this.ready) return false;
@@ -176,10 +271,10 @@ export class Dust2TriangleCollider {
 
     for (let i = 0; i < bucket.length; i++) {
       const t = bucket[i];
-      if (t.maxY < yBottom + 0.85 || t.minY > yBottom + 1.72) continue;
+      if (t.maxY < yBottom + 0.82 || t.minY > yBottom + 1.58) continue;
       if (x < t.minX || x > t.maxX || z < t.minZ || z > t.maxZ) continue;
       const yOnTri = this.sampleTriangleY(t, x, z);
-      if (yOnTri !== null && yOnTri >= yBottom + 0.85 && yOnTri < yBottom + 1.72) {
+      if (yOnTri !== null && yOnTri >= yBottom + 0.82 && yOnTri < yBottom + 1.58) {
         return true;
       }
     }
@@ -197,9 +292,13 @@ export class Dust2TriangleCollider {
     radius: number,
     outPos: { x: number; z: number }
   ): boolean {
-    // Outer Dust2 map safety perimeter clamp
-    let rx = THREE.MathUtils.clamp(nextX, -58.5, 45.5);
-    let rz = THREE.MathUtils.clamp(nextZ, -78.5, 27.5);
+    const minWorldX = !this.worldBounds.isEmpty() ? this.worldBounds.min.x + 0.45 : -66.0;
+    const maxWorldX = !this.worldBounds.isEmpty() ? this.worldBounds.max.x - 0.45 : 46.0;
+    const minWorldZ = !this.worldBounds.isEmpty() ? this.worldBounds.min.z + 0.45 : -79.0;
+    const maxWorldZ = !this.worldBounds.isEmpty() ? this.worldBounds.max.z - 0.45 : 84.0;
+
+    let rx = THREE.MathUtils.clamp(nextX, minWorldX, maxWorldX);
+    let rz = THREE.MathUtils.clamp(nextZ, minWorldZ, maxWorldZ);
     let collided = rx !== nextX || rz !== nextZ;
 
     if (!this.ready) {
@@ -208,16 +307,19 @@ export class Dust2TriangleCollider {
       return collided;
     }
 
-    // Step-up tolerance (0.52m) so 16-unit CS stairs & ramps are climbed instead of blocking horizontally
-    const waistMinY = yBottom + 0.52;
-    const headMaxY = yBottom + playerHeight - 0.08;
+    // Step-up tolerance (0.54m) and 1.52m max standing head check so 1.60m CS archways/cars/vents don't snag
+    const waistMinY = yBottom + 0.54;
+    const headMaxY = yBottom + Math.min(playerHeight - 0.2, 1.5);
     const midY = (waistMinY + headMaxY) * 0.5;
-    const sampleHeights = [waistMinY + 0.06, midY, headMaxY - 0.06];
+    const sampleHeights =
+      headMaxY > waistMinY + 0.15
+        ? [waistMinY + 0.04, midY, headMaxY - 0.04]
+        : [waistMinY + 0.04];
 
     const minCx = Math.floor((rx - radius - 0.2) / this.cellSize);
     const maxCx = Math.floor((rx + radius + 0.2) / this.cellSize);
     const minCz = Math.floor((rz - radius - 0.2) / this.cellSize);
-    const maxCz = Math.floor((rz + radius + 0.2) / this.cellSize);
+    const maxCz = Math.floor((rz + radius - 0.2) / this.cellSize);
 
     for (let iter = 0; iter < 2; iter++) {
       for (let cx = minCx; cx <= maxCx; cx++) {
@@ -270,6 +372,61 @@ export class Dust2TriangleCollider {
     return collided;
   }
 
+  /**
+   * Ultra-fast spatial-cell raycast for wall-tuck, PEQ laser, and bot LOS checks.
+   * Avoids testing 10,100+ triangles on mobile CPUs.
+   */
+  public raycastDistance(
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    maxDist: number
+  ): number | null {
+    if (!this.ready) return null;
+    _ray.set(origin, dir);
+    let closestDist = maxDist + 1;
+    const step = 1.45;
+    const steps = Math.max(1, Math.ceil(maxDist / step));
+    let lastKey = '';
+
+    for (let s = 0; s <= steps; s++) {
+      const d = Math.min(maxDist, s * step);
+      if (d > closestDist + step) break;
+      const px = origin.x + dir.x * d;
+      const py = origin.y + dir.y * d;
+      const pz = origin.z + dir.z * d;
+      const key = this.cellKey(Math.floor(px / this.cellSize), Math.floor(pz / this.cellSize));
+      if (key === lastKey) continue;
+      lastKey = key;
+
+      const walls = this.wallGrid.get(key);
+      if (walls) {
+        for (let i = 0; i < walls.length; i++) {
+          const w = walls[i];
+          if (py + step < w.minY || py - step > w.maxY) continue;
+          const hit = _ray.intersectTriangle(w.a, w.b, w.c, false, _hitPt);
+          if (hit) {
+            const dist = origin.distanceTo(_hitPt);
+            if (dist <= maxDist && dist < closestDist) closestDist = dist;
+          }
+        }
+      }
+      const floors = this.floorGrid.get(key);
+      if (floors) {
+        for (let i = 0; i < floors.length; i++) {
+          const f = floors[i];
+          if (py + step < f.minY || py - step > f.maxY) continue;
+          const hit = _ray.intersectTriangle(f.a, f.b, f.c, false, _hitPt);
+          if (hit) {
+            const dist = origin.distanceTo(_hitPt);
+            if (dist <= maxDist && dist < closestDist) closestDist = dist;
+          }
+        }
+      }
+    }
+
+    return closestDist <= maxDist ? closestDist : null;
+  }
+
   private sampleTriangleY(t: Dust2TriEntry, x: number, z: number): number | null {
     const x0 = t.a.x;
     const z0 = t.a.z;
@@ -291,10 +448,7 @@ export class Dust2TriangleCollider {
     return null;
   }
 
-  private generateTopDownRadarDataUrl(
-    floors: Dust2TriEntry[],
-    walls: Dust2TriEntry[]
-  ): void {
+  private generateTopDownRadarDataUrl(floors: Dust2TriEntry[], walls: Dust2TriEntry[]): void {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 256;
@@ -304,11 +458,16 @@ export class Dust2TriangleCollider {
     ctx.fillStyle = '#0b1017';
     ctx.fillRect(0, 0, 256, 256);
 
-    // Map bounds X: [-60, +48] (108m), Z: [-80, +30] (110m)
-    const toPx = (wx: number) => ((wx + 60) / 108) * 256;
-    const toPz = (wz: number) => ((wz + 80) / 110) * 256;
+    const minX = !this.worldBounds.isEmpty() ? this.worldBounds.min.x : -60;
+    const maxX = !this.worldBounds.isEmpty() ? this.worldBounds.max.x : 48;
+    const minZ = !this.worldBounds.isEmpty() ? this.worldBounds.min.z : -80;
+    const maxZ = !this.worldBounds.isEmpty() ? this.worldBounds.max.z : 30;
+    const spanX = Math.max(10, maxX - minX);
+    const spanZ = Math.max(10, maxZ - minZ);
 
-    // Draw playable floors shaded by elevation
+    const toPx = (wx: number) => ((wx - minX) / spanX) * 256;
+    const toPz = (wz: number) => ((wz - minZ) / spanZ) * 256;
+
     for (let i = 0; i < floors.length; i++) {
       const f = floors[i];
       if (f.maxY > 9.6) continue;
@@ -321,12 +480,11 @@ export class Dust2TriangleCollider {
       ctx.fill();
     }
 
-    // Draw crisp wall outlines
     ctx.strokeStyle = '#64748b';
     ctx.lineWidth = 1.1;
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i];
-      if (w.minY > 8.5 || w.maxY < 1.5) continue;
+      if (w.minY > 8.5 || w.maxY < 1.0) continue;
       ctx.beginPath();
       ctx.moveTo(toPx(w.a.x), toPz(w.a.z));
       ctx.lineTo(toPx(w.b.x), toPz(w.b.z));

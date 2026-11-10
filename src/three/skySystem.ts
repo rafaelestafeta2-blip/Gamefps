@@ -38,8 +38,9 @@ export class TacticalSkySystem {
 
   public configureForMode(mode: DrillMode, fogEnabled = true): void {
     const isDust2 = mode === 'DUST2_BOMB_5V5';
+    const isAssault = mode === 'ASSAULT_BOMB_5V5';
     const isYard = mode === 'YARD_BOMB_5V5';
-    this.isOutdoor = isDust2 || isYard;
+    this.isOutdoor = isDust2 || isAssault || isYard;
 
     this.sky.visible = this.isOutdoor;
     const uniforms = this.sky.material.uniforms;
@@ -76,8 +77,8 @@ export class TacticalSkySystem {
       this.keyLight.color.setHex(0xfff7e6);
       this.keyLight.intensity = 2.15;
       this.updateShadowFrustum(68, 175);
-    } else if (isYard) {
-      // Elevação solar de 38° e azimute de 52° para o mapa Yard
+    } else if (isAssault || isYard) {
+      // Elevação solar de 38° e azimute de 52° para mapas urbanos industriais (CS_ASSAULT & Yard)
       const phi = THREE.MathUtils.degToRad(90 - 38);
       const theta = THREE.MathUtils.degToRad(52);
       this.sunDirection.setFromSphericalCoords(1, phi, theta);
@@ -97,23 +98,26 @@ export class TacticalSkySystem {
 
       this.outdoorFallbackBg.setHex(0xcbd5e1);
       this.scene.background = this.outdoorFallbackBg;
-      this.scene.fog = fogEnabled ? new THREE.FogExp2(0xcbd5e1, 0.0048) : null;
+      this.scene.fog = fogEnabled
+        ? new THREE.FogExp2(0xcbd5e1, isAssault ? 0.0036 : 0.0048)
+        : null;
 
-      this.keyLightTarget.position.set(0, 0, 0);
+      this.keyLightTarget.position.set(isAssault ? -18 : 0, 0, isAssault ? 18 : 0);
       this.keyLight.position
         .copy(this.keyLightTarget.position)
-        .addScaledVector(this.sunDirection, 75);
+        .addScaledVector(this.sunDirection, 80);
       this.keyLight.color.setHex(0xfffbeb);
       this.keyLight.intensity = 1.95;
-      this.updateShadowFrustum(52, 140);
+      this.updateShadowFrustum(isAssault ? 65 : 52, 165);
     } else {
+      this.indoorBgColor.setHex(0x070a10);
       this.scene.background = this.indoorBgColor;
-      this.scene.fog = fogEnabled ? new THREE.FogExp2(0x0d121a, 0.014) : null;
+      this.scene.fog = fogEnabled ? new THREE.FogExp2(0x070a10, 0.011) : null;
 
-      this.keyLightTarget.position.set(0, 0, -15);
-      this.keyLight.position.set(22, 36, 18);
-      this.keyLight.color.setHex(0xfffbeb);
-      this.keyLight.intensity = 1.85;
+      this.keyLightTarget.position.set(4, 0, -2);
+      this.keyLight.position.set(16, 28, 12);
+      this.keyLight.color.setHex(0xe2e8f0);
+      this.keyLight.intensity = 0.85;
       this.updateShadowFrustum(42, 110);
     }
 

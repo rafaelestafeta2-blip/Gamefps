@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
+import { DrillMode } from '../types/game';
 
 interface MatchmakingModalProps {
-  onMatchFound: () => void;
+  onMatchFound: (selectedMode: DrillMode) => void;
   onCancel: () => void;
 }
 
@@ -12,22 +13,22 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
 }) => {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [matchFound, setMatchFound] = useState(false);
+  const [selectedMap, setSelectedMap] = useState<DrillMode>('ASSAULT_BOMB_5V5');
+  const selectedMapRef = useRef<DrillMode>(selectedMap);
+  selectedMapRef.current = selectedMap;
 
   useEffect(() => {
-    // Cronômetro de busca estilo Warface
     const timer = window.setInterval(() => {
       setElapsedSec((s) => s + 1);
     }, 1000);
 
-    // Encontra a partida em ~2.4 segundos de forma ágil e satisfatória
     const matchTimer = window.setTimeout(() => {
       setMatchFound(true);
       soundEngine.playMechanicalSwitch(1.15);
     }, 2400);
 
-    // Aguarda confirmação visual de "Partida Encontrada" antes de transicionar
     const launchTimer = window.setTimeout(() => {
-      onMatchFound();
+      onMatchFound(selectedMapRef.current);
     }, 3200);
 
     return () => {
@@ -52,23 +53,23 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
         />
 
         {/* Radar animado / Pulsar de Matchmaking */}
-        <div className="relative w-20 h-20 mb-3 flex items-center justify-center">
+        <div className="relative w-18 h-18 mb-2.5 flex items-center justify-center">
           <div
             className={`absolute inset-0 rounded-full border-2 animate-ping ${
               matchFound ? 'border-emerald-400 opacity-60' : 'border-amber-400 opacity-40'
             }`}
           />
           <div
-            className={`w-16 h-16 rounded-full border border-white/20 flex items-center justify-center shadow-lg ${
+            className={`w-14 h-14 rounded-full border border-white/20 flex items-center justify-center shadow-lg ${
               matchFound ? 'bg-emerald-950/70 border-emerald-400' : 'bg-slate-900/80 border-amber-400/60'
             }`}
           >
             {matchFound ? (
-              <svg viewBox="0 0 24 24" className="w-8 h-8 text-emerald-400 animate-bounce" fill="none">
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-emerald-400 animate-bounce" fill="none">
                 <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             ) : (
-              <svg viewBox="0 0 24 24" className="w-8 h-8 text-amber-400 animate-spin" fill="none">
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-amber-400 animate-spin" fill="none">
                 <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" strokeDasharray="14 10" />
               </svg>
             )}
@@ -76,7 +77,7 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
         </div>
 
         {/* Status da Busca */}
-        <div className="text-[11px] font-mono font-bold tracking-[0.2em] uppercase text-amber-400 mb-1">
+        <div className="text-[11px] font-mono font-bold tracking-[0.2em] uppercase text-amber-400 mb-0.5">
           {matchFound ? 'SISTEMA DE MATCHMAKING' : 'PROCURANDO PARTIDA...'}
         </div>
 
@@ -90,19 +91,71 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
           )}
         </h2>
 
+        {/* Seletor de Arena Oficial (.GLB) */}
+        <div className="w-full mb-3 relative z-10">
+          <div className="text-[9px] font-mono uppercase tracking-widest text-slate-400 mb-1">
+            SELECIONAR MAPA DA OPERAÇÃO (.GLB):
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playMechanicalSwitch(1.05);
+                setSelectedMap('ASSAULT_BOMB_5V5');
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                selectedMap === 'ASSAULT_BOMB_5V5'
+                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
+              }`}
+            >
+              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
+                CS_ASSAULT
+              </div>
+              <div className="text-[8px] font-mono text-slate-300 truncate">
+                Galpão Industrial · Real Light
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playMechanicalSwitch(1.05);
+                setSelectedMap('DUST2_BOMB_5V5');
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                selectedMap === 'DUST2_BOMB_5V5'
+                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
+              }`}
+            >
+              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
+                DE_DUST2
+              </div>
+              <div className="text-[8px] font-mono text-slate-300 truncate">
+                Deserto Tático · Clássico 5v5
+              </div>
+            </button>
+          </div>
+        </div>
+
         {/* Metadados do Servidor Estilo Warface */}
-        <div className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mb-4 flex flex-col gap-1.5 text-xs font-mono">
+        <div className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mb-3.5 flex flex-col gap-1.5 text-xs font-mono">
+          <div className="flex items-center justify-between text-slate-300">
+            <span>Mapa Selecionado:</span>
+            <span className="font-bold text-amber-300">
+              {selectedMap === 'ASSAULT_BOMB_5V5' ? 'CS_ASSAULT (.GLB)' : 'DE_DUST2 (.GLB)'}
+            </span>
+          </div>
           <div className="flex items-center justify-between text-slate-300">
             <span>Região do Servidor:</span>
             <span className="font-bold text-sky-300">SA-BRAZIL (São Paulo)</span>
           </div>
           <div className="flex items-center justify-between text-slate-300">
-            <span>Latência / Ping:</span>
-            <span className="font-bold text-emerald-400">18 ms · Conexão Estável</span>
-          </div>
-          <div className="flex items-center justify-between text-slate-300">
             <span>Jogadores na Fila:</span>
-            <span className="font-bold text-amber-300">{matchFound ? '10/10 Prontos' : '9/10 Conectando...'}</span>
+            <span className="font-bold text-emerald-400">
+              {matchFound ? '10/10 Prontos' : '9/10 Conectando...'}
+            </span>
           </div>
           <div className="flex items-center justify-between text-slate-300 pt-1 border-t border-white/10">
             <span>Tempo Decorrido:</span>

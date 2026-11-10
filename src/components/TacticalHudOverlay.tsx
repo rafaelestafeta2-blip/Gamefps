@@ -9,7 +9,6 @@ import { HudBottomWeaponDock } from './HudBottomWeaponDock';
 import { HudTopRightControls } from './HudTopRightControls';
 import { bindTap, WeaponSilhouette } from './hudTapUtils';
 import { WarfaceKillfeed } from './WarfaceKillfeed';
-import { WarfaceRankIcon } from './WarfaceRankIcon';
 import { YardBombHudBar } from './YardBombHudBar';
 
 interface TacticalHudOverlayProps {
@@ -152,29 +151,13 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
         )}
       </div>
 
-      {/* PROMOÇÃO DE PATENTE WARFACE NOTIFICATION BANNER */}
-      {hud.rankUpNotification && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 pointer-events-none select-none font-mono">
-          <div className="bg-[#0b0e14]/95 border-2 border-amber-400 rounded-2xl px-5 py-2.5 shadow-[0_0_30px_rgba(245,158,11,0.6)] flex items-center gap-3">
-            <WarfaceRankIcon level={hud.rankLevel} className="w-8 h-8" />
-            <div>
-              <div className="text-[10px] font-mono font-bold text-amber-400 tracking-widest uppercase">
-                ★ WARFACE CAREER PROMOTION ★
-              </div>
-              <div className="font-display font-black text-sm sm:text-base text-white tracking-wide">
-                {hud.rankUpNotification}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* WARFACE TACTICAL 5V5 KILLFEED (Canto superior direito abaixo do radar) */}
       <WarfaceKillfeed entries={hud.killfeed} />
 
-      {/* TOP-CENTER: 5v5 PLANT THE BOMB HUD BAR (YARD & DE_DUST2) */}
+      {/* TOP-CENTER: 5v5 PLANT THE BOMB HUD BAR (YARD, DE_DUST2 & CS_ASSAULT) */}
       {(hud.drillMode === 'YARD_BOMB_5V5' ||
-        hud.drillMode === 'DUST2_BOMB_5V5') &&
+        hud.drillMode === 'DUST2_BOMB_5V5' ||
+        hud.drillMode === 'ASSAULT_BOMB_5V5') &&
         hud.yardBomb && (
           <YardBombHudBar
             yardBomb={hud.yardBomb}

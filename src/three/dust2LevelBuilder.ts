@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { TacticalLevelData, TacticalTargetEntity } from './levelBuilder';
@@ -40,12 +41,15 @@ export function getDust2CalloutForPos(x: number, y: number, z: number): string {
 
 export interface Dust2LevelBundle extends TacticalLevelData {
   collider: Dust2TriangleCollider;
+  mapGeometryGroup: THREE.Group | null;
+  isLoaded: boolean;
 }
 
-export function buildDust2Level(
-  isSoftwareGl: boolean,
-  onReady?: () => void
-): Dust2LevelBundle {
+/**
+ * Creates only the lightweight Dust2 container shell, lights, bomb beacons, and 5v5 bot rigs.
+ * Does NOT download `/models/maps/de_dust2.glb` at boot time to keep Lobby RAM usage minimal.
+ */
+export function buildDust2Level(isSoftwareGl: boolean): Dust2LevelBundle {
   const levelGroup = new THREE.Group();
   levelGroup.name = 'Dust2LevelRoot';
 
@@ -70,107 +74,6 @@ export function buildDust2Level(
   // Spawn 5v5 Bots at verified Dust2 coordinates & elevations
   spawnDust2Squads(levelGroup, targets, shootableMeshes, isSoftwareGl);
 
-  // Load real /models/maps/de_dust2.glb
-  const loader = new GLTFLoader();
-  loader.load(
-    '/models/maps/de_dust2.glb',
-    (gltf) => {
-      const modelRoot = gltf.scene;
-
-      // Reset baked Sketchfab translation ([0, 1008, 1232]) & non-metric scale (0.01333)
-      modelRoot.position.set(0, 0, 0);
-      modelRoot.rotation.set(0, 0, 0);
-      modelRoot.scale.set(1, 1, 1);
-
-      modelRoot.traverse((node) => {
-        if (!(node instanceof THREE.Mesh)) {
-          node.position.set(0, 0, 0);
-          node.rotation.set(0, 0, 0);
-          node.scale.set(1, 1, 1);
-          node.updateMatrix();
-        }
-      });
-
-      // Apply exact metric CS scale (1 Hammer unit = 0.025m) and upright +Y orientation
-      const mapTransformGroup = new THREE.Group();
-      mapTransformGroup.name = 'Dust2NormalizedGeometry';
-      mapTransformGroup.rotation.set(Math.PI, 0, 0);
-      mapTransformGroup.scale.setScalar(0.025);
-      mapTransformGroup.position.set(0, 4.8, 0);
-      mapTransformGroup.add(modelRoot);
-
-      mapTransformGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          const mats = Array.isArray(child.material)
-            ? child.material
-            : [child.material];
-          const matName = mats[0]?.name || '';
-
-          // Hide Source-engine black doorway void blocker quads (material_18 & material_3)
-          if (matName === 'material_18' || matName === 'material_3') {
-            child.visible = false;
-            return;
-          }
-
-          child.castShadow = !isSoftwareGl;
-          child.receiveShadow = !isSoftwareGl;
-          child.userData.isEnvironment = true;
-
-          mats.forEach((m) => {
-            const std = m as THREE.MeshStandardMaterial;
-            if (std && std.map) {
-              std.map.colorSpace = THREE.SRGBColorSpace;
-              std.map.anisotropy = isSoftwareGl ? 1 : 16;
-              std.map.minFilter = THREE.LinearMipmapLinearFilter;
-              std.map.magFilter = THREE.LinearFilter;
-              std.map.generateMipmaps = true;
-              std.map.needsUpdate = true;
-            }
-            if (std) {
-              std.roughness = 0.74;
-              std.metalness = 0.04;
-              std.envMapIntensity = 0.8;
-              // DoubleSide prevents any back-face gaps from flipped X-axis winding
-              std.side = THREE.DoubleSide;
-              // Prevent Z-fighting on coplanar Bomb Site A & B floor decals
-              if (std.name === 'material_15' || std.name === 'material_25') {
-                std.polygonOffset = true;
-                std.polygonOffsetFactor = -1;
-                std.polygonOffsetUnits = -1;
-              }
-            }
-          });
-
-          shootableMeshes.push(child);
-        }
-      });
-
-      levelGroup.add(mapTransformGroup);
-      levelGroup.updateMatrixWorld(true);
-
-      // Build 2D spatial hash triangle collider from exact world-space triangles
-      collider.buildFromGroup(mapTransformGroup);
-
-      // Snap all 5v5 bots to exact floor triangle elevation
-      for (let i = 0; i < targets.length; i++) {
-        const bot = targets[i];
-        const exactY = collider.getGroundHeight(
-          bot.basePosition.x,
-          bot.basePosition.y,
-          bot.basePosition.z
-        );
-        bot.basePosition.y = exactY;
-        bot.root.position.y = exactY;
-      }
-
-      onReady?.();
-    },
-    undefined,
-    (err) => {
-      console.error('Failed to load /models/maps/de_dust2.glb:', err);
-    }
-  );
-
   return {
     levelGroup,
     colliders: [],
@@ -181,7 +84,189 @@ export function buildDust2Level(
       new THREE.Vector3(-6.25, 1.6, -56.25),
     ],
     collider,
+    mapGeometryGroup: null,
+    isLoaded: false,
   };
+}
+
+/**
+ * Loads `/models/maps/de_dust2.glb` on demand during Match Loading (`Loading 2`)
+ * using a real `THREE.LoadingManager` + `GLTFLoader` + `DRACOLoader`, builds
+ * `Box3` & triangle spatial colliders, and snaps all 5v5 bots to the floor.
+ */
+export async function loadDust2MapGeometry(
+  bundle: Dust2LevelBundle,
+  isSoftwareGl: boolean,
+  loadingManager: THREE.LoadingManager,
+  onByteProgress?: (ratio0to1: number) => void
+): Promise<void> {
+  if (bundle.isLoaded && bundle.mapGeometryGroup && bundle.collider.ready) {
+    onByteProgress?.(1.0);
+    return;
+  }
+
+  // Clean any partial state before loading
+  disposeDust2MapGeometry(bundle);
+
+  const dracoLoader = new DRACOLoader(loadingManager);
+  dracoLoader.setDecoderPath(
+    'https://www.gstatic.com/draco/versioned/decoders/1.5.6/'
+  );
+  dracoLoader.preload();
+
+  const gltfLoader = new GLTFLoader(loadingManager);
+  gltfLoader.setDRACOLoader(dracoLoader);
+
+  try {
+    const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+      gltfLoader.load(
+        '/models/maps/de_dust2.glb',
+        (loaded) => resolve(loaded),
+        (evt) => {
+          if (evt.lengthComputable && evt.total > 0) {
+            onByteProgress?.(Math.min(1, evt.loaded / evt.total));
+          }
+        },
+        (err) => reject(err)
+      );
+    });
+
+    const modelRoot = gltf.scene;
+
+    // Reset baked Sketchfab translation ([0, 1008, 1232]) & non-metric scale (0.01333)
+    modelRoot.position.set(0, 0, 0);
+    modelRoot.rotation.set(0, 0, 0);
+    modelRoot.scale.set(1, 1, 1);
+
+    modelRoot.traverse((node) => {
+      if (!(node instanceof THREE.Mesh)) {
+        node.position.set(0, 0, 0);
+        node.rotation.set(0, 0, 0);
+        node.scale.set(1, 1, 1);
+        node.updateMatrix();
+      }
+    });
+
+    // Apply exact metric CS scale (1 Hammer unit = 0.025m) and upright +Y orientation
+    const mapTransformGroup = new THREE.Group();
+    mapTransformGroup.name = 'Dust2NormalizedGeometry';
+    mapTransformGroup.rotation.set(Math.PI, 0, 0);
+    mapTransformGroup.scale.setScalar(0.025);
+    mapTransformGroup.position.set(0, 4.8, 0);
+    mapTransformGroup.add(modelRoot);
+
+    mapTransformGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+        const matName = mats[0]?.name || '';
+
+        // Hide Source-engine black doorway void blocker quads (material_18 & material_3)
+        if (matName === 'material_18' || matName === 'material_3') {
+          child.visible = false;
+          return;
+        }
+
+        child.castShadow = !isSoftwareGl;
+        child.receiveShadow = !isSoftwareGl;
+        child.userData.isEnvironment = true;
+
+        mats.forEach((m) => {
+          const std = m as THREE.MeshStandardMaterial;
+          if (std && std.map) {
+            std.map.colorSpace = THREE.SRGBColorSpace;
+            std.map.anisotropy = isSoftwareGl ? 1 : 16;
+            std.map.minFilter = THREE.LinearMipmapLinearFilter;
+            std.map.magFilter = THREE.LinearFilter;
+            std.map.generateMipmaps = true;
+            std.map.needsUpdate = true;
+          }
+          if (std) {
+            std.roughness = 0.74;
+            std.metalness = 0.04;
+            std.envMapIntensity = 0.8;
+            std.side = THREE.DoubleSide;
+            if (std.name === 'material_15' || std.name === 'material_25') {
+              std.polygonOffset = true;
+              std.polygonOffsetFactor = -1;
+              std.polygonOffsetUnits = -1;
+            }
+          }
+        });
+
+        bundle.shootableMeshes.push(child);
+      }
+    });
+
+    bundle.levelGroup.add(mapTransformGroup);
+    bundle.levelGroup.updateMatrixWorld(true);
+    bundle.mapGeometryGroup = mapTransformGroup;
+
+    // Build Box3 bounds + 2D spatial hash triangle collider
+    bundle.collider.buildFromGroup(mapTransformGroup);
+
+    // Snap all 5v5 bots to exact floor triangle elevation
+    for (let i = 0; i < bundle.targets.length; i++) {
+      const bot = bundle.targets[i];
+      const exactY = bundle.collider.getGroundHeight(
+        bot.basePosition.x,
+        bot.basePosition.y,
+        bot.basePosition.z
+      );
+      bot.basePosition.y = exactY;
+      bot.root.position.y = exactY;
+    }
+
+    bundle.isLoaded = true;
+    onByteProgress?.(1.0);
+  } finally {
+    dracoLoader.dispose();
+  }
+}
+
+/**
+ * Disposes all geometries, materials, PBR textures, and spatial collider data
+ * of the Dust2 `.glb` arena when the player exits the match back to the Lobby.
+ */
+export function disposeDust2MapGeometry(bundle: Dust2LevelBundle): void {
+  if (bundle.mapGeometryGroup) {
+    bundle.mapGeometryGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        if (child.geometry) {
+          child.geometry.dispose();
+        }
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : child.material
+            ? [child.material]
+            : [];
+        mats.forEach((m) => {
+          const std = m as THREE.MeshStandardMaterial;
+          if (std.map) std.map.dispose();
+          if (std.normalMap) std.normalMap.dispose();
+          if (std.roughnessMap) std.roughnessMap.dispose();
+          if (std.metalnessMap) std.metalnessMap.dispose();
+          if (std.aoMap) std.aoMap.dispose();
+          if (std.emissiveMap) std.emissiveMap.dispose();
+          if (std.bumpMap) std.bumpMap.dispose();
+          m.dispose();
+        });
+      }
+    });
+    bundle.levelGroup.remove(bundle.mapGeometryGroup);
+    bundle.mapGeometryGroup = null;
+  }
+
+  // Keep only bot hitboxes in shootableMeshes, removing environment meshes
+  for (let i = bundle.shootableMeshes.length - 1; i >= 0; i--) {
+    if (bundle.shootableMeshes[i].userData?.isEnvironment) {
+      bundle.shootableMeshes.splice(i, 1);
+    }
+  }
+
+  bundle.collider.clear();
+  bundle.isLoaded = false;
 }
 
 function addDust2BombSiteBeacon(

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { ASSAULT_BOMB_SITE_A, ASSAULT_BOMB_SITE_B } from '../three/assaultLevelBuilder';
 import { DUST2_BOMB_SITE_A, DUST2_BOMB_SITE_B } from '../three/dust2LevelBuilder';
 import { YARD_BOMB_SITE_A, YARD_BOMB_SITE_B } from '../three/yardMapData';
 import { DrillMode } from '../types/game';
@@ -43,8 +44,9 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
       const center = size / 2;
       const isYard = drillMode === 'YARD_BOMB_5V5';
       const isDust2 = drillMode === 'DUST2_BOMB_5V5';
-      const isBombMode = isYard || isDust2;
-      const scale = isDust2 ? 1.05 : isYard ? 1.35 : 2.0;
+      const isAssault = drillMode === 'ASSAULT_BOMB_5V5';
+      const isBombMode = isYard || isDust2 || isAssault;
+      const scale = isDust2 || isAssault ? 1.05 : isYard ? 1.35 : 2.0;
       const maxRange = center - 6;
 
       ctx.clearRect(0, 0, size, size);
@@ -88,6 +90,14 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
         drawSectorRect(-38, -26, 22, 26, '#231d16'); // Upper B Tunnels
         drawSectorRect(-22, -36, 16, 12, '#1c1812'); // Lower B Tunnels
         drawSectorRect(-40, -64, 24, 24, '#2c251c', 'rgba(56,189,248,0.45)'); // Site B
+      } else if (isAssault) {
+        // Authentic Counter-Strike cs_assault radar sectors in world coordinates
+        drawSectorRect(-16, 40, 56, 24, '#1b2634'); // Outer CT Street & Courtyard
+        drawSectorRect(-40, 36, 18, 16, '#273649'); // Highway Overpass Bridge
+        drawSectorRect(-26, 12, 28, 22, '#233040', 'rgba(248,113,113,0.45)'); // Loading Dock & Site A
+        drawSectorRect(-3, 2, 24, 26, '#2d3b4e', 'rgba(56,189,248,0.45)'); // Main Assault Warehouse & Site B
+        drawSectorRect(-9, -7, 16, 10, '#36465c'); // Upper Warehouse Catwalk / Hostage Room
+        drawSectorRect(14, 18, 14, 28, '#1e2938'); // East Backdoor Alley
       } else {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
         ctx.lineWidth = 1;
@@ -106,10 +116,18 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
         drawSectorRect(0, -18, 22, 6, '#1f2933');
       }
 
-      // Draw Bomb Site A and B pins on minimap for both Yard and Dust2
+      // Draw Bomb Site A and B pins on minimap for Yard, Dust2, and Assault
       if (isBombMode) {
-        const siteA = isDust2 ? DUST2_BOMB_SITE_A : YARD_BOMB_SITE_A;
-        const siteB = isDust2 ? DUST2_BOMB_SITE_B : YARD_BOMB_SITE_B;
+        const siteA = isDust2
+          ? DUST2_BOMB_SITE_A
+          : isAssault
+            ? ASSAULT_BOMB_SITE_A
+            : YARD_BOMB_SITE_A;
+        const siteB = isDust2
+          ? DUST2_BOMB_SITE_B
+          : isAssault
+            ? ASSAULT_BOMB_SITE_B
+            : YARD_BOMB_SITE_B;
         const drawSitePin = (sx: number, sz: number, label: string, color: string) => {
           let rx = (sx - playerX) * scale;
           let rz = (sz - playerZ) * scale;

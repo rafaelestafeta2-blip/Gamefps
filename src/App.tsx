@@ -7,20 +7,12 @@ import { MainMenu } from './components/MainMenu';
 import { MobileTouchControls } from './components/MobileTouchControls';
 import { OrientationLockOverlay } from './components/OrientationLockOverlay';
 import { TacticalHudOverlay } from './components/TacticalHudOverlay';
+import { WarfaceMatchmakingWidget } from './components/WarfaceMatchmakingWidget';
+import { WarfaceRankUpModal } from './components/WarfaceRankUpModal';
 import { YardMatchLoadingModal } from './components/YardMatchLoadingModal';
-import {
-  ControlSettings,
-  loadControlSettings,
-  saveControlSettings,
-} from './controls/hudLayoutSettings';
+import { ControlSettings, loadControlSettings, saveControlSettings } from './controls/hudLayoutSettings';
 import { applyGraphicsToEngine } from './graphics/applyGraphicsToEngine';
-import {
-  FpsLimit,
-  GameSettings,
-  getDefaultSettings,
-  loadGameSettings,
-  saveGameSettings,
-} from './graphics/graphicsSettings';
+import { FpsLimit, GameSettings, getDefaultSettings, loadGameSettings, saveGameSettings } from './graphics/graphicsSettings';
 import { mobileHardware } from './mobile/nativeHardware';
 import { TacticalFPSEngine } from './three/fpsEngine';
 import { DrillMode, GyroMode, HudState, OpticType, WeaponId } from './types/game';
@@ -60,6 +52,8 @@ export default function App() {
   const [preloadProgress, setPreloadProgress] = useState(0);
   const [preloadStatus, setPreloadStatus] = useState('INICIALIZANDO GERENCIADOR...');
   const [loadingBombMode, setLoadingBombMode] = useState<DrillMode | null>(null);
+  const [matchmakingTargetMode, setMatchmakingTargetMode] =
+    useState<DrillMode | null>(null);
   const [gameSettings, setGameSettings] = useState<GameSettings>(() => loadGameSettings());
   const gameSettingsRef = useRef<GameSettings>(gameSettings);
   gameSettingsRef.current = gameSettings;
@@ -119,14 +113,23 @@ export default function App() {
 
   const handleStartMatch = (mode?: DrillMode) => {
     if (!engineRef.current) return;
+    setMatchmakingTargetMode(null);
     if (
-      (mode === 'YARD_BOMB_5V5' || mode === 'DUST2_BOMB_5V5') &&
+      (mode === 'YARD_BOMB_5V5' ||
+        mode === 'DUST2_BOMB_5V5' ||
+        mode === 'ASSAULT_BOMB_5V5') &&
       hud.screen !== 'PLAYING'
     ) {
       setLoadingBombMode(mode);
       return;
     }
     launchMatchNow(mode);
+  };
+
+  const handleStartWarfaceMatchmaking = (targetMode: DrillMode) => {
+    if (!engineRef.current) return;
+    setMatchmakingTargetMode(targetMode);
+    launchMatchNow('FREE_RANGE');
   };
 
   const handleSelectWeapon = (weaponId: WeaponId) => {
@@ -244,18 +247,30 @@ export default function App() {
       )}
 
       {(hud.screen === 'MAIN_MENU' || hud.screen === 'TITLE') && !loadingBombMode && (
-        <MainMenu
-          onStartTraining={() => handleStartMatch('FREE_RANGE')}
-          onStartDrill={(mode) => handleStartMatch(mode)}
-          activeWeapon={hud.activeWeapon}
-          onSelectStartingWeapon={handleSelectWeapon}
-          gameSettings={gameSettings}
-          onUpdateGameSettings={handleUpdateSettings}
-          onResetGameSettings={handleResetSettings}
-          controlSettings={controlSettings}
-          onUpdateControlSettings={handleUpdateControlSettings}
-          onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
-        />
+        <>
+          <MainMenu
+            onStartTraining={() => handleStartMatch('FREE_RANGE')}
+            onStartDrill={(mode) => handleStartMatch(mode)}
+            onStartMatchmaking={handleStartWarfaceMatchmaking}
+            activeWeapon={hud.activeWeapon}
+            onSelectStartingWeapon={handleSelectWeapon}
+            gameSettings={gameSettings}
+            onUpdateGameSettings={handleUpdateSettings}
+            onResetGameSettings={handleResetSettings}
+            controlSettings={controlSettings}
+            onUpdateControlSettings={handleUpdateControlSettings}
+            onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
+          />
+          {hud.rankUpNotification && (
+            <WarfaceRankUpModal
+              rankLevel={parseInt(hud.rankUpNotification, 10) || hud.rankLevel}
+              onConfirm={() => {
+                engineRef.current?.acknowledgeRankUp();
+                setHud((prev) => ({ ...prev, rankUpNotification: null }));
+              }}
+            />
+          )}
+        </>
       )}
 
       {hud.screen === 'PLAYING' && (
@@ -301,10 +316,28 @@ export default function App() {
             onPause={() => engineRef.current?.pauseGame()}
             onPlantBomb={() => engineRef.current?.triggerPlantBomb()}
             onReturnToMenu={() => {
+              setMatchmakingTargetMode(null);
               engineRef.current?.returnToMainMenu();
               setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
             }}
           />
+
+          {hud.drillMode === 'FREE_RANGE' &&
+            matchmakingTargetMode &&
+            !loadingBombMode && (
+              <WarfaceMatchmakingWidget
+                selectedMode={matchmakingTargetMode}
+                onChangeMode={(nextMode) => setMatchmakingTargetMode(nextMode)}
+                onMatchReady={(readyMode) => {
+                  setMatchmakingTargetMode(null);
+                  if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                  }
+                  setLoadingBombMode(readyMode);
+                }}
+                onCancelSearch={() => setMatchmakingTargetMode(null)}
+              />
+            )}
         </>
       )}
 
@@ -318,6 +351,7 @@ export default function App() {
         onResumeGame={() => engineRef.current?.resumeGame()}
         onRestartDrill={() => handleStartMatch(hud.drillMode)}
         onReturnToTitle={() => {
+          setMatchmakingTargetMode(null);
           engineRef.current?.returnToMainMenu();
           setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
         }}

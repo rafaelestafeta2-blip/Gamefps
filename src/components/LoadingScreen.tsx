@@ -20,53 +20,32 @@ const TIPS = [
 
 export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   onComplete,
-  progress: externalProgress,
+  progress = 0,
   statusLabel,
 }) => {
-  const [internalProgress, setInternalProgress] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
 
-  const displayProgress =
-    typeof externalProgress === 'number'
-      ? Math.min(100, Math.max(0, externalProgress))
-      : internalProgress;
+  const displayProgress = Math.min(100, Math.max(0, progress));
 
   useEffect(() => {
     const tipInterval = setInterval(() => {
       setTipIndex((prev) => (prev + 1) % TIPS.length);
     }, 3000);
 
-    let progressInterval: NodeJS.Timeout | undefined;
-
-    if (typeof externalProgress !== 'number') {
-      progressInterval = setInterval(() => {
-        setInternalProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(progressInterval);
-            setTimeout(onComplete, 400);
-            return 100;
-          }
-          const step = prev < 30 ? 2.5 : prev < 70 ? 1.8 : prev < 90 ? 1.2 : 0.8;
-          return Math.min(100, prev + step);
-        });
-      }, 50);
-    }
-
     return () => {
       clearInterval(tipInterval);
-      if (progressInterval) clearInterval(progressInterval);
     };
-  }, [externalProgress, onComplete]);
+  }, []);
 
-  // If controlled externally and reaches 100%, trigger completion
+  // Libera o Lobby assim que os recursos reais do Boot atingirem 100%
   useEffect(() => {
-    if (typeof externalProgress === 'number' && externalProgress >= 100) {
+    if (displayProgress >= 100) {
       const timer = setTimeout(() => {
         onComplete();
-      }, 400);
+      }, 250);
       return () => clearTimeout(timer);
     }
-  }, [externalProgress, onComplete]);
+  }, [displayProgress, onComplete]);
 
   return (
     <div className="fixed inset-0 z-50 bg-[#05070a] select-none overflow-hidden flex flex-col justify-between">

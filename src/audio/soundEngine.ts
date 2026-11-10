@@ -1107,6 +1107,76 @@ class TacticalSoundEngine {
     }
   }
 
+  /**
+   * Pré-carrega e decodifica os áudios globais leves do Boot/Lobby (headshot, UI, troca de arma,
+   * passos, granadas e disparos base) reportando progresso real item a item.
+   */
+  public async prewarmBootAudio(
+    onProgress?: (loaded: number, total: number, label: string) => void
+  ): Promise<void> {
+    this.init();
+    const ctx = this.ensureContext();
+
+    const bootAudioTasks: Array<{ label: string; run: () => Promise<void> }> = [
+      {
+        label: 'ÁUDIO DE HEADSHOT & FEEDBACK DE COMBATE',
+        run: async () => {
+          if (!this.headshotDeathRawData) {
+            const res = await fetch(HEADSHOT_DEATH_LOCAL_URL).catch(() =>
+              fetch(HEADSHOT_DEATH_GITHUB_RAW_URL)
+            );
+            if (res.ok) {
+              this.headshotDeathRawData = await res.arrayBuffer();
+            }
+          }
+          if (ctx) this.tryDecodeGrenadeSamples(ctx);
+        },
+      },
+      {
+        label: 'ÁUDIOS DE MOVIMENTAÇÃO, PULO, SLIDE & TROCA DE ARMA',
+        run: async () => {
+          if (!this.weaponSwapRawData) {
+            const res = await fetch(WEAPON_SWAP_LOCAL_URL).catch(() =>
+              fetch(WEAPON_SWAP_GITHUB_RAW_URL)
+            );
+            if (res.ok) {
+              this.weaponSwapRawData = await res.arrayBuffer();
+            }
+          }
+          if (ctx) this.tryDecodeMovementAndSwapSamples(ctx);
+        },
+      },
+      {
+        label: 'SAMPLES DE DISPARO (M4A1, AK-47, MARK 23 & SNIPER)',
+        run: async () => {
+          if (ctx) {
+            this.tryDecodeM4a1Shot(ctx);
+            this.tryDecodeDryFire(ctx);
+            this.tryDecodeSniperSamples(ctx);
+          }
+        },
+      },
+      {
+        label: 'EFEITOS E VOZES TÁTICAS DE GRANADAS',
+        run: async () => {
+          await this.prewarmGrenadeAudio();
+        },
+      },
+    ];
+
+    const total = bootAudioTasks.length;
+    for (let i = 0; i < total; i++) {
+      const task = bootAudioTasks[i];
+      onProgress?.(i, total, task.label);
+      try {
+        await task.run();
+      } catch {
+        // Fallback procedural garantido caso offline
+      }
+      onProgress?.(i + 1, total, task.label);
+    }
+  }
+
   public playGunshot(
     suppressed: boolean,
     boltLockedBackAfterShot: boolean,
