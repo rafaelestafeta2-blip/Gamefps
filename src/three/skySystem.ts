@@ -117,8 +117,8 @@ export class TacticalSkySystem {
       this.keyLightTarget.position.set(4, 0, -2);
       this.keyLight.position.set(16, 28, 12);
       this.keyLight.color.setHex(0xe2e8f0);
-      this.keyLight.intensity = 0.85;
-      this.updateShadowFrustum(42, 110);
+      this.keyLight.intensity = 1.05;
+      this.keyLight.castShadow = false;
     }
 
     this.keyLightTarget.updateMatrixWorld();

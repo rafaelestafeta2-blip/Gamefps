@@ -7,6 +7,7 @@ import { MainMenu } from './components/MainMenu';
 import { MobileTouchControls } from './components/MobileTouchControls';
 import { OrientationLockOverlay } from './components/OrientationLockOverlay';
 import { TacticalHudOverlay } from './components/TacticalHudOverlay';
+import { VideoIntroScreen } from './components/VideoIntroScreen';
 import { WarfaceMatchmakingWidget } from './components/WarfaceMatchmakingWidget';
 import { WarfaceRankUpModal } from './components/WarfaceRankUpModal';
 import { YardMatchLoadingModal } from './components/YardMatchLoadingModal';
@@ -213,6 +214,14 @@ export default function App() {
       {hud.screen === 'INTRO' && (
         <IntroScreen
           onComplete={() => {
+            setHud((prev) => ({ ...prev, screen: 'VIDEO_INTRO' }));
+          }}
+        />
+      )}
+
+      {hud.screen === 'VIDEO_INTRO' && (
+        <VideoIntroScreen
+          onComplete={() => {
             engineRef.current?.setScreenState('LOADING');
             setHud((prev) => ({ ...prev, screen: 'LOADING' }));
           }}
@@ -356,35 +365,14 @@ export default function App() {
           setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
         }}
         onSelectDrillMode={(mode: DrillMode) => engineRef.current?.setDrillMode(mode)}
-        onSetGyroMode={(mode: GyroMode) =>
-          handleUpdateControlSettings({ ...controlSettingsRef.current, gyroMode: mode })
-        }
-        onSetGyroSensitivity={(sens: number) =>
-          handleUpdateControlSettings({ ...controlSettingsRef.current, gyroSensitivity: sens })
-        }
-        onSetLookSensitivity={(sens: number) =>
-          handleUpdateControlSettings({ ...controlSettingsRef.current, lookSensitivity: sens })
-        }
-        onSetAdsSensitivity={(sens: number) =>
-          handleUpdateControlSettings({ ...controlSettingsRef.current, adsSensitivity: sens })
-        }
+        onSetGyroMode={(m: GyroMode) => handleUpdateControlSettings({ ...controlSettingsRef.current, gyroMode: m })}
+        onSetGyroSensitivity={(s: number) => handleUpdateControlSettings({ ...controlSettingsRef.current, gyroSensitivity: s })}
+        onSetLookSensitivity={(s: number) => handleUpdateControlSettings({ ...controlSettingsRef.current, lookSensitivity: s })}
+        onSetAdsSensitivity={(s: number) => handleUpdateControlSettings({ ...controlSettingsRef.current, adsSensitivity: s })}
         onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
-        onToggleHaptics={() =>
-          handleUpdateSettings({
-            ...gameSettingsRef.current,
-            vibration: !gameSettingsRef.current.vibration,
-          })
-        }
-        onToggleFullscreen={() => {
-          void engineRef.current?.toggleFullscreenLandscape();
-        }}
-        onSetFpsLimit={(fps: number) =>
-          handleUpdateSettings({
-            ...gameSettingsRef.current,
-            fpsLimit: fps as FpsLimit,
-            preset: 'CUSTOM',
-          })
-        }
+        onToggleHaptics={() => handleUpdateSettings({ ...gameSettingsRef.current, vibration: !gameSettingsRef.current.vibration })}
+        onToggleFullscreen={() => { void engineRef.current?.toggleFullscreenLandscape(); }}
+        onSetFpsLimit={(fps: number) => handleUpdateSettings({ ...gameSettingsRef.current, fpsLimit: fps as FpsLimit, preset: 'CUSTOM' })}
       />
     </main>
   );

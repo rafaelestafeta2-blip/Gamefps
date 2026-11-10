@@ -277,24 +277,12 @@ export function spawnYard5v5Bots(
       pivotGroup.add(armorMesh);
     }
 
-    let laserLine: THREE.Line | undefined;
     if (!opts.isAlly) {
       torsoMesh.userData.targetId = opts.id;
       torsoMesh.userData.hitZone = 'TORSO_A';
       headMesh.userData.targetId = opts.id;
       headMesh.userData.hitZone = 'HEAD';
       shootableMeshes.push(torsoMesh, headMesh);
-
-      const lineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 1.64, 0.12),
-        new THREE.Vector3(0, 1.4, 14),
-      ]);
-      laserLine = new THREE.Line(
-        lineGeo,
-        new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.75 })
-      );
-      laserLine.visible = false;
-      pivotGroup.add(laserLine);
     }
 
     levelGroup.add(root);
@@ -308,7 +296,6 @@ export function spawnYard5v5Bots(
       torsoMesh,
       armorMesh,
       visorMesh,
-      laserLine,
       basePosition: new THREE.Vector3(opts.x, opts.y ?? 0, opts.z),
       patrolOffset: Math.random() * Math.PI * 2,
       patrolSpeed: opts.patrolSpeed ?? 1.1,

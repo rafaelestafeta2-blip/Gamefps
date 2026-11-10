@@ -158,7 +158,9 @@ export function applyGraphicsToEngine(
   }
 
   // 3. Sombras (PCFShadowMap, mapSize e reconstrução de shadow map ao alterar)
-  const shadowsActive = effectiveShadows !== 'OFF';
+  const currentDrillMode = (engine.state as { drillMode?: string }).drillMode;
+  const shadowsActive =
+    effectiveShadows !== 'OFF' && currentDrillMode !== 'FREE_RANGE';
   if (renderer.shadowMap.enabled !== shadowsActive) {
     renderer.shadowMap.enabled = shadowsActive;
     forceAllMaterialsNeedsUpdate = true;
@@ -317,11 +319,15 @@ export function applyGraphicsToEngine(
         }
       }
 
-      // Aplica anisotropia em map, normalMap, roughnessMap, metalnessMap, aoMap e emissiveMap só quando mudar
+      // Aplica anisotropia apenas quando a textura não possui lockAnisotropy (evita listras em atlas de lightmap)
       for (let i = 0; i < PBR_TEXTURE_SLOTS.length; i++) {
         const slot = PBR_TEXTURE_SLOTS[i];
         const tex = stdMat[slot] as THREE.Texture | null | undefined;
-        if (tex && tex.anisotropy !== targetAnisotropy) {
+        if (
+          tex &&
+          !tex.userData?.lockAnisotropy &&
+          tex.anisotropy !== targetAnisotropy
+        ) {
           tex.anisotropy = targetAnisotropy;
           tex.needsUpdate = true;
         }

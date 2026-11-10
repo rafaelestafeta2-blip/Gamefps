@@ -61,6 +61,7 @@ import {
   triggerBotHitAnimation,
   updateAllBotCharacters,
 } from './botCharacterSystem';
+import { updateSmartBotNavigation } from './botNavigationSystem';
 import {
   buildStanderTiroLevel,
   loadStanderTiroMapGeometry,
@@ -185,6 +186,12 @@ export class TacticalFPSEngine {
   private sniperChamberTimer = 0;
   private sniperChamberDuration = 1.25;
   private sniperReturnToScopeAfterBolt = false;
+
+  // Premium Cinematic Player Death Camera State
+  private isPlayerDying = false;
+  private deathAnimElapsed = 0;
+  private deathSequenceDuration = 2.2;
+  private deathOnFinish: (() => void) | null = null;
 
   // Reload State Machine
   private reloadTimer = 0;
@@ -680,6 +687,41 @@ export class TacticalFPSEngine {
     const fresh = this.state.killfeed.filter((e) => now - e.timestamp < 4500);
     this.state.killfeed = [...fresh.slice(-4), entry];
     this.emitHud();
+  }
+
+  public triggerPlayerDeathSequence(
+    isHeadshot: boolean,
+    killerCallsign: string,
+    killerTeam: 'BLACKTHORN' | 'VANGUARD',
+    killerWeapon: WeaponId,
+    onFinish: () => void
+  ): void {
+    if (this.isPlayerDying) return;
+    this.isPlayerDying = true;
+    this.deathAnimElapsed = 0;
+    this.deathSequenceDuration = 2.2;
+    this.deathOnFinish = onFinish;
+    this.cameraShake = isHeadshot ? 0.048 : 0.028;
+    this.state.damageFlashAlpha = 1.0;
+
+    if (isHeadshot) {
+      soundEngine.playHeadshotDeath();
+    } else {
+      soundEngine.playImpact('TORSO');
+    }
+
+    this.registerKill(
+      killerCallsign,
+      killerTeam,
+      'VOCÊ',
+      'VANGUARD',
+      killerWeapon,
+      isHeadshot
+    );
+
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
   }
 
   public addPlayerXp(amount: number): void {
@@ -1533,6 +1575,15 @@ export class TacticalFPSEngine {
     this.state.drillMode = mode;
     this.state.health = 100;
     this.state.stamina = 100;
+    this.isPlayerDying = false;
+    this.deathAnimElapsed = 0;
+    this.deathOnFinish = null;
+    this.currentEyeHeight = 1.68;
+    this.camera.rotation.z = 0;
+    if (this.weaponRig?.root) {
+      this.weaponRig.root.position.y = 0;
+      this.weaponRig.root.rotation.x = 0;
+    }
     this.sprintExhausted = false;
     this.sprintPoseAlpha = 0;
     if (!keepMatchScore) {
@@ -2566,43 +2617,55 @@ export class TacticalFPSEngine {
       return;
     }
 
-    if (hitZone === 'ARMOR' && target.armorHealth > 0) {
-      target.armorHealth -= 34;
-      target.hitTiltVelocity = -5.5;
-      triggerBotHitAnimation(target);
-      this.fxPool.spawnImpactFX(hitPoint, hitNormal, true, false);
-      this.state.hitMarkerAlpha = 1.0;
-      this.state.hitMarkerIsCrit = false;
-      this.state.lastHitZone = 'ARMOR';
-      this.addPlayerXp(20);
+    const isSniper =
+      this.state.activeWeapon === 'SNIPER_BOLT' ||
+      this.state.activeWeapon === 'SNIPER_TACTICAL';
 
-      if (target.armorHealth <= 0 && target.armorMesh) {
-        target.armorMesh.visible = false;
+    if (hitZone === 'ARMOR' && target.armorHealth > 0) {
+      if (isSniper) {
+        // Sniper .338 Lapua / .308 AP round punches straight through armor, shattering it and continuing to lethal body damage
+        target.armorHealth = 0;
+        if (target.armorMesh) target.armorMesh.visible = false;
         soundEngine.playImpact('ARMOR_BREAK');
-        this.hitstopTimer = 0.038; // Crisp 38ms hitstop on armor shatter
       } else {
-        soundEngine.playImpact('TORSO');
+        target.armorHealth -= 34;
+        target.hitTiltVelocity = -5.5;
+        triggerBotHitAnimation(target);
+        this.fxPool.spawnImpactFX(hitPoint, hitNormal, true, false);
+        this.state.hitMarkerAlpha = 1.0;
+        this.state.hitMarkerIsCrit = false;
+        this.state.lastHitZone = 'ARMOR';
+        this.addPlayerXp(20);
+
+        if (target.armorHealth <= 0 && target.armorMesh) {
+          target.armorMesh.visible = false;
+          soundEngine.playImpact('ARMOR_BREAK');
+          this.hitstopTimer = 0.038; // Crisp 38ms hitstop on armor shatter
+        } else {
+          soundEngine.playImpact('TORSO');
+        }
+        this.recordShotTelemetry(distanceMeters, 'ARMOR', 25, velocityMs);
+        return;
       }
-      this.recordShotTelemetry(distanceMeters, 'ARMOR', 25, velocityMs);
-      return;
     }
 
     const isHead = hitZone === 'HEAD';
-    const damage = isHead ? 110 : 42;
+    // Sniper kills in 1 single shot regardless of body part (250 damage vs 100 HP)
+    const damage = isSniper ? 250 : (isHead ? 110 : 42);
     target.health -= damage;
-    target.hitTiltVelocity = isHead ? -14.0 : -7.5;
+    target.hitTiltVelocity = isSniper || isHead ? -16.0 : -7.5;
     triggerBotHitAnimation(target);
 
-    this.fxPool.spawnImpactFX(hitPoint, hitNormal, isHead, isHead);
+    this.fxPool.spawnImpactFX(hitPoint, hitNormal, isHead || isSniper, isHead || isSniper);
     this.state.hitMarkerAlpha = 1.0;
-    this.state.hitMarkerIsCrit = isHead;
+    this.state.hitMarkerIsCrit = isHead || isSniper;
 
-    if (isHead) {
-      this.state.headshots += 1;
-      this.addPlayerXp(50);
-      soundEngine.playImpact('HEADSHOT');
+    if (isHead || isSniper) {
+      if (isHead) this.state.headshots += 1;
+      this.addPlayerXp(isHead ? 50 : 40);
+      soundEngine.playImpact(isHead ? 'HEADSHOT' : 'TORSO');
       mobileHardware.vibrateHitConfirm(true);
-      this.hitstopTimer = 0.042; // Weight-scaled 42ms simulation hitstop on headshot
+      this.hitstopTimer = isSniper ? 0.052 : 0.042; // Heavy tactile hitstop on lethal sniper shot
     } else {
       this.addPlayerXp(15);
       soundEngine.playImpact('TORSO');
@@ -3281,11 +3344,22 @@ export class TacticalFPSEngine {
       const climbJump = this.keysHeld.has('Space') || this.jumpBufferTimer > 0;
       if (climbJump) {
         this.jumpBufferTimer = 0;
-        this.playerVel.y = 5.0;
+        this.playerVel.y = 3.6;
+        this.playerVel.x = -_forward.x * 2.8;
+        this.playerVel.z = -_forward.z * 2.8;
         this.isGrounded = false;
       } else if (forwardInput > 0.12) {
-        this.playerVel.y = this.pitch < -0.55 ? -4.2 : 4.8;
-        this.isGrounded = false;
+        const climbDir = this.pitch < -0.55 ? -4.2 : 4.4;
+        if (climbDir > 0 && this.playerPos.y >= activeLadder.maxY - 0.06) {
+          this.playerPos.y = activeLadder.maxY;
+          this.playerVel.y = 0;
+          this.playerVel.x = _forward.x * 3.0;
+          this.playerVel.z = _forward.z * 3.0;
+          this.isGrounded = true;
+        } else {
+          this.playerVel.y = climbDir;
+          this.isGrounded = false;
+        }
       } else if (forwardInput < -0.12) {
         this.playerVel.y = -4.5;
         this.isGrounded = false;
@@ -3295,6 +3369,10 @@ export class TacticalFPSEngine {
         this.playerVel.z *= 0.5;
       } else {
         this.playerVel.y -= 15.5 * dt;
+      }
+
+      if (activeLadder.id.startsWith('vent_') && this.playerPos.y >= 9.6) {
+        this.state.stance = 'CROUCH';
       }
     } else {
       if (this.jumpBufferTimer > 0 && this.coyoteTimer > 0) {
@@ -3318,15 +3396,16 @@ export class TacticalFPSEngine {
         ? 0.26
         : 0.34;
 
+    const currentHeight =
+      this.state.stance === 'SLIDE'
+        ? 0.90
+        : this.state.stance === 'PRONE'
+          ? 0.45
+          : this.state.stance === 'CROUCH'
+            ? 1.10
+            : 1.72;
+
     if (activeGlbCollider) {
-      const currentHeight =
-        this.state.stance === 'SLIDE'
-          ? 0.90
-          : this.state.stance === 'PRONE'
-            ? 0.45
-            : this.state.stance === 'CROUCH'
-              ? 1.10
-              : 1.72;
       const candX = this.playerPos.x + this.playerVel.x * dt;
       const candZ = this.playerPos.z + this.playerVel.z * dt;
       activeGlbCollider.resolveHorizontal(
@@ -3356,7 +3435,31 @@ export class TacticalFPSEngine {
     }
 
     const wasGrounded = this.isGrounded;
-    this.playerPos.y += this.playerVel.y * dt;
+    const prevY = this.playerPos.y;
+    let nextY = prevY + this.playerVel.y * dt;
+
+    if (activeLadder && this.playerVel.y > 0 && nextY >= activeLadder.maxY) {
+      nextY = activeLadder.maxY;
+      this.playerVel.y = 0;
+      this.playerVel.x = _forward.x * 3.0;
+      this.playerVel.z = _forward.z * 3.0;
+    }
+
+    if (activeGlbCollider && nextY > prevY) {
+      const clampedY = activeGlbCollider.clampCeilingHeight(
+        this.playerPos.x,
+        prevY,
+        nextY,
+        this.playerPos.z,
+        currentHeight
+      );
+      if (clampedY < nextY) {
+        nextY = clampedY;
+        if (this.playerVel.y > 0) this.playerVel.y = 0;
+      }
+    }
+
+    this.playerPos.y = nextY;
 
     // Find highest walkable ground underneath player
     let groundHeight = 0;
@@ -3446,6 +3549,44 @@ export class TacticalFPSEngine {
     const shakePitch = this.cameraShake > 0.0001 ? Math.sin(this.elapsedTime * 42) * this.cameraShake : 0;
     const shakeYaw = this.cameraShake > 0.0001 ? Math.cos(this.elapsedTime * 34) * this.cameraShake * 0.5 : 0;
 
+    if (this.isPlayerDying) {
+      this.deathAnimElapsed += dt;
+      const progress = Math.min(1, this.deathAnimElapsed / 1.5);
+      const easeOut = progress * (2 - progress);
+
+      // Camera collapses from normal eye height (1.68m) down to floor (0.24m)
+      const targetDeathY = THREE.MathUtils.lerp(1.68, 0.24, easeOut);
+      this.currentEyeHeight = THREE.MathUtils.damp(this.currentEyeHeight, targetDeathY, 9, dt);
+
+      // Lateral camera roll onto shoulder/floor (approx 28 degrees sideways)
+      const deathRoll = THREE.MathUtils.lerp(0, 0.48, easeOut);
+      this.camera.rotation.z = deathRoll;
+
+      // Pitch dips downwards onto the ground
+      this.pitch = THREE.MathUtils.damp(this.pitch, -0.38, 5, dt);
+
+      // Arms & weapon drop limp out of view
+      this.weaponRig.root.position.y = THREE.MathUtils.damp(this.weaponRig.root.position.y, -0.95, 8, dt);
+      this.weaponRig.root.rotation.x = THREE.MathUtils.damp(this.weaponRig.root.rotation.x, 0.32, 6, dt);
+
+      // Deep cinematic blood vignette on death
+      this.state.damageFlashAlpha = THREE.MathUtils.lerp(1.0, 0.65, Math.min(1, this.deathAnimElapsed / 1.8));
+
+      if (this.deathAnimElapsed >= this.deathSequenceDuration) {
+        this.isPlayerDying = false;
+        this.weaponRig.root.position.y = 0;
+        this.weaponRig.root.rotation.x = 0;
+        this.camera.rotation.z = 0;
+        this.currentEyeHeight = 1.68;
+        const cb = this.deathOnFinish;
+        this.deathOnFinish = null;
+        cb?.();
+      }
+    } else {
+      const slideRoll = this.slideTimer > 0 ? -0.08 : 0;
+      this.camera.rotation.z = -this.leanCurrent * 0.24 + slideRoll;
+    }
+
     this.yawObject.position.set(
       leanWorldX,
       this.playerPos.y + this.currentEyeHeight + this.landingDip,
@@ -3454,8 +3595,6 @@ export class TacticalFPSEngine {
     this.yawObject.rotation.y = this.yaw + shakeYaw;
     this.pitchObject.rotation.x = this.pitch + shakePitch;
 
-    const slideRoll = this.slideTimer > 0 ? -0.08 : 0;
-    this.camera.rotation.z = -this.leanCurrent * 0.24 + slideRoll;
     this.cameraShake = THREE.MathUtils.damp(this.cameraShake, 0, 24, dt);
   }
 
@@ -3588,7 +3727,10 @@ export class TacticalFPSEngine {
         this.camera.getWorldPosition(_rayOrigin);
         this.camera.getWorldDirection(_rayDir);
         this.raycaster.set(_rayOrigin, _rayDir);
-        this.raycaster.far = 65.0;
+        this.raycaster.far =
+          this.state.laserActive && this.state.activeWeapon !== 'KNIFE_TACTICAL'
+            ? 45.0
+            : 7.5;
         this.cachedAimHits = this.raycaster.intersectObjects(this.shootableMeshes, false);
       }
       const aimHits = this.cachedAimHits;
@@ -3886,8 +4028,8 @@ export class TacticalFPSEngine {
     for (let i = 0; i < this.targets.length; i++) {
       const t = this.targets[i];
 
-      // 1. Patrol Motion on Active Targets
-      if (!t.isDown && t.patrolAxis !== 'NONE' && t.patrolSpeed > 0) {
+      // 1. Patrol Motion on Active Range Targets
+      if (t.type !== 'COMBAT_BOT' && !t.isDown && t.patrolAxis !== 'NONE' && t.patrolSpeed > 0) {
         const offset =
           Math.sin(this.elapsedTime * t.patrolSpeed + t.patrolOffset) *
           t.patrolRange;
@@ -3929,15 +4071,12 @@ export class TacticalFPSEngine {
         t.pivotGroup.rotation.x = t.hitTiltAngle;
       }
 
-      // 3. Autonomous Combat Bot Telegraph & Return Fire (in TACTICAL_WAVE, KILLHOUSE_BLITZ, or YARD_BOMB_5V5)
+      // 3. Autonomous Combat Bot Return Fire (in TACTICAL_WAVE & KILLHOUSE_BLITZ)
       if (
         t.canShootBack &&
         !(t as YardBotEntity).isAlly &&
         (this.state.drillMode === 'TACTICAL_WAVE' ||
-          this.state.drillMode === 'KILLHOUSE_BLITZ' ||
-          this.state.drillMode === 'YARD_BOMB_5V5' ||
-          this.state.drillMode === 'DUST2_BOMB_5V5' ||
-          this.state.drillMode === 'ASSAULT_BOMB_5V5')
+          this.state.drillMode === 'KILLHOUSE_BLITZ')
       ) {
         const distToPlayer = t.root.position.distanceTo(_worldPos);
         if (distToPlayer < 34) {
@@ -3953,33 +4092,16 @@ export class TacticalFPSEngine {
             );
             _targetToPlayer.subVectors(_worldPos, _rayOrigin).normalize();
 
-            const activeGlbCollider =
-              this.state.drillMode === 'DUST2_BOMB_5V5'
-                ? this.dust2LevelData.collider
-                : this.state.drillMode === 'ASSAULT_BOMB_5V5'
-                  ? this.assaultLevelData.collider
-                  : null;
-
-            let envBlocked = false;
-            if (activeGlbCollider && activeGlbCollider.ready) {
-              const hitDist = activeGlbCollider.raycastDistance(
-                _rayOrigin,
-                _targetToPlayer,
-                distToPlayer - 0.5
-              );
-              envBlocked = hitDist !== null;
-            } else {
-              this.raycaster.set(_rayOrigin, _targetToPlayer);
-              this.raycaster.far = distToPlayer;
-              const envHits = this.raycaster.intersectObjects(
-                this.shootableMeshes,
-                false
-              );
-              envBlocked =
-                envHits.length > 0 &&
-                Boolean(envHits[0].object.userData.isEnvironment) &&
-                envHits[0].distance < distToPlayer - 0.5;
-            }
+            this.raycaster.set(_rayOrigin, _targetToPlayer);
+            this.raycaster.far = distToPlayer;
+            const envHits = this.raycaster.intersectObjects(
+              this.shootableMeshes,
+              false
+            );
+            const envBlocked =
+              envHits.length > 0 &&
+              Boolean(envHits[0].object.userData.isEnvironment) &&
+              envHits[0].distance < distToPlayer - 0.5;
 
             t.root.userData.blockedByCover =
               envBlocked ||
@@ -4008,7 +4130,6 @@ export class TacticalFPSEngine {
               if (t.cooldownTimer <= 0) {
                 t.isTelegraphing = true;
                 t.windupTimer = 1.15; // Clear 1.15s visual + audio windup telegraph
-                if (t.laserLine) t.laserLine.visible = true;
                 soundEngine.playEnemyTelegraph();
               }
             } else {
@@ -4016,10 +4137,11 @@ export class TacticalFPSEngine {
               if (t.windupTimer <= 0) {
                 t.isTelegraphing = false;
                 t.cooldownTimer = 2.1 + Math.random() * 1.4;
-                if (t.laserLine) t.laserLine.visible = false;
 
-                // Bot fires tracer at player!
+                // Bot fires tracer at player with real weapon sound!
                 triggerBotFireAnimation(t);
+                const botEntity = t as YardBotEntity;
+                soundEngine.playGunshot(false, false, botEntity.weaponId || 'AK47_RIFLE');
                 this.fxPool.spawnTracer(_rayOrigin, _worldPos, 0xef4444);
                 const isHeadshotHit = Math.random() < 0.35;
                 if (isHeadshotHit) {
@@ -4035,53 +4157,82 @@ export class TacticalFPSEngine {
                 this.cameraShake = isHeadshotHit ? 0.024 : 0.012;
 
                 if (this.state.health <= 0) {
-                  // O som de knockdown de headshot toca exclusivamente se a morte foi causada por headshot
-                  if (isHeadshotHit) {
-                    soundEngine.playHeadshotDeath();
-                  }
                   const botEntity = t as YardBotEntity;
-                  this.registerKill(
+                  this.triggerPlayerDeathSequence(
+                    isHeadshotHit,
                     botEntity.callsign || 'KRAKEN-BT',
                     'BLACKTHORN',
-                    'VOCÊ',
-                    'VANGUARD',
                     botEntity.weaponId || 'AK47_RIFLE',
-                    isHeadshotHit
-                  );
-                  if (
-                    this.state.drillMode === 'YARD_BOMB_5V5' ||
-                    this.state.drillMode === 'DUST2_BOMB_5V5' ||
-                    this.state.drillMode === 'ASSAULT_BOMB_5V5'
-                  ) {
-                    this.state.health = 100;
-                    this.yardBombSystem.finishCurrentRound(
-                      'BLACKTHORN',
-                      isHeadshotHit
-                        ? 'OPERADOR VANGUARD ELIMINADO COM HEADSHOT CRÍTICO!'
-                        : 'OPERADOR VANGUARD NEUTRALIZADO EM COMBATE!',
-                      (xp, cash) => {
-                        this.addPlayerXp(xp);
-                        addPlayerCash(cash);
-                        this.state.score += xp;
-                      }
-                    );
-                    this.state.yardBomb = { ...this.yardBombSystem.info };
-                  } else {
-                    this.state.screen = 'GAME_OVER';
-                    if (document.pointerLockElement) {
-                      document.exitPointerLock();
+                    () => {
+                      this.state.screen = 'GAME_OVER';
+                      this.emitHud();
                     }
-                  }
+                  );
                 }
                 this.emitHud();
               }
             }
           } else {
             t.isTelegraphing = false;
-            if (t.laserLine) t.laserLine.visible = false;
           }
         }
       }
+    }
+
+    // 3.5. Sistema Tático de Navegação Inteligente nos Modos 5v5 (Yard, Dust2, Assault)
+    const isBombMode =
+      this.state.drillMode === 'YARD_BOMB_5V5' ||
+      this.state.drillMode === 'DUST2_BOMB_5V5' ||
+      this.state.drillMode === 'ASSAULT_BOMB_5V5';
+
+    if (isBombMode && this.targets.length > 0) {
+      updateSmartBotNavigation(
+        this.targets as YardBotEntity[],
+        this.state.drillMode,
+        _worldPos,
+        dt,
+        this.yardBombSystem,
+        this.fxPool,
+        this.grenadeSystem,
+        (dmg, isHeadshot, bot) => {
+          if (isHeadshot) {
+            soundEngine.playImpact('HEADSHOT');
+          } else {
+            soundEngine.playImpact('TORSO');
+          }
+          mobileHardware.vibrateDamage();
+          this.state.health = Math.max(0, this.state.health - dmg);
+          this.state.damageFlashAlpha = isHeadshot ? 0.95 : 0.75;
+          this.cameraShake = isHeadshot ? 0.024 : 0.012;
+
+          if (this.state.health <= 0) {
+            this.triggerPlayerDeathSequence(
+              isHeadshot,
+              bot.callsign || 'KRAKEN-BT',
+              'BLACKTHORN',
+              bot.weaponId || 'AK47_RIFLE',
+              () => {
+                this.state.health = 100;
+                this.yardBombSystem.finishCurrentRound(
+                  'BLACKTHORN',
+                  isHeadshot
+                    ? 'OPERADOR VANGUARD ELIMINADO COM HEADSHOT CRÍTICO!'
+                    : 'OPERADOR VANGUARD NEUTRALIZADO EM COMBATE!',
+                  (xp, cash) => {
+                    this.addPlayerXp(xp);
+                    addPlayerCash(cash);
+                    this.state.score += xp;
+                  }
+                );
+                this.state.yardBomb = { ...this.yardBombSystem.info };
+                this.emitHud();
+              }
+            );
+          }
+          this.emitHud();
+        },
+        this.colliders
+      );
     }
 
     // 4. Update Pro.Rifle.Pack.glb 3D Skeletal Bot Mixers & State Machines

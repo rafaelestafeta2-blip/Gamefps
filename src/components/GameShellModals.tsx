@@ -69,7 +69,13 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
     onUpdateControlSettings?.(next);
   };
 
-  if (hud.screen === 'PLAYING' || hud.screen === 'INTRO' || hud.screen === 'LOADING' || hud.screen === 'MAIN_MENU') {
+  if (
+    hud.screen === 'PLAYING' ||
+    hud.screen === 'INTRO' ||
+    hud.screen === 'VIDEO_INTRO' ||
+    hud.screen === 'LOADING' ||
+    hud.screen === 'MAIN_MENU'
+  ) {
     return null;
   }
 

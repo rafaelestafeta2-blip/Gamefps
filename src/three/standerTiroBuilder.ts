@@ -64,8 +64,7 @@ function widenStanderGlbSideDoorway(mesh: THREE.Mesh): void {
 
 /**
  * Builds the Stander de Tiro (`ImageToStl.com_Stander_tiro.glb`) level bundle,
- * including dark tactical range lighting, hanging paper bullseye target sheets,
- * connected Obstacle Course Hall (Jump, Crouch, Slide), and collision boxes.
+ * optimized for 60 FPS mobile performance (zero PointLight shader loops, shared geometry).
  */
 export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle {
   const levelGroup = new THREE.Group();
@@ -95,7 +94,6 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
   };
 
   // 1. Room Perimeter Walls & Firing Line Counter Colliders
-  // Left wall (Z = -1.37) split at X = [-8.75, -7.00] to open the doorway to the Obstacle Course Hall
   addCollider(-12.2, -8.75, 0, 3.2, -1.65, -1.22);
   addCollider(-7.0, 26.2, 0, 3.2, -1.65, -1.22);
 
@@ -106,19 +104,19 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
   // Firing Line Counter across the 5 Shooting Booths (X = -4.52 to -4.18)
   addCollider(-4.52, -4.18, 0, 2.6, -1.35, 6.8);
 
-  // 6 Thin Booth Dividers (allowing the player to step into any of the 5 shooting booths!)
+  // 6 Thin Booth Dividers
   const boothDividerZs = [-0.97, 0.53, 2.02, 3.52, 5.02, 6.54];
   boothDividerZs.forEach((zPos) => {
     addCollider(-5.08, -4.2, 0, 2.4, zPos - 0.05, zPos + 0.05);
   });
 
-  // Prep Room Tables (Table04_22 & Table04_30) & Glass Partition (Glass_42) with wide open walkways
+  // Prep Room Tables & Glass Partition
   addCollider(-8.88, -7.9, 0, 0.85, 1.48, 3.94);
   addCollider(-8.88, -7.9, 0, 0.85, 4.15, 6.6);
   addCollider(-9.08, -8.92, 0, 2.3, 1.32, 4.12);
   addCollider(-10.1, -9.1, 0, 0.85, 1.42, 3.9);
 
-  // Invisible raycast floor & backstop so bullet impacts and grenade bounces always register cleanly
+  // Invisible raycast floor & backstop
   const floorRayMesh = new THREE.Mesh(
     new THREE.PlaneGeometry(40, 10),
     new THREE.MeshBasicMaterial({ visible: false })
@@ -129,20 +127,22 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
   levelGroup.add(floorRayMesh);
   shootableMeshes.push(floorRayMesh);
 
-  // 2. Indoor Range Tactical Lighting (Crisp booth lighting + downrange target illumination)
-  if (!isSoftwareGl) {
-    const boothLight = new THREE.PointLight(0xfef3c7, 2.3, 15, 1.3);
-    boothLight.position.set(-5.2, 2.65, 2.8);
-    levelGroup.add(boothLight);
+  // 2. Iluminação Tática Premium com Contraste Realista (Sem saturação branca e com profundidade de sombras)
+  const rangeHemiFill = new THREE.HemisphereLight(0x334155, 0x0f172a, 0.75);
+  rangeHemiFill.position.set(0, 3.5, 0);
+  levelGroup.add(rangeHemiFill);
 
-    const midRangeLight = new THREE.PointLight(0xe0f2fe, 2.4, 18, 1.25);
-    midRangeLight.position.set(4.5, 2.75, 2.8);
-    levelGroup.add(midRangeLight);
+  // Foco linear quente (3500K) sobre as bancadas e baias de tiro
+  const overheadLight = new THREE.DirectionalLight(0xffedd5, 1.15);
+  overheadLight.position.set(-6, 3.8, 3.0);
+  overheadLight.castShadow = false;
+  levelGroup.add(overheadLight);
 
-    const deepRangeLight = new THREE.PointLight(0xfef3c7, 2.6, 20, 1.25);
-    deepRangeLight.position.set(16.5, 2.75, 2.8);
-    levelGroup.add(deepRangeLight);
-  }
+  // Iluminação direcionada suave ao longo das raias até os alvos
+  const downrangeLight = new THREE.DirectionalLight(0x94a3b8, 0.7);
+  downrangeLight.position.set(12, 3.8, 3.0);
+  downrangeLight.castShadow = false;
+  levelGroup.add(downrangeLight);
 
   // 3. Populate Hanging Paper Bullseye Targets (Static + Moving) & Quick Armory Rack
   populateStanderTiroTargetsAndArmory(
@@ -173,13 +173,12 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
 }
 
 /**
- * Loads `/models/maps/stander_tiro.glb` (with GitHub raw fallback), transforms it into
- * meters aligned with the 5 shooting lanes, applies dark acoustic tactical wall/floor
- * textures, opens the side doorway into the Obstacle Hall, and tags weapon plaques.
+ * Loads `/models/maps/stander_tiro.glb` (with GitHub raw fallback), hides the 13,860-vertex
+ * static ceiling rails (`targ1_46`), applies shared fast tactical materials, and tags weapon plaques.
  */
 export async function loadStanderTiroMapGeometry(
   bundle: StanderTiroBundle,
-  isSoftwareGl: boolean,
+  _isSoftwareGl: boolean,
   loadingManager?: THREE.LoadingManager
 ): Promise<void> {
   if (bundle.isLoaded) return;
@@ -210,14 +209,11 @@ export async function loadStanderTiroMapGeometry(
     dracoLoader.dispose();
   }
 
-  // Cancel Node0's 0.01 centimeter scale so 1 unit = 1 meter, rotate 180 deg so downrange is +X,
-  // and align floor Y=0.19m to Y=0.00m and Lane #3 to Z=2.80m.
   gltfScene.scale.setScalar(100);
   gltfScene.rotation.y = Math.PI;
   gltfScene.position.set(4.9, -0.19, -0.26);
   gltfScene.updateMatrixWorld(true);
 
-  // Replace washed-out white walls & floors with dark tactical acoustic slate & vulcanized rubber
   applyDarkTacticalMaterialsToStanderGlb(gltfScene);
 
   const wallPlaqueWeapons: Record<string, WeaponId> = {
@@ -238,10 +234,10 @@ export async function loadStanderTiroMapGeometry(
     if (!(child as THREE.Mesh).isMesh) return;
     const mesh = child as THREE.Mesh;
     mesh.castShadow = false;
-    mesh.receiveShadow = !isSoftwareGl;
+    mesh.receiveShadow = false;
 
-    // Open interior doors (`Door02*`) and doorway post (`Door02Post_25`) to give open access to the Obstacle Hall
-    if (mesh.name.startsWith('Door02')) {
+    // Hide interior doors (`Door02*`) and the heavy 13,860-vertex static target rail mesh (`targ1_46`)
+    if (mesh.name.startsWith('Door02') || mesh.name.startsWith('targ1')) {
       mesh.visible = false;
       return;
     }

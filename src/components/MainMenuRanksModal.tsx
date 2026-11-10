@@ -24,7 +24,7 @@ export const MainMenuRanksModal: React.FC<MainMenuRanksModalProps> = ({
           <WarfaceRankIcon level={currentRank.level} className="w-7 h-7" />
           <div>
             <h3 className="font-display font-black text-sm sm:text-base text-amber-400 uppercase tracking-wider flex items-center gap-2">
-              <span>PROGRESSÃO DE PATENTES WARFACE</span>
+              <span>PROGRESSÃO DE PATENTES · KINETIC</span>
               <span className="text-[10px] font-mono bg-amber-500/20 text-amber-300 px-1.5 py-0.2 rounded border border-amber-500/30">
                 70 NÍVEIS
               </span>

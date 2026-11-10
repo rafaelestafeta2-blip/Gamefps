@@ -1056,6 +1056,50 @@ export class TacticalGrenadeSystem {
     });
   }
 
+  public spawnBotGrenade(
+    origin: THREE.Vector3,
+    velocity: THREE.Vector3,
+    type: GrenadeType
+  ): void {
+    const projGroup = new THREE.Group();
+    if (type === 'FRAG') {
+      if (this.fragTemplate) {
+        projGroup.add(this.fragTemplate.clone(true));
+      } else {
+        projGroup.add(this.buildProceduralFragFallback());
+      }
+    } else {
+      const template = this.m18SmokeTemplate || this.s13SmokeTemplate;
+      if (template) {
+        projGroup.add(template.clone(true));
+      } else {
+        projGroup.add(this.buildProceduralSmokeFallback());
+      }
+    }
+
+    projGroup.position.copy(origin);
+    this.scene.add(projGroup);
+
+    const angVel = new THREE.Vector3(
+      7.5 + Math.random() * 4,
+      (Math.random() - 0.5) * 5,
+      (Math.random() - 0.5) * 5
+    );
+
+    this.projectiles.push({
+      type,
+      group: projGroup,
+      vel: velocity.clone(),
+      angVel,
+      age: 0,
+      fuseTime: type === 'FRAG' ? 2.05 : 1.35,
+      detonated: false,
+      smokeCloudSpawned: false,
+      removeAge: type === 'FRAG' ? 2.1 : 26.5,
+      bounces: 0,
+    });
+  }
+
   private spawnExplosion(pos: THREE.Vector3): void {
     soundEngine.playGrenadeExplosion();
 

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { soundEngine } from '../audio/soundEngine';
+import { preloadProRifleBotCharacter } from './botCharacterSystem';
 
 export interface PreloadProgressCallback {
   (progressPercent: number, statusLabel: string): void;
@@ -33,6 +34,7 @@ export class AssetPreloader {
     };
 
     report(6, 'INICIALIZANDO CONTEXTO WEBGL2 E THREE.LOADINGMANAGER DO LOBBY...');
+    void preloadProRifleBotCharacter();
 
     // 1. Carrega ícones de classes e artes de UI usando THREE.LoadingManager real (6% -> 40%)
     await new Promise<void>((resolve) => {

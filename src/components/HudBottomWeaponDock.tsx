@@ -262,18 +262,34 @@ export const HudBottomWeaponDock: React.FC<HudBottomWeaponDockProps> = ({
         </button>
       </div>
 
-      {/* Bottom Sleek HP & Reload Progress Bar */}
-      <div className="w-64 sm:w-76 h-3 bg-black/70 border border-white/25 px-1.5 flex items-center gap-1.5">
-        <div className="flex-1 h-1.5 bg-white/15 overflow-hidden">
+      {/* Bottom Military Vitality (HP) & Reload Progress Bar */}
+      <div className="w-72 sm:w-84 h-5 bg-black/85 border border-white/20 px-2 flex items-center gap-2 shadow-lg rounded-sm">
+        <div className="flex items-center gap-1">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" className={hud.health < 35 ? 'text-red-500 animate-pulse' : hud.health < 65 ? 'text-amber-400' : 'text-emerald-400'}>
+            <path d="M19 10.5h-5.5V5c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v5.5H5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h5.5V19c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-5.5H19c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z" />
+          </svg>
+          <span className={`text-[10px] font-mono font-black tabular-nums tracking-tighter ${hud.health < 35 ? 'text-red-400 animate-pulse' : hud.health < 65 ? 'text-amber-300' : 'text-emerald-300'}`}>
+            {Math.round(hud.health)}
+          </span>
+        </div>
+        <div className="flex-1 h-2 bg-white/10 rounded-xs overflow-hidden relative border border-white/10">
           <div
-            className="h-full bg-white transition-all duration-150"
-            style={{ width: `${hud.health}%` }}
+            className={`h-full transition-all duration-200 ${
+              hud.health < 35
+                ? 'bg-gradient-to-r from-red-600 to-rose-500 animate-pulse'
+                : hud.health < 65
+                  ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
+                  : 'bg-gradient-to-r from-emerald-500 to-teal-400'
+            }`}
+            style={{ width: `${Math.max(0, Math.min(100, hud.health))}%` }}
           />
+          {/* Subtle tactical tick mark at 50% */}
+          <div className="absolute top-0 bottom-0 left-1/2 w-px bg-black/40 pointer-events-none" />
         </div>
         {hud.reloadPhase !== 'IDLE' && (
-          <div className="w-14 h-1.5 bg-amber-500/25 overflow-hidden">
+          <div className="w-16 h-2 bg-amber-500/20 border border-amber-500/30 rounded-xs overflow-hidden">
             <div
-              className="h-full bg-amber-400 transition-all duration-75"
+              className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-75"
               style={{ width: `${Math.round(hud.reloadProgress * 100)}%` }}
             />
           </div>

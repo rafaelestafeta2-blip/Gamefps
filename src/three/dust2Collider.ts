@@ -73,9 +73,7 @@ export class Dust2TriangleCollider {
       if (child.userData.targetId || child.userData.ignoreCollider) return;
 
       const geom = child.geometry as THREE.BufferGeometry;
-      if (!geom.boundingBox) {
-        geom.computeBoundingBox();
-      }
+      if (!geom.boundingBox) geom.computeBoundingBox();
       if (geom.boundingBox) {
         const worldBox = geom.boundingBox.clone().applyMatrix4(child.matrixWorld);
         this.boundingBoxes.push(worldBox);
@@ -116,10 +114,14 @@ export class Dust2TriangleCollider {
         const minZ = Math.min(a.z, b.z, c.z);
         const maxZ = Math.max(a.z, b.z, c.z);
 
-        // Skip tiny 3D ladder rungs & thin ladder side-rails inside ladder zones so they never block climbing
         const spanX = maxX - minX;
         const spanZ = maxZ - minZ;
-        if (area < 0.26 && spanX < 1.05 && spanZ < 1.05 && this.isBoxInLadderZone(minX, maxX, minY, maxY, minZ, maxZ)) {
+        if (
+          area < 0.26 &&
+          spanX < 1.05 &&
+          spanZ < 1.05 &&
+          this.isBoxInLadderZone(minX, maxX, minY, maxY, minZ, maxZ)
+        ) {
           continue;
         }
 
@@ -213,7 +215,7 @@ export class Dust2TriangleCollider {
         z >= l.minZ &&
         z <= l.maxZ &&
         yBottom >= l.minY - 0.5 &&
-        yBottom <= l.maxY + 0.35
+        yBottom <= l.maxY + 0.08
       ) {
         return l;
       }
@@ -223,6 +225,8 @@ export class Dust2TriangleCollider {
 
   /**
    * Computes exact barycentric Y height on floor/ramp/stair triangles under (x, z).
+   * Ignores downward-facing ceiling triangles (`normal.y < -0.45`) above feet so climbing
+   * near a ceiling never snaps the player onto the roof of the map.
    */
   public getGroundHeight(x: number, yBottom: number, z: number): number {
     if (!this.ready) return yBottom;
@@ -244,12 +248,16 @@ export class Dust2TriangleCollider {
       const yOnTri = this.sampleTriangleY(t, x, z);
       if (yOnTri === null) continue;
 
+      // Never treat a downward-facing ceiling above the player's feet as a step-up floor
+      if (t.normal.y < -0.45 && yOnTri > yBottom + 0.08) {
+        continue;
+      }
+
       if (yOnTri < fallbackLowestY) {
         fallbackLowestY = yOnTri;
       }
 
-      // Walkable floor or step/ramp up to 0.56m above current feet
-      if (yOnTri <= yBottom + 0.56 && yOnTri > bestY) {
+      if (yOnTri <= yBottom + 0.54 && yOnTri > bestY) {
         bestY = yOnTri;
       }
     }
@@ -260,8 +268,37 @@ export class Dust2TriangleCollider {
   }
 
   /**
-   * Checks if there is a low ceiling / air vent duct roof directly above the player.
+   * Clamps upward vertical motion (`nextY > prevY`) so the player's head (`nextY + playerHeight`)
+   * never clips upward through a ceiling or the skybox roof.
    */
+  public clampCeilingHeight(
+    x: number,
+    prevY: number,
+    nextY: number,
+    z: number,
+    playerHeight: number
+  ): number {
+    if (!this.ready || nextY <= prevY) return nextY;
+    const cx = Math.floor(x / this.cellSize);
+    const cz = Math.floor(z / this.cellSize);
+    const bucket = this.floorGrid.get(this.cellKey(cx, cz));
+    if (!bucket) return nextY;
+
+    let clampedY = nextY;
+    for (let i = 0; i < bucket.length; i++) {
+      const t = bucket[i];
+      if (t.normal.y > -0.45) continue;
+      if (x < t.minX || x > t.maxX || z < t.minZ || z > t.maxZ) continue;
+      const yOnTri = this.sampleTriangleY(t, x, z);
+      if (yOnTri === null) continue;
+
+      if (yOnTri >= prevY + 0.85 && clampedY + playerHeight > yOnTri - 0.04) {
+        clampedY = Math.min(clampedY, Math.max(prevY, yOnTri - playerHeight - 0.04));
+      }
+    }
+    return clampedY;
+  }
+
   public hasLowCeiling(x: number, yBottom: number, z: number): boolean {
     if (!this.ready) return false;
     const cx = Math.floor(x / this.cellSize);
@@ -281,9 +318,6 @@ export class Dust2TriangleCollider {
     return false;
   }
 
-  /**
-   * Resolves horizontal cylinder-vs-triangle wall collisions with smooth wall sliding.
-   */
   public resolveHorizontal(
     nextX: number,
     nextZ: number,
@@ -307,7 +341,6 @@ export class Dust2TriangleCollider {
       return collided;
     }
 
-    // Step-up tolerance (0.54m) and 1.52m max standing head check so 1.60m CS archways/cars/vents don't snag
     const waistMinY = yBottom + 0.54;
     const headMaxY = yBottom + Math.min(playerHeight - 0.2, 1.5);
     const midY = (waistMinY + headMaxY) * 0.5;
@@ -319,7 +352,7 @@ export class Dust2TriangleCollider {
     const minCx = Math.floor((rx - radius - 0.2) / this.cellSize);
     const maxCx = Math.floor((rx + radius + 0.2) / this.cellSize);
     const minCz = Math.floor((rz - radius - 0.2) / this.cellSize);
-    const maxCz = Math.floor((rz + radius - 0.2) / this.cellSize);
+    const maxCz = Math.floor((rz + radius + 0.2) / this.cellSize);
 
     for (let iter = 0; iter < 2; iter++) {
       for (let cx = minCx; cx <= maxCx; cx++) {
@@ -348,8 +381,7 @@ export class Dust2TriangleCollider {
               _pt.set(rx, sy, rz);
               _tri.closestPointToPoint(_pt, _closest);
 
-              const dy = Math.abs(_closest.y - sy);
-              if (dy > 0.28) continue;
+              if (Math.abs(_closest.y - sy) > 0.28) continue;
 
               const dx = rx - _closest.x;
               const dz = rz - _closest.z;
@@ -372,10 +404,6 @@ export class Dust2TriangleCollider {
     return collided;
   }
 
-  /**
-   * Ultra-fast spatial-cell raycast for wall-tuck, PEQ laser, and bot LOS checks.
-   * Avoids testing 10,100+ triangles on mobile CPUs.
-   */
   public raycastDistance(
     origin: THREE.Vector3,
     dir: THREE.Vector3,
@@ -403,8 +431,7 @@ export class Dust2TriangleCollider {
         for (let i = 0; i < walls.length; i++) {
           const w = walls[i];
           if (py + step < w.minY || py - step > w.maxY) continue;
-          const hit = _ray.intersectTriangle(w.a, w.b, w.c, false, _hitPt);
-          if (hit) {
+          if (_ray.intersectTriangle(w.a, w.b, w.c, false, _hitPt)) {
             const dist = origin.distanceTo(_hitPt);
             if (dist <= maxDist && dist < closestDist) closestDist = dist;
           }
@@ -415,8 +442,7 @@ export class Dust2TriangleCollider {
         for (let i = 0; i < floors.length; i++) {
           const f = floors[i];
           if (py + step < f.minY || py - step > f.maxY) continue;
-          const hit = _ray.intersectTriangle(f.a, f.b, f.c, false, _hitPt);
-          if (hit) {
+          if (_ray.intersectTriangle(f.a, f.b, f.c, false, _hitPt)) {
             const dist = origin.distanceTo(_hitPt);
             if (dist <= maxDist && dist < closestDist) closestDist = dist;
           }
@@ -428,18 +454,11 @@ export class Dust2TriangleCollider {
   }
 
   private sampleTriangleY(t: Dust2TriEntry, x: number, z: number): number | null {
-    const x0 = t.a.x;
-    const z0 = t.a.z;
-    const x1 = t.b.x;
-    const z1 = t.b.z;
-    const x2 = t.c.x;
-    const z2 = t.c.z;
-
-    const denom = (z1 - z2) * (x0 - x2) + (x2 - x1) * (z0 - z2);
+    const denom = (t.b.z - t.c.z) * (t.a.x - t.c.x) + (t.c.x - t.b.x) * (t.a.z - t.c.z);
     if (Math.abs(denom) < 1e-6) return null;
 
-    const u = ((z1 - z2) * (x - x2) + (x2 - x1) * (z - z2)) / denom;
-    const v = ((z2 - z0) * (x - x2) + (x0 - x2) * (z - z2)) / denom;
+    const u = ((t.b.z - t.c.z) * (x - t.c.x) + (t.c.x - t.b.x) * (z - t.c.z)) / denom;
+    const v = ((t.c.z - t.a.z) * (x - t.c.x) + (t.a.x - t.c.x) * (z - t.c.z)) / denom;
     const w = 1 - u - v;
 
     if (u >= -0.025 && v >= -0.025 && w >= -0.025) {

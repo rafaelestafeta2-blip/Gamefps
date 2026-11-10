@@ -68,11 +68,18 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
 
   return (
     <>
-      {/* Damage Vignette Flash */}
-      {hud.damageFlashAlpha > 0.01 && (
+      {/* Damage Vignette Flash & Critical Low Health Pulsing Blood Fringe */}
+      {(hud.damageFlashAlpha > 0.01 || hud.health < 35) && (
         <div
-          className="fixed inset-0 pointer-events-none z-15 border-[16px] border-red-600/60"
-          style={{ opacity: hud.damageFlashAlpha }}
+          className={`fixed inset-0 pointer-events-none z-15 transition-opacity ${
+            hud.health < 35 ? 'animate-pulse bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(220,38,38,0.38)_100%)]' : ''
+          }`}
+          style={{
+            boxShadow: hud.damageFlashAlpha > 0.01
+              ? `inset 0 0 ${Math.round(hud.damageFlashAlpha * 60 + 24)}px rgba(239, 68, 68, ${Math.min(0.95, hud.damageFlashAlpha)})`
+              : 'inset 0 0 50px rgba(220, 38, 38, 0.45)',
+            opacity: Math.max(hud.damageFlashAlpha, hud.health < 35 ? 0.85 : 0),
+          }}
         />
       )}
 

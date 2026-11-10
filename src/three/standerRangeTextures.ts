@@ -11,78 +11,112 @@ export interface StanderDarkTextures {
 
 let cachedTextures: StanderDarkTextures | null = null;
 
+interface SharedStanderMaterials {
+  lightLum: THREE.MeshBasicMaterial;
+  glass: THREE.MeshBasicMaterial;
+  decalLine: THREE.MeshBasicMaterial;
+  floorCeil: THREE.MeshLambertMaterial;
+  wall: THREE.MeshLambertMaterial;
+  wood: THREE.MeshLambertMaterial;
+  plasticBlack: THREE.MeshLambertMaterial;
+}
+
+let sharedMats: SharedStanderMaterials | null = null;
+
 /**
- * Generates dark, high-contrast PBR textures for the Stander de Tiro (.glb) and
- * the connected Tactical Obstacle & Parkour Hall:
- * - Dark charcoal acoustic baffle walls with amber tactical trim
- * - Dark vulcanized ballistic rubber floor tiles with subtle grid/tread
- * - Dark industrial steel ceiling baffles
- * - High-contrast yellow/black hazard stripes for jump/crouch/slide obstacles
+ * Texturas premium de estande de tiro tático moderno (padrão Sig Sauer Academy / John Wick Continental):
+ * - Painéis acústicos antirricochete em carbono grafite escuro com fendas de absorção sonora
+ * - Piso de borracha vulcanizada antiderrapante com demarcações táticas em amarelo ouro balístico
+ * - Teto modular industrial em tungstênio fosco sem saturações estranhas
  */
 export function getStanderDarkRangeTextures(): StanderDarkTextures {
   if (cachedTextures) return cachedTextures;
 
-  // 1. Dark Acoustic Baffle Wall Texture (Charcoal Slate + Soundproofing Pyramid Ribs + Amber Stripe)
+  // 1. Parede: Painéis Acústicos Antirricochete de Alta Performance em Carbono Tungstênio
   const wallCanvas = document.createElement('canvas');
   wallCanvas.width = 512;
   wallCanvas.height = 512;
   const wCtx = wallCanvas.getContext('2d')!;
 
-  wCtx.fillStyle = '#151922';
+  // Base em carbono grafite escuro premium (sem cinza lavado)
+  wCtx.fillStyle = '#181d24';
   wCtx.fillRect(0, 0, 512, 512);
 
-  // Horizontal acoustic slate panels & dark mortar grooves
-  for (let y = 0; y < 512; y += 32) {
-    wCtx.fillStyle = (y / 32) % 2 === 0 ? '#181d27' : '#12161e';
-    wCtx.fillRect(0, y, 512, 30);
-    wCtx.fillStyle = '#090b10';
-    wCtx.fillRect(0, y + 30, 512, 2);
+  // Cunha acústica antirricochete com chanfro 3D profundo
+  for (let y = 0; y < 512; y += 48) {
+    // Face superior iluminada
+    wCtx.fillStyle = (y / 48) % 2 === 0 ? '#262d38' : '#202630';
+    wCtx.fillRect(0, y, 512, 40);
+    // Chanfro de sombra profunda
+    wCtx.fillStyle = '#0f1318';
+    wCtx.fillRect(0, y + 40, 512, 8);
+    // Borda reflexiva superior
+    wCtx.fillStyle = '#374151';
+    wCtx.fillRect(0, y, 512, 2);
   }
 
-  // Acoustic wedge micro-pattern inside panels
-  for (let y = 0; y < 512; y += 16) {
-    for (let x = 0; x < 512; x += 16) {
-      wCtx.fillStyle =
-        (x + y) % 32 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.18)';
-      wCtx.fillRect(x + 2, y + 2, 12, 12);
-    }
-  }
+  // Divisórias verticais em alumínio anodizado preto fosco
+  [0, 256].forEach((x) => {
+    wCtx.fillStyle = '#0b0e12';
+    wCtx.fillRect(x, 0, 8, 512);
+    wCtx.fillStyle = '#4b5563';
+    wCtx.fillRect(x + 8, 0, 2, 512);
+  });
 
-  // Vertical dark gunmetal structural pilasters
-  wCtx.fillStyle = '#0d1017';
-  wCtx.fillRect(0, 0, 14, 512);
-  wCtx.fillRect(250, 0, 12, 512);
+  // Parafusos e rebites balísticos hexagonais
+  [48, 144, 240, 336, 432].forEach((y) => {
+    [32, 224, 288, 480].forEach((x) => {
+      wCtx.fillStyle = '#0d1116';
+      wCtx.beginPath();
+      wCtx.arc(x, y, 4, 0, Math.PI * 2);
+      wCtx.fill();
+      wCtx.fillStyle = '#9ca3af';
+      wCtx.beginPath();
+      wCtx.arc(x - 1, y - 1, 1.8, 0, Math.PI * 2);
+      wCtx.fill();
+    });
+  });
 
-  // Subtle tactical amber & slate accent band
-  wCtx.fillStyle = '#d97706';
-  wCtx.fillRect(0, 348, 512, 6);
-  wCtx.fillStyle = 'rgba(56, 189, 248, 0.35)';
-  wCtx.fillRect(0, 356, 512, 2);
+  // Estêncil tático de estande balístico
+  wCtx.font = 'bold 13px monospace';
+  wCtx.fillStyle = '#64748b';
+  wCtx.fillText('KINETIC BALLISTIC RANGE // BAY 01-05', 24, 32);
+  wCtx.fillText('HEARING & EYE PROTECTION REQUIRED', 24, 276);
+
+  // Linha de advertência de segurança em amarelo ouro balístico na base
+  wCtx.fillStyle = '#eab308';
+  wCtx.fillRect(0, 498, 512, 6);
+  wCtx.fillStyle = '#090c0f';
+  wCtx.fillRect(0, 504, 512, 8);
 
   const acousticWallMap = new THREE.CanvasTexture(wallCanvas);
   acousticWallMap.colorSpace = THREE.SRGBColorSpace;
   acousticWallMap.wrapS = THREE.RepeatWrapping;
   acousticWallMap.wrapT = THREE.RepeatWrapping;
-  acousticWallMap.repeat.set(3, 2);
-  acousticWallMap.anisotropy = 4;
+  acousticWallMap.repeat.set(2, 2);
 
-  const acousticWallBump = new THREE.CanvasTexture(wallCanvas);
-  acousticWallBump.colorSpace = THREE.NoColorSpace;
-  acousticWallBump.wrapS = THREE.RepeatWrapping;
-  acousticWallBump.wrapT = THREE.RepeatWrapping;
-  acousticWallBump.repeat.set(3, 2);
-
-  // 2. Dark Vulcanized Ballistic Rubber Floor Texture
+  // 2. Piso: Borracha Vulcanizada de Estande em Ardósia Escura Fosca com Grip Antiderrapante
   const floorCanvas = document.createElement('canvas');
   floorCanvas.width = 512;
   floorCanvas.height = 512;
   const fCtx = floorCanvas.getContext('2d')!;
 
-  fCtx.fillStyle = '#11141b';
+  // Base ardósia escura rica
+  fCtx.fillStyle = '#14171d';
   fCtx.fillRect(0, 0, 512, 512);
 
-  // Interlocking dark rubber tile seams
-  fCtx.strokeStyle = '#080a0e';
+  // Micro-textura de grânulos antiderrapantes
+  for (let y = 8; y < 512; y += 16) {
+    for (let x = 8; x < 512; x += 16) {
+      fCtx.fillStyle = '#222832';
+      fCtx.fillRect(x - 2, y - 2, 4, 4);
+      fCtx.fillStyle = '#0d1014';
+      fCtx.fillRect(x, y, 2, 2);
+    }
+  }
+
+  // Linhas modulares de placas de borracha 1m x 1m
+  fCtx.strokeStyle = '#090b0e';
   fCtx.lineWidth = 4;
   for (let i = 0; i <= 512; i += 128) {
     fCtx.beginPath();
@@ -93,44 +127,34 @@ export function getStanderDarkRangeTextures(): StanderDarkTextures {
     fCtx.stroke();
   }
 
-  // Anti-slip rubber stud dots & subtle metallic fleck
-  for (let y = 8; y < 512; y += 16) {
-    for (let x = 8; x < 512; x += 16) {
-      fCtx.fillStyle = '#191e28';
-      fCtx.beginPath();
-      fCtx.arc(x, y, 3.2, 0, Math.PI * 2);
-      fCtx.fill();
-    }
-  }
+  // Demarcação tática de baia em amarelo ouro balístico
+  fCtx.strokeStyle = 'rgba(234, 179, 8, 0.65)';
+  fCtx.lineWidth = 4;
+  fCtx.strokeRect(6, 6, 500, 500);
 
-  // Subtle tactical lane border line
-  fCtx.strokeStyle = 'rgba(245, 158, 11, 0.22)';
-  fCtx.lineWidth = 2;
-  fCtx.strokeRect(4, 4, 504, 504);
+  // Marcações de estêncil no chão
+  fCtx.font = 'bold 16px monospace';
+  fCtx.fillStyle = 'rgba(234, 179, 8, 0.7)';
+  fCtx.fillText('FIRING LINE // KEEP MUZZLE DOWNRANGE', 32, 60);
 
   const rubberFloorMap = new THREE.CanvasTexture(floorCanvas);
   rubberFloorMap.colorSpace = THREE.SRGBColorSpace;
   rubberFloorMap.wrapS = THREE.RepeatWrapping;
   rubberFloorMap.wrapT = THREE.RepeatWrapping;
-  rubberFloorMap.repeat.set(6, 6);
-  rubberFloorMap.anisotropy = 4;
+  rubberFloorMap.repeat.set(4, 4);
 
-  const rubberFloorBump = new THREE.CanvasTexture(floorCanvas);
-  rubberFloorBump.colorSpace = THREE.NoColorSpace;
-  rubberFloorBump.wrapS = THREE.RepeatWrapping;
-  rubberFloorBump.wrapT = THREE.RepeatWrapping;
-  rubberFloorBump.repeat.set(6, 6);
-
-  // 3. Dark Industrial Baffle Ceiling Texture
+  // 3. Teto Modular Industrial Escuro
   const ceilCanvas = document.createElement('canvas');
   ceilCanvas.width = 256;
   ceilCanvas.height = 256;
   const cCtx = ceilCanvas.getContext('2d')!;
-  cCtx.fillStyle = '#0b0e14';
+  cCtx.fillStyle = '#12151b';
   cCtx.fillRect(0, 0, 256, 256);
   for (let y = 0; y < 256; y += 32) {
-    cCtx.fillStyle = '#131822';
-    cCtx.fillRect(0, y, 256, 12);
+    cCtx.fillStyle = '#0c0e12';
+    cCtx.fillRect(0, y, 256, 6);
+    cCtx.fillStyle = '#1f242e';
+    cCtx.fillRect(0, y + 6, 256, 3);
   }
   const darkCeilingMap = new THREE.CanvasTexture(ceilCanvas);
   darkCeilingMap.colorSpace = THREE.SRGBColorSpace;
@@ -138,121 +162,116 @@ export function getStanderDarkRangeTextures(): StanderDarkTextures {
   darkCeilingMap.wrapT = THREE.RepeatWrapping;
   darkCeilingMap.repeat.set(4, 4);
 
-  // 4. High-Contrast Tactical Hazard Stripe Texture (for Jump/Crouch/Slide Obstacles)
+  // 4. Faixa de Advertência Balística Amarela / Preta
   const hazCanvas = document.createElement('canvas');
-  hazCanvas.width = 256;
-  hazCanvas.height = 256;
+  hazCanvas.width = 128;
+  hazCanvas.height = 128;
   const hCtx = hazCanvas.getContext('2d')!;
-  hCtx.fillStyle = '#181c24';
-  hCtx.fillRect(0, 0, 256, 256);
+  hCtx.fillStyle = '#0f1217';
+  hCtx.fillRect(0, 0, 128, 128);
 
-  hCtx.fillStyle = '#f59e0b';
-  for (let i = -256; i < 512; i += 48) {
+  hCtx.fillStyle = '#eab308';
+  for (let i = -128; i < 256; i += 32) {
     hCtx.beginPath();
     hCtx.moveTo(i, 0);
-    hCtx.lineTo(i + 24, 0);
-    hCtx.lineTo(i + 80, 56);
-    hCtx.lineTo(i + 56, 56);
+    hCtx.lineTo(i + 16, 0);
+    hCtx.lineTo(i + 48, 32);
+    hCtx.lineTo(i + 32, 32);
     hCtx.closePath();
     hCtx.fill();
   }
-
-  hCtx.strokeStyle = '#334155';
-  hCtx.lineWidth = 4;
-  hCtx.strokeRect(2, 2, 252, 252);
 
   const hazardStripeMap = new THREE.CanvasTexture(hazCanvas);
   hazardStripeMap.colorSpace = THREE.SRGBColorSpace;
   hazardStripeMap.wrapS = THREE.RepeatWrapping;
   hazardStripeMap.wrapT = THREE.RepeatWrapping;
-  hazardStripeMap.anisotropy = 4;
 
   cachedTextures = {
     acousticWallMap,
-    acousticWallBump,
+    acousticWallBump: acousticWallMap,
     rubberFloorMap,
-    rubberFloorBump,
+    rubberFloorBump: rubberFloorMap,
     darkCeilingMap,
     hazardStripeMap,
   };
   return cachedTextures;
 }
 
+function getSharedStanderMaterials(): SharedStanderMaterials {
+  if (sharedMats) return sharedMats;
+  const tex = getStanderDarkRangeTextures();
+
+  sharedMats = {
+    lightLum: new THREE.MeshBasicMaterial({ color: 0xfff4e6 }),
+    glass: new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.18,
+      depthWrite: false,
+    }),
+    decalLine: new THREE.MeshBasicMaterial({
+      color: 0xeab308,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    }),
+    floorCeil: new THREE.MeshLambertMaterial({
+      map: tex.rubberFloorMap,
+      color: 0xffffff,
+    }),
+    wall: new THREE.MeshLambertMaterial({
+      map: tex.acousticWallMap,
+      color: 0xffffff,
+    }),
+    wood: new THREE.MeshLambertMaterial({
+      color: 0x3d2b1f, // Madeira escura nogueira nobre de bancada armaria
+    }),
+    plasticBlack: new THREE.MeshLambertMaterial({
+      color: 0x181c24,
+    }),
+  };
+  return sharedMats;
+}
+
 /**
- * Replaces the washed-out white materials of `stander_tiro.glb` with dark tactical
- * acoustic wall panels, vulcanized rubber floor tiles, smoked walnut booths, and
- * glowing overhead range fixtures.
+ * Aplica os materiais realistas de estande tático premium à cena do Stander.
  */
 export function applyDarkTacticalMaterialsToStanderGlb(
   gltfScene: THREE.Group
 ): void {
-  const tex = getStanderDarkRangeTextures();
+  const mats = getSharedStanderMaterials();
 
   gltfScene.traverse((child) => {
     if (!(child as THREE.Mesh).isMesh) return;
     const mesh = child as THREE.Mesh;
 
-    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    mats.forEach((m) => {
-      const std = m as THREE.MeshStandardMaterial;
-      if (!std) return;
-      const matName = std.name || '';
-
-      if (matName.includes('LightLum')) {
-        std.color.setHex(0xffffff);
-        std.emissive = new THREE.Color(0xfff7ed);
-        std.emissiveIntensity = 1.35;
-        std.roughness = 0.2;
-      } else if (matName.includes('GlassClear')) {
-        std.color.setHex(0x38bdf8);
-        std.transparent = true;
-        std.opacity = 0.22;
-        std.roughness = 0.1;
-        std.metalness = 0.2;
-        std.depthWrite = false;
-      } else if (matName.includes('DecalLine')) {
-        std.color.setHex(0xf59e0b);
-        std.emissive = new THREE.Color(0xf59e0b);
-        std.emissiveIntensity = 0.25;
-        std.polygonOffset = true;
-        std.polygonOffsetFactor = -1;
-        std.polygonOffsetUnits = -1;
-      } else if (
+    const mapSingleMat = (m: THREE.Material): THREE.Material => {
+      const matName = m?.name || '';
+      if (matName.includes('LightLum')) return mats.lightLum;
+      if (matName.includes('GlassClear')) return mats.glass;
+      if (matName.includes('DecalLine')) return mats.decalLine;
+      if (
         matName.includes('ConcreteClear01') ||
         matName.includes('ConcreteClear09')
       ) {
-        // Floor & Ceiling surfaces of Range_44
-        std.map = tex.rubberFloorMap;
-        std.bumpMap = tex.rubberFloorBump;
-        std.bumpScale = 0.015;
-        std.color.setHex(0x8a94a6);
-        std.roughness = 0.65;
-        std.metalness = 0.15;
-        std.needsUpdate = true;
-      } else if (
+        return mats.floorCeil;
+      }
+      if (
         matName.includes('TileWall') ||
         matName.includes('ConctereWall') ||
         matName.includes('PlasticWhite')
       ) {
-        // Side walls, Firing booth walls & Borders_47 partitions -> Dark Acoustic Range Panels!
-        std.map = tex.acousticWallMap;
-        std.bumpMap = tex.acousticWallBump;
-        std.bumpScale = 0.025;
-        std.color.setHex(0x94a3b8);
-        std.roughness = 0.68;
-        std.metalness = 0.22;
-        std.needsUpdate = true;
-      } else if (matName.includes('WoodCherry')) {
-        // Shooting Booths (StandPlace_45) & Prep Tables -> Dark Tactical Walnut/Carbon
-        std.color.setHex(0x5c4938);
-        std.roughness = 0.48;
-        std.metalness = 0.18;
-        std.needsUpdate = true;
-      } else if (matName.includes('PlasticBlack')) {
-        std.color.setHex(0x11151c);
-        std.roughness = 0.45;
-        std.metalness = 0.35;
+        return mats.wall;
       }
-    });
+      if (matName.includes('WoodCherry')) return mats.wood;
+      if (matName.includes('PlasticBlack')) return mats.plasticBlack;
+      return m;
+    };
+
+    if (Array.isArray(mesh.material)) {
+      mesh.material = mesh.material.map(mapSingleMat);
+    } else if (mesh.material) {
+      mesh.material = mapSingleMat(mesh.material);
+    }
   });
 }

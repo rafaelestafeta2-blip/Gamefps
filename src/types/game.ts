@@ -1,5 +1,6 @@
 export type GameScreenState =
   | 'INTRO'
+  | 'VIDEO_INTRO'
   | 'LOADING'
   | 'MAIN_MENU'
   | 'TITLE'

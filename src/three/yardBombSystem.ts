@@ -51,22 +51,11 @@ export class YardBombSystem {
 
   constructor(sceneGroup: THREE.Object3D) {
     this.c4MeshGroup = new THREE.Group();
-    const pack = new THREE.Mesh(
-      new THREE.BoxGeometry(0.36, 0.12, 0.24),
-      new THREE.MeshStandardMaterial({ color: 0x3f4d34, roughness: 0.65, metalness: 0.25 })
-    );
-    const keypad = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 0.03, 0.1),
-      new THREE.MeshBasicMaterial({ color: 0x111827 })
-    );
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.24), new THREE.MeshStandardMaterial({ color: 0x3f4d34, roughness: 0.65, metalness: 0.25 }));
+    const keypad = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.1), new THREE.MeshBasicMaterial({ color: 0x111827 }));
     keypad.position.set(0.05, 0.065, 0);
-
-    this.c4LedMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.025, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xef4444 })
-    );
+    this.c4LedMesh = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 8), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
     this.c4LedMesh.position.set(-0.08, 0.07, 0);
-
     this.c4MeshGroup.add(pack, keypad, this.c4LedMesh);
     this.c4MeshGroup.visible = false;
     sceneGroup.add(this.c4MeshGroup);
@@ -352,18 +341,14 @@ export class YardBombSystem {
       }
     }
 
-    // 6. Allied Squad Firefight Visuals & Skirmish Kills
+    // 6. Skirmish de bots com som real de tiro e registro tático
     this.allyFireTimer += dt;
     if (this.allyFireTimer >= 1.4 && allyList.length > 0 && enemyList.length > 0) {
       this.allyFireTimer = 0;
       const ally = allyList[Math.floor(Math.random() * allyList.length)];
       const enemy = enemyList[Math.floor(Math.random() * enemyList.length)];
       if (ally.root.position.distanceTo(enemy.root.position) < 42) {
-        _allyOrigin.set(
-          ally.root.position.x,
-          ally.root.position.y + 1.45,
-          ally.root.position.z
-        );
+        _allyOrigin.set(ally.root.position.x, ally.root.position.y + 1.45, ally.root.position.z);
         _enemyPos.set(
           enemy.root.position.x + (Math.random() - 0.5) * 0.6,
           enemy.root.position.y + 1.25,
@@ -371,6 +356,7 @@ export class YardBombSystem {
         );
         fxPool.spawnTracer(_allyOrigin, _enemyPos, 0x38bdf8);
         triggerBotFireAnimation(ally);
+        soundEngine.playGunshot(false, false, ally.weaponId || 'M4_CARBINE');
 
         if (Math.random() < 0.26 && !enemy.isDown) {
           enemy.health -= 55;
@@ -387,6 +373,7 @@ export class YardBombSystem {
           }
         } else if (Math.random() < 0.16 && !ally.isDown) {
           triggerBotFireAnimation(enemy);
+          soundEngine.playGunshot(false, false, enemy.weaponId || 'AK47_RIFLE');
           ally.health -= 55;
           ally.hitTiltVelocity = -12.0;
           triggerBotHitAnimation(ally);
