@@ -16,42 +16,17 @@ interface SoundSourceUrls {
   github: string;
 }
 
+const GH_BASE =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/36c457bb15ef7a22d1b66f754c211465857d2b02/Sound/Personagem';
+
 const SOUND_URLS: Record<CharacterSoundKey, SoundSourceUrls> = {
-  CASING_BOUNCE: {
-    local: '/sounds/casing_bounce.wav',
-    github:
-      'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/36c457bb15ef7a22d1b66f754c211465857d2b02/Sound/Personagem/678887__drinkingwindgames__firearm-casing-bounce-6.wav',
-  },
-  SPRINT_PANTING: {
-    local: '/sounds/sprint_panting.wav',
-    github:
-      'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/36c457bb15ef7a22d1b66f754c211465857d2b02/Sound/Personagem/422987__wakuwakuwakuwaku__sfxpantingafterrun.wav',
-  },
-  C4_BEEP: {
-    local: '/sounds/c4_beep.flac',
-    github:
-      'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/36c457bb15ef7a22d1b66f754c211465857d2b02/Sound/Personagem/875010__cb9382__digital-watch-beep.flac',
-  },
-  BOMB_PLANTED_VOICE: {
-    local: '/sounds/bomb_planted_voice.mp3',
-    github:
-      'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/36c457bb15ef7a22d1b66f754c211465857d2b02/Sound/Personagem/ElevenLabs_2026-11-11T16_56_40_Le%C3%B3nidas%20-%20Legendary%20Spartan%20Warrior_pvc_s50_m2.mp3',
-  },
-  PLAYER_HIT_GRUNT: {
-    local: '/sounds/player_hit_grunt.wav',
-    github:
-      'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/36c457bb15ef7a22d1b66f754c211465857d2b02/Sound/Personagem/90164__snaginneb__gruntsound.wav',
-  },
-  HITMARKER: {
-    local: '/sounds/hitmarker.wav',
-    github:
-      'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/36c457bb15ef7a22d1b66f754c211465857d2b02/Sound/Personagem/570335__user391915396__hitmarker-sound-effect.wav',
-  },
-  GRENADE_BOUNCE: {
-    local: '/sounds/grenade_bounce.wav',
-    github:
-      'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/36c457bb15ef7a22d1b66f754c211465857d2b02/Sound/Personagem/466453__patrick_corra__grenade-bouncing.wav',
-  },
+  CASING_BOUNCE: { local: '/sounds/casing_bounce.wav', github: `${GH_BASE}/678887__drinkingwindgames__firearm-casing-bounce-6.wav` },
+  SPRINT_PANTING: { local: '/sounds/sprint_panting.wav', github: `${GH_BASE}/422987__wakuwakuwakuwaku__sfxpantingafterrun.wav` },
+  C4_BEEP: { local: '/sounds/c4_beep.flac', github: `${GH_BASE}/875010__cb9382__digital-watch-beep.flac` },
+  BOMB_PLANTED_VOICE: { local: '/sounds/bomb_planted_voice.mp3', github: `${GH_BASE}/ElevenLabs_2026-11-11T16_56_40_Le%C3%B3nidas%20-%20Legendary%20Spartan%20Warrior_pvc_s50_m2.mp3` },
+  PLAYER_HIT_GRUNT: { local: '/sounds/player_hit_grunt.wav', github: `${GH_BASE}/90164__snaginneb__gruntsound.wav` },
+  HITMARKER: { local: '/sounds/hitmarker.wav', github: `${GH_BASE}/570335__user391915396__hitmarker-sound-effect.wav` },
+  GRENADE_BOUNCE: { local: '/sounds/grenade_bounce.wav', github: `${GH_BASE}/466453__patrick_corra__grenade-bouncing.wav` },
 };
 
 const rawArrayBuffers = new Map<CharacterSoundKey, ArrayBuffer>();
@@ -138,10 +113,7 @@ function playBufferOneShot(
 
   const src = ctx.createBufferSource();
   src.buffer = buf;
-  src.playbackRate.setValueAtTime(
-    THREE.MathUtils.clamp(pitchRate, 0.5, 2.0),
-    startAt
-  );
+  src.playbackRate.setValueAtTime(THREE.MathUtils.clamp(pitchRate, 0.5, 2.0), startAt);
 
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(THREE.MathUtils.clamp(gainVal, 0.01, 1.5), startAt);
@@ -161,43 +133,23 @@ function playBufferOneShot(
   return true;
 }
 
-/**
- * 1. Som real do cartucho metálico vazio quicando no chão após os disparos.
- */
-export function playRealShellCasingBounce(
-  panVal: number,
-  gainVal: number,
-  pitchRate = 1.0,
-  delaySec = 0.26
-): boolean {
+export function playRealShellCasingBounce(panVal: number, gainVal: number, pitchRate = 1.0, delaySec = 0.26): boolean {
   return playBufferOneShot('CASING_BOUNCE', gainVal, pitchRate, panVal, delaySec);
 }
 
-/**
- * 2. Som real de Hitmarker quando o jogador acerta um inimigo.
- */
 export function playRealHitmarkerSound(isHeadshotOrCrit = false): void {
   const pitch = isHeadshotOrCrit ? 1.12 : 1.0 + (Math.random() - 0.5) * 0.04;
-  const vol = isHeadshotOrCrit ? 0.88 : 0.72;
-  playBufferOneShot('HITMARKER', vol, pitch, 0, 0);
+  playBufferOneShot('HITMARKER', isHeadshotOrCrit ? 0.88 : 0.72, pitch, 0, 0);
 }
 
-/**
- * 3. Som real de gemido/impacto quando o personagem do jogador recebe tiro ou dano.
- */
 export function playRealPlayerHitGrunt(isCritical = false): void {
   const now = performance.now();
   if (now - lastGruntTime < 220) return;
   lastGruntTime = now;
-
   const pitch = (isCritical ? 0.94 : 1.0) + (Math.random() - 0.5) * 0.08;
-  const vol = isCritical ? 0.92 : 0.78;
-  playBufferOneShot('PLAYER_HIT_GRUNT', vol, pitch, 0, 0);
+  playBufferOneShot('PLAYER_HIT_GRUNT', isCritical ? 0.92 : 0.78, pitch, 0, 0);
 }
 
-/**
- * 4. Voz ElevenLabs "Bomba Plantada" acionada imediatamente ao plantar a C4.
- */
 export function playRealBombPlantedVoice(): void {
   const played = playBufferOneShot('BOMB_PLANTED_VOICE', 1.15, 1.0, 0, 0);
   if (!played) {
@@ -211,43 +163,23 @@ export function playRealBombPlantedVoice(): void {
   }
 }
 
-/**
- * 5. Bip digital real da bomba C4 plantada (com atenuação 3D por distância).
- */
-export function playRealC4Beep(
-  c4Pos: THREE.Vector3,
-  listenerPos: THREE.Vector3,
-  remainingSec: number
-): void {
+export function playRealC4Beep(c4Pos: THREE.Vector3, listenerPos: THREE.Vector3, remainingSec: number): void {
   const dist = c4Pos.distanceTo(listenerPos);
   const atten = THREE.MathUtils.clamp(1 / (1 + dist * 0.045), 0.14, 0.95);
-  const urgentPitch =
-    remainingSec < 5 ? 1.18 : remainingSec < 12 ? 1.08 : 1.0;
-
-  const played = playBufferOneShot('C4_BEEP', atten, urgentPitch, 0, 0);
-  if (!played) {
+  const urgentPitch = remainingSec < 5 ? 1.18 : remainingSec < 12 ? 1.08 : 1.0;
+  if (!playBufferOneShot('C4_BEEP', atten, urgentPitch, 0, 0)) {
     soundEngine.playMechanicalSwitch(1.65);
   }
 }
 
-/**
- * 6. Explosão real da Bomba C4 usando o áudio real de explosão da granada + concussão.
- */
-export function playC4DetonationExplosion(
-  c4Pos: THREE.Vector3,
-  listenerPos: THREE.Vector3
-): void {
+export function playC4DetonationExplosion(c4Pos: THREE.Vector3, listenerPos: THREE.Vector3): void {
   soundEngine.playGrenadeExplosion();
   triggerShellshockTinnitus(c4Pos, listenerPos);
 }
 
-/**
- * 7. Som real da granada quicando no chão ou parede.
- */
 export function playRealGrenadeBounce(intensity = 1.0): boolean {
   const gain = THREE.MathUtils.clamp(intensity * 0.85, 0.15, 0.95);
-  const pitch = 0.94 + Math.random() * 0.14;
-  return playBufferOneShot('GRENADE_BOUNCE', gain, pitch, 0, 0);
+  return playBufferOneShot('GRENADE_BOUNCE', gain, 0.94 + Math.random() * 0.14, 0, 0);
 }
 
 /**
@@ -326,6 +258,56 @@ export function updatePlayerSprintPantingAudio(
   }
 }
 
+const C4_KEYPAD_PITCHES = [1.24, 1.36, 1.48, 1.48, 1.58, 1.18, 1.68, 1.84];
+const C4_DTMF_PAIRS: Array<[number, number]> = [
+  [852, 1209], // 7
+  [697, 1477], // 3
+  [770, 1336], // 5
+  [770, 1336], // 5
+  [770, 1477], // 6
+  [941, 1336], // 0
+  [852, 1336], // 8
+  [941, 1477], // # (Confirm)
+];
+
+/**
+ * 9. Som realista de discar o código no teclado digital da bomba C4 (7-3-5-5-6-0-8) durante o plantio.
+ */
+export function playC4KeypadDigitSound(digitStep: number): void {
+  const state = soundEngine.getSpatialAudioState();
+  if (state.muted) return;
+
+  const idx = Math.abs(digitStep) % C4_KEYPAD_PITCHES.length;
+  playBufferOneShot('C4_BEEP', 0.55, C4_KEYPAD_PITCHES[idx], 0, 0);
+  soundEngine.playMechanicalSwitch(1.35 + (idx % 3) * 0.08);
+
+  if (state.ctx) {
+    try {
+      const ctx = state.ctx;
+      const now = ctx.currentTime;
+      const [lowFreq, highFreq] = C4_DTMF_PAIRS[idx];
+      const oscA = ctx.createOscillator();
+      const oscB = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscA.type = 'sine';
+      oscB.type = 'triangle';
+      oscA.frequency.setValueAtTime(lowFreq, now);
+      oscB.frequency.setValueAtTime(highFreq, now);
+      gain.gain.setValueAtTime(0.11, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.065);
+      oscA.connect(gain);
+      oscB.connect(gain);
+      gain.connect(ctx.destination);
+      oscA.start(now);
+      oscB.start(now);
+      oscA.stop(now + 0.068);
+      oscB.stop(now + 0.068);
+    } catch {
+      // Ignorar erro de contexto de áudio
+    }
+  }
+}
+
 const MATCH_VICTORY_LOCAL = '/sounds/match_victory_fanfare.mp3';
 const MATCH_VICTORY_GITHUB =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/2114b7f72a1293400bf8f5fd4c70e85dd73e74ea/Sound/Victory%20fanfare%20sound%20effect%20(4).mp3';
@@ -335,11 +317,6 @@ const MATCH_DEFEAT_GITHUB =
 
 let activeMatchFanfareAudio: HTMLAudioElement | null = null;
 
-/**
- * 9. Toca a música tema oficial de Fim de Partida:
- * - Vitória do time Vanguard: Victory fanfare sound effect (4).mp3
- * - Derrota do time Vanguard: Victory fanfare sound effect (3).mp3
- */
 export function playMatchEndFanfare(isVanguardVictory: boolean): void {
   stopMatchEndFanfare();
   const state = soundEngine.getSpatialAudioState();
@@ -375,4 +352,3 @@ export function stopMatchEndFanfare(): void {
     activeMatchFanfareAudio = null;
   }
 }
-

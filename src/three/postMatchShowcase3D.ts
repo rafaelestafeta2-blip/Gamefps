@@ -16,23 +16,23 @@ interface PodiumOperatorSlot {
   weaponProp: THREE.Group | null;
   weaponId: WeaponId;
   poseState: BotAnimState;
-  isCrouched: boolean;
 }
 
-// Coordenadas da formação em V estilo Call of Duty Winner's Circle (Centro = #1 MVP)
+// Coordenadas da formação Winner's Circle (alinhadas aos 5 cards inferiores da esquerda para a direita)
+// Índices em PODIUM_SLOTS correspondem a sortedSquad[0..4]:
+// [0]=#1 MVP (Centro), [1]=#2 (Esq Interna), [2]=#3 (Dir Interna), [3]=#4 (Flanco Esq), [4]=#5 (Flanco Dir)
 const PODIUM_SLOTS: Array<{
   x: number;
   y: number;
   z: number;
   yaw: number;
   pose: BotAnimState;
-  crouch: boolean;
 }> = [
-  { x: 0.0, y: 0.18, z: 0.52, yaw: 0.0, pose: 'RIFLE_AIM', crouch: false }, // #1 MVP (Centro Frente)
-  { x: -1.12, y: 0.1, z: -0.05, yaw: 0.18, pose: 'RIFLE_IDLE', crouch: false }, // #2 Esquerda Interna
-  { x: 1.12, y: 0.1, z: -0.05, yaw: -0.18, pose: 'RIFLE_AIM', crouch: false }, // #3 Direita Interna
-  { x: -2.18, y: 0.04, z: -0.52, yaw: 0.28, pose: 'RIFLE_CROUCH', crouch: true }, // #4 Flanco Esquerdo (Joelho no chão)
-  { x: 2.18, y: 0.04, z: -0.52, yaw: -0.28, pose: 'RIFLE_IDLE', crouch: false }, // #5 Flanco Direito
+  { x: 0.0, y: 0.22, z: 0.36, yaw: 0.0, pose: 'RIFLE_IDLE' },     // #1 MVP (Centro em destaque)
+  { x: -1.04, y: 0.18, z: 0.06, yaw: 0.14, pose: 'RIFLE_AIM' },   // #2 Esquerda Interna
+  { x: 1.04, y: 0.18, z: 0.06, yaw: -0.14, pose: 'RIFLE_AIM' },   // #3 Direita Interna
+  { x: -2.08, y: 0.15, z: -0.22, yaw: 0.24, pose: 'RIFLE_IDLE' }, // #4 Flanco Esquerdo
+  { x: 2.08, y: 0.15, z: -0.22, yaw: -0.24, pose: 'RIFLE_AIM' },  // #5 Flanco Direito
 ];
 
 const _rHandWorld = new THREE.Vector3();
@@ -44,9 +44,10 @@ const _lookTargetWorld = new THREE.Vector3();
 const _camTarget = new THREE.Vector3();
 
 /**
- * Palco 3D estilo Call of Duty "Winner's Circle" para o Fim da Partida:
- * Renderiza os 5 operadores do Esquadrão VANGUARD em formação tática com suas
- * armas 3D reais (.glb) e animações de pose enquanto o placar de estatísticas é exibido.
+ * Palco 3D "Winner's Circle" para o Fim da Partida:
+ * Enquadramento calibrado para posicionar os 5 soldados no centro da tela sobre
+ * a plataforma tática chanfrada, deixando o topo livre para o título "WINNER'S CIRCLE"
+ * e a base alinhada aos 5 cards de estatísticas dos operadores.
  */
 export class PostMatchShowcase3D {
   private scene: THREE.Scene;
@@ -62,7 +63,6 @@ export class PostMatchShowcase3D {
     this.isSoftwareGl = isSoftwareGl;
     this.stageRoot = new THREE.Group();
     this.stageRoot.name = 'PostMatchWinnersCircle3D';
-    // Posicionado acima da arena para nunca colidir com paredes dos mapas
     this.stageRoot.position.set(0, 52, 0);
     this.stageRoot.visible = false;
     this.scene.add(this.stageRoot);
@@ -71,82 +71,128 @@ export class PostMatchShowcase3D {
     void preloadProRifleBotCharacter();
   }
 
+  private createSunsetBackdropTexture(): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0.0, '#111824');
+    grad.addColorStop(0.38, '#2d3748');
+    grad.addColorStop(0.68, '#7c5836');
+    grad.addColorStop(0.84, '#d99b52');
+    grad.addColorStop(1.0, '#2a241e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 256);
+
+    // Brilho solar no horizonte central (estilo pôr do sol militar da referência)
+    const sunGrad = ctx.createRadialGradient(240, 188, 6, 240, 188, 120);
+    sunGrad.addColorStop(0.0, 'rgba(255, 244, 214, 0.95)');
+    sunGrad.addColorStop(0.35, 'rgba(245, 158, 11, 0.45)');
+    sunGrad.addColorStop(1.0, 'rgba(245, 158, 11, 0)');
+    ctx.fillStyle = sunGrad;
+    ctx.fillRect(0, 0, 512, 256);
+
+    // Silhueta de montanhas no horizonte
+    ctx.fillStyle = '#1c1917';
+    ctx.beginPath();
+    ctx.moveTo(0, 256);
+    ctx.lineTo(0, 198);
+    ctx.lineTo(85, 176);
+    ctx.lineTo(175, 194);
+    ctx.lineTo(290, 182);
+    ctx.lineTo(395, 165);
+    ctx.lineTo(465, 184);
+    ctx.lineTo(512, 172);
+    ctx.lineTo(512, 256);
+    ctx.closePath();
+    ctx.fill();
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
   private buildTacticalPodiumStage(): void {
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x0b111d,
-      roughness: 0.38,
-      metalness: 0.65,
+    const stonePlatformMat = new THREE.MeshStandardMaterial({
+      color: 0x3b3834,
+      roughness: 0.72,
+      metalness: 0.22,
     });
-    const pedMat = new THREE.MeshStandardMaterial({
-      color: 0x152238,
+    const darkTrimMat = new THREE.MeshStandardMaterial({
+      color: 0x1c1917,
+      roughness: 0.55,
+      metalness: 0.48,
+    });
+    const goldEmblemMat = new THREE.MeshStandardMaterial({
+      color: 0xd99b26,
       roughness: 0.32,
-      metalness: 0.78,
-    });
-    const accentCyanMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-    const accentGoldMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
-    const backdropMat = new THREE.MeshStandardMaterial({
-      color: 0x060a12,
-      roughness: 0.85,
-      metalness: 0.2,
+      metalness: 0.82,
     });
 
-    // Plataforma principal escura e parede de fundo para contraste de silhueta 3D
-    const mainBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(5.6, 6.0, 0.24, 32),
-      floorMat
+    // Chão de deserto/asfalto escuro ao redor do palco
+    const desertGround = new THREE.Mesh(
+      new THREE.PlaneGeometry(28, 18),
+      new THREE.MeshStandardMaterial({ color: 0x26211c, roughness: 0.92 })
     );
-    mainBase.position.y = -0.12;
-    mainBase.receiveShadow = true;
-    this.stageRoot.add(mainBase);
+    desertGround.rotation.x = -Math.PI / 2;
+    desertGround.position.y = -0.18;
+    this.stageRoot.add(desertGround);
 
-    const backdropWall = new THREE.Mesh(
-      new THREE.BoxGeometry(14.0, 7.5, 0.3),
-      backdropMat
+    // Painel panorâmico de céu de pôr-do-sol cinematográfico ao fundo
+    const skyBackdrop = new THREE.Mesh(
+      new THREE.PlaneGeometry(22, 10.5),
+      new THREE.MeshBasicMaterial({ map: this.createSunsetBackdropTexture() })
     );
-    backdropWall.position.set(0, 3.2, -2.6);
-    this.stageRoot.add(backdropWall);
+    skyBackdrop.position.set(0, 3.85, -4.6);
+    this.stageRoot.add(skyBackdrop);
 
-    // Pilares táticos iluminados ao fundo
-    for (let i = -2; i <= 2; i++) {
-      const pillar = new THREE.Mesh(
-        new THREE.BoxGeometry(0.42, 6.2, 0.42),
-        pedMat
-      );
-      pillar.position.set(i * 2.1, 2.8, -2.25);
-      this.stageRoot.add(pillar);
+    // Plataforma principal de pedra/concreto militar (igual ao palco da imagem de referência)
+    const podiumBase = new THREE.Mesh(
+      new THREE.BoxGeometry(5.65, 0.34, 2.65),
+      stonePlatformMat
+    );
+    podiumBase.position.set(0, -0.02, 0.05);
+    podiumBase.receiveShadow = true;
+    this.stageRoot.add(podiumBase);
 
-      const strip = new THREE.Mesh(
-        new THREE.BoxGeometry(0.06, 5.2, 0.45),
-        i === 0 ? accentGoldMat : accentCyanMat
+    const podiumBorder = new THREE.Mesh(
+      new THREE.BoxGeometry(5.82, 0.14, 2.82),
+      darkTrimMat
+    );
+    podiumBorder.position.set(0, -0.11, 0.05);
+    this.stageRoot.add(podiumBorder);
+
+    // 4 Blocos/Pilares baixos nos cantos da plataforma (idênticos aos cantos do palco da imagem)
+    const cornerOffsets: Array<[number, number]> = [
+      [-2.68, 1.22],
+      [2.68, 1.22],
+      [-2.68, -1.12],
+      [2.68, -1.12],
+    ];
+    for (const [cx, cz] of cornerOffsets) {
+      const bollard = new THREE.Mesh(
+        new THREE.BoxGeometry(0.36, 0.48, 0.36),
+        darkTrimMat
       );
-      strip.position.set(i * 2.1, 2.8, -2.24);
-      this.stageRoot.add(strip);
+      bollard.position.set(cx, 0.08, cz);
+      this.stageRoot.add(bollard);
     }
 
-    // Pedestais individuais para cada um dos 5 operadores
+    // Brasão octogonal dourado cravado no centro do piso da plataforma
+    const centerCrest = new THREE.Mesh(
+      new THREE.RingGeometry(0.68, 0.88, 6),
+      goldEmblemMat
+    );
+    centerCrest.rotation.x = -Math.PI / 2;
+    centerCrest.position.set(0, 0.155, 0.25);
+    this.stageRoot.add(centerCrest);
+
+    // Slots individuais para cada um dos 5 operadores
     for (let i = 0; i < PODIUM_SLOTS.length; i++) {
       const cfg = PODIUM_SLOTS[i];
-      const isMvp = i === 0;
-      const pedHeight = cfg.y;
-      const pedRadius = isMvp ? 0.74 : 0.62;
-
-      const ped = new THREE.Mesh(
-        new THREE.CylinderGeometry(pedRadius, pedRadius * 1.08, pedHeight, 24),
-        pedMat
-      );
-      ped.position.set(cfg.x, pedHeight * 0.5, cfg.z);
-      this.stageRoot.add(ped);
-
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(pedRadius * 0.88, pedRadius * 1.02, 24),
-        isMvp ? accentGoldMat : accentCyanMat
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(cfg.x, pedHeight + 0.008, cfg.z);
-      this.stageRoot.add(ring);
-
       const slotGroup = new THREE.Group();
-      slotGroup.position.set(cfg.x, pedHeight, cfg.z);
+      slotGroup.position.set(cfg.x, cfg.y, cfg.z);
       slotGroup.rotation.set(0, cfg.yaw, 0);
       this.stageRoot.add(slotGroup);
 
@@ -159,22 +205,21 @@ export class PostMatchShowcase3D {
         weaponProp: null,
         weaponId: 'M4_CARBINE',
         poseState: cfg.pose,
-        isCrouched: cfg.crouch,
       });
     }
 
-    // Iluminação de estúdio 3 pontos dedicada ao Winner's Circle
-    const keyLight = new THREE.DirectionalLight(0xfff4e0, 2.6);
-    keyLight.position.set(2.5, 5.5, 5.0);
+    // Iluminação cinematográfica Golden-Hour de 3 pontos
+    const keyLight = new THREE.DirectionalLight(0xfff1d6, 2.75);
+    keyLight.position.set(2.2, 5.2, 4.8);
     this.stageRoot.add(keyLight);
 
-    const rimLight = new THREE.PointLight(0x38bdf8, 6.5, 14);
-    rimLight.position.set(0, 3.6, -1.8);
-    this.stageRoot.add(rimLight);
+    const warmSunsetRim = new THREE.PointLight(0xf59e0b, 7.5, 16);
+    warmSunsetRim.position.set(-0.6, 2.8, -2.5);
+    this.stageRoot.add(warmSunsetRim);
 
-    const goldMvpLight = new THREE.PointLight(0xf59e0b, 3.5, 7);
-    goldMvpLight.position.set(0, 2.4, 1.9);
-    this.stageRoot.add(goldMvpLight);
+    const frontFillLight = new THREE.PointLight(0xe2e8f0, 3.2, 10);
+    frontFillLight.position.set(0, 2.1, 3.2);
+    this.stageRoot.add(frontFillLight);
   }
 
   private populateAvatarsIfNeeded(sortedSquad: SquadOperatorStats[]): void {
@@ -202,8 +247,8 @@ export class PostMatchShowcase3D {
         if (clip) {
           const action = slot.mixer.clipAction(clip);
           action.setLoop(THREE.LoopRepeat, Infinity);
-          action.time = i * 0.47; // Desfase natural entre os 5 soldados
-          action.setEffectiveTimeScale(0.85);
+          action.time = i * 0.55;
+          action.setEffectiveTimeScale(0.75);
           action.play();
         }
       }
@@ -250,7 +295,7 @@ export class PostMatchShowcase3D {
         }
       }
 
-      slot.weaponProp.position.set(-0.08, slot.isCrouched ? 0.78 : 1.26, 0.18);
+      slot.weaponProp.position.set(-0.08, 1.26, 0.18);
       slot.weaponProp.rotation.set(0.02, 0.04, 0);
     }
   }
@@ -287,7 +332,7 @@ export class PostMatchShowcase3D {
     weaponRigRoot.visible = false;
 
     if (!this.avatarsPopulated) {
-      const sorted = [...squadStats].sort((a, b) => b.score - a.kills);
+      const sorted = [...squadStats].sort((a, b) => b.score - a.score || b.kills - a.kills);
       this.populateAvatarsIfNeeded(sorted);
     }
 
@@ -300,14 +345,16 @@ export class PostMatchShowcase3D {
     this.stageRoot.updateMatrixWorld(true);
     this.syncSlotWeapons();
 
-    // Movimento cinematográfico suave da câmera diante dos 5 personagens em pose
+    // Enquadramento calibrado igual à referência:
+    // Olha ligeiramente mais alto (y + 1.38) a uma distância de 4.65m para posicionar
+    // os 5 personagens entre o título "WINNER'S CIRCLE" no topo e os 5 cards na base!
     const basePos = this.stageRoot.position;
-    const swayX = Math.sin(this.elapsed * 0.42) * 0.42;
-    const zoomZ = 3.95 - Math.min(0.35, this.elapsed * 0.08);
-    const camY = basePos.y + 1.36 + Math.sin(this.elapsed * 0.65) * 0.04;
+    const swayX = Math.sin(this.elapsed * 0.35) * 0.22;
+    const zoomZ = 4.68 - Math.min(0.22, this.elapsed * 0.05);
+    const camY = basePos.y + 1.32 + Math.sin(this.elapsed * 0.5) * 0.025;
 
     yawObject.position.set(basePos.x + swayX, camY, basePos.z + zoomZ);
-    _camTarget.set(basePos.x + swayX * 0.25, basePos.y + 1.12, basePos.z - 0.1);
+    _camTarget.set(basePos.x + swayX * 0.2, basePos.y + 1.38, basePos.z);
 
     const dx = _camTarget.x - yawObject.position.x;
     const dy = _camTarget.y - yawObject.position.y;
@@ -317,8 +364,8 @@ export class PostMatchShowcase3D {
     yawObject.rotation.y = Math.atan2(-dx, -dz);
     pitchObject.rotation.x = Math.atan2(dy, horizDist);
     camera.rotation.z = 0;
-    if (Math.abs(camera.fov - 54) > 0.5) {
-      camera.fov = THREE.MathUtils.damp(camera.fov, 54, 8, dt);
+    if (Math.abs(camera.fov - 50) > 0.5) {
+      camera.fov = THREE.MathUtils.damp(camera.fov, 50, 8, dt);
       camera.updateProjectionMatrix();
     }
   }

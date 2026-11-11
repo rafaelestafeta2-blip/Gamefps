@@ -288,27 +288,17 @@ function spawnAssaultSquads(
   isSoftwareGl: boolean
 ): void {
   const spawnBot = (opts: {
-    id: string;
-    x: number;
-    y: number;
-    z: number;
-    isAlly: boolean;
-    callsign: string;
-    weaponId: WeaponId;
-    patrolAxis?: 'X' | 'Z' | 'NONE';
-    patrolRange?: number;
-    patrolSpeed?: number;
-    hasArmor?: boolean;
+    id: string; x: number; y: number; z: number; isAlly: boolean;
+    callsign: string; weaponId: WeaponId; patrolAxis?: 'X' | 'Z' | 'NONE';
+    patrolRange?: number; patrolSpeed?: number; hasArmor?: boolean;
   }) => {
     const root = new THREE.Group();
     root.position.set(opts.x, opts.y, opts.z);
     const pivotGroup = new THREE.Group();
     root.add(pivotGroup);
 
-    const suitColor = opts.isAlly ? 0x1e3a5f : 0x5c2828;
-    const headColor = opts.isAlly ? 0x0f172a : 0x2a1212;
-    const matSuit = new THREE.MeshStandardMaterial({ color: suitColor, roughness: 0.72, metalness: 0.18 });
-    const matHead = new THREE.MeshStandardMaterial({ color: headColor, roughness: 0.55, metalness: 0.25 });
+    const matSuit = new THREE.MeshStandardMaterial({ color: opts.isAlly ? 0x1e3a5f : 0x5c2828, roughness: 0.72, metalness: 0.18 });
+    const matHead = new THREE.MeshStandardMaterial({ color: opts.isAlly ? 0x0f172a : 0x2a1212, roughness: 0.55, metalness: 0.25 });
 
     const legs = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.68, 0.2), matSuit);
     legs.position.set(0, 0.34, 0);
@@ -324,10 +314,7 @@ function spawnAssaultSquads(
     headMesh.castShadow = !isSoftwareGl;
     pivotGroup.add(headMesh);
 
-    const visorMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.06, 0.04),
-      new THREE.MeshBasicMaterial({ color: opts.isAlly ? 0x38bdf8 : 0xf59e0b })
-    );
+    const visorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.04), new THREE.MeshBasicMaterial({ color: opts.isAlly ? 0x38bdf8 : 0xf59e0b }));
     visorMesh.position.set(0, 1.66, 0.12);
     pivotGroup.add(visorMesh);
 
@@ -335,11 +322,7 @@ function spawnAssaultSquads(
     if (opts.hasArmor) {
       armorMesh = new THREE.Mesh(
         new THREE.BoxGeometry(0.46, 0.48, 0.06),
-        new THREE.MeshStandardMaterial({
-          color: opts.isAlly ? 0x38bdf8 : 0xf59e0b,
-          metalness: 0.75,
-          roughness: 0.3,
-        })
+        new THREE.MeshStandardMaterial({ color: opts.isAlly ? 0x38bdf8 : 0xf59e0b, metalness: 0.75, roughness: 0.3 })
       );
       armorMesh.position.set(0, 1.1, 0.14);
       if (!opts.isAlly) {
@@ -358,61 +341,35 @@ function spawnAssaultSquads(
       headMesh.userData.hitZone = 'HEAD';
       shootableMeshes.push(torsoMesh, headMesh);
 
-      const lineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 1.64, 0.12),
-        new THREE.Vector3(0, 1.4, 14),
-      ]);
-      laserLine = new THREE.Line(
-        lineGeo,
-        new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.75 })
-      );
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 1.64, 0.12), new THREE.Vector3(0, 1.4, 14)]);
+      laserLine = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.75 }));
       laserLine.visible = false;
       pivotGroup.add(laserLine);
     }
 
     levelGroup.add(root);
     targets.push({
-      id: opts.id,
-      type: 'COMBAT_BOT',
-      sector: 'KILLHOUSE',
-      root,
-      pivotGroup,
-      headMesh,
-      torsoMesh,
-      armorMesh,
-      visorMesh,
-      laserLine,
-      basePosition: new THREE.Vector3(opts.x, opts.y, opts.z),
-      patrolOffset: Math.random() * Math.PI * 2,
-      patrolSpeed: opts.patrolSpeed ?? 1.0,
-      patrolAxis: opts.patrolAxis ?? 'X',
-      patrolRange: opts.patrolRange ?? 2.2,
-      maxHealth: 100,
-      health: 100,
-      armorHealth: opts.hasArmor ? 60 : 0,
-      isDown: false,
-      downTimer: 0,
-      hitTiltAngle: 0,
-      hitTiltVelocity: 0,
-      canShootBack: !opts.isAlly,
-      windupTimer: 0,
-      cooldownTimer: 1.4 + Math.random() * 1.5,
-      isTelegraphing: false,
-      isAlly: opts.isAlly,
-      callsign: opts.callsign,
-      team: opts.isAlly ? 'VANGUARD' : 'BLACKTHORN',
-      weaponId: opts.weaponId,
+      id: opts.id, type: 'COMBAT_BOT', sector: 'KILLHOUSE', root, pivotGroup, headMesh, torsoMesh, armorMesh, visorMesh, laserLine,
+      basePosition: new THREE.Vector3(opts.x, opts.y, opts.z), patrolOffset: Math.random() * Math.PI * 2,
+      patrolSpeed: opts.patrolSpeed ?? 1.0, patrolAxis: opts.patrolAxis ?? 'X', patrolRange: opts.patrolRange ?? 2.2,
+      maxHealth: 100, health: 100, armorHealth: opts.hasArmor ? 60 : 0, isDown: false, downTimer: 0,
+      hitTiltAngle: 0, hitTiltVelocity: 0, canShootBack: !opts.isAlly, windupTimer: 0,
+      cooldownTimer: 1.4 + Math.random() * 1.5, isTelegraphing: false,
+      isAlly: opts.isAlly, callsign: opts.callsign, team: opts.isAlly ? 'VANGUARD' : 'BLACKTHORN', weaponId: opts.weaponId,
     } as YardBotEntity);
   };
 
-  spawnBot({ id: 'assault_bt_siteA', callsign: 'KRAKEN-BT', weaponId: 'AK47_RIFLE', x: -21.1, y: 0.0, z: 6.0, isAlly: false, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
-  spawnBot({ id: 'assault_bt_dock', callsign: 'WRAITH-BT', weaponId: 'SNIPER_BOLT', x: -8.7, y: 0.0, z: 22.0, isAlly: false, patrolAxis: 'X', patrolRange: 2.8, hasArmor: true });
-  spawnBot({ id: 'assault_bt_siteB', callsign: 'HAVOC-BT', weaponId: 'AK47_RIFLE', x: 3.5, y: 0.0, z: 6.9, isAlly: false, patrolAxis: 'Z', patrolRange: 2.6, hasArmor: true });
-  spawnBot({ id: 'assault_bt_catwalk', callsign: 'SERAPH-BT', weaponId: 'M4_CARBINE', x: -11.5, y: 0.0, z: 5.5, isAlly: false, patrolAxis: 'X', patrolRange: 2.0, hasArmor: true });
-  spawnBot({ id: 'assault_bt_east', callsign: 'VOLT-BT', weaponId: 'P50_PISTOL', x: 17.8, y: 0.0, z: 5.5, isAlly: false, patrolAxis: 'Z', patrolRange: 2.8, hasArmor: true });
+  // 5 Defensores Blackthorn — Nascem juntos na Base Interna do Galpão e se espalham para defender Bombs A e B
+  spawnBot({ id: 'assault_bt_siteA', callsign: 'KRAKEN-BT', weaponId: 'AK47_RIFLE', x: -5.5, y: 0.0, z: 6.5, isAlly: false, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
+  spawnBot({ id: 'assault_bt_dock', callsign: 'WRAITH-BT', weaponId: 'SNIPER_BOLT', x: 1.2, y: 0.0, z: 6.5, isAlly: false, patrolAxis: 'X', patrolRange: 2.8, hasArmor: true });
+  spawnBot({ id: 'assault_bt_siteB', callsign: 'HAVOC-BT', weaponId: 'AK47_RIFLE', x: -2.3, y: 0.0, z: 4.2, isAlly: false, patrolAxis: 'Z', patrolRange: 2.6, hasArmor: true });
+  spawnBot({ id: 'assault_bt_catwalk', callsign: 'SERAPH-BT', weaponId: 'M4_CARBINE', x: -6.2, y: 0.0, z: 4.2, isAlly: false, patrolAxis: 'X', patrolRange: 2.0, hasArmor: true });
+  spawnBot({ id: 'assault_bt_east', callsign: 'VOLT-BT', weaponId: 'P50_PISTOL', x: 2.2, y: 0.0, z: 4.2, isAlly: false, patrolAxis: 'Z', patrolRange: 2.8, hasArmor: true });
 
-  spawnBot({ id: 'assault_vg_1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -29.5, y: 0.0, z: 32.5, isAlly: true, patrolAxis: 'X', patrolRange: 2.2, hasArmor: true });
-  spawnBot({ id: 'assault_vg_2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: -32.0, y: 0.0, z: 18.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.2, hasArmor: true });
-  spawnBot({ id: 'assault_vg_3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -14.3, y: 0.0, z: 23.9, isAlly: true, patrolAxis: 'X', patrolRange: 2.8 });
-  spawnBot({ id: 'assault_vg_4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: 8.5, y: 0.0, z: 38.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.0 });
+  // 4 Aliados Vanguard — Nascem juntos ao lado do jogador na Rua de Spawn igual CS
+  spawnBot({ id: 'assault_vg_1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -24.2, y: 0.0, z: 36.2, isAlly: true, patrolAxis: 'X', patrolRange: 2.2, hasArmor: true });
+  spawnBot({ id: 'assault_vg_2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: -29.2, y: 0.0, z: 36.2, isAlly: true, patrolAxis: 'Z', patrolRange: 3.2, hasArmor: true });
+  spawnBot({ id: 'assault_vg_3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -25.0, y: 0.0, z: 39.0, isAlly: true, patrolAxis: 'X', patrolRange: 2.8 });
+  spawnBot({ id: 'assault_vg_4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: -28.4, y: 0.0, z: 39.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.0 });
 }
+

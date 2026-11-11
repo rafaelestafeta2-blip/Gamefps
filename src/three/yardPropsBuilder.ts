@@ -319,16 +319,17 @@ export function spawnYard5v5Bots(
     } as YardBotEntity);
   };
 
-  // 5 Enemy Defenders (Blackthorn Mercenaries)
-  spawnBot({ id: 'yard_def_mid', callsign: 'KRAKEN-BT', weaponId: 'AK47_RIFLE', x: -0.8, z: 6.2, isAlly: false, patrolAxis: 'X', patrolRange: 3.2, hasArmor: true });
-  spawnBot({ id: 'yard_def_siteA_truck', callsign: 'WRAITH-BT', weaponId: 'SNIPER_BOLT', x: 26.5, z: -7.5, isAlly: false, patrolAxis: 'Z', patrolRange: 3.5, hasArmor: true });
-  spawnBot({ id: 'yard_def_siteA_high', callsign: 'VOLT-BT', weaponId: 'P50_PISTOL', x: 33.5, y: 2.5, z: 2.2, isAlly: false, patrolAxis: 'X', patrolRange: 1.8 });
-  spawnBot({ id: 'yard_def_siteB', callsign: 'SERAPH-BT', weaponId: 'M4_CARBINE', x: -21.5, z: -6.5, isAlly: false, patrolAxis: 'X', patrolRange: 3.0, hasArmor: true });
-  spawnBot({ id: 'yard_def_north_sniper', callsign: 'HAVOC-BT', weaponId: 'AK47_RIFLE', x: 11.5, z: -15.5, isAlly: false, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
+  // 5 Enemy Defenders (Blackthorn Mercenaries — Nascem juntos na Base Norte igual CS e se espalham pros Bombs A/B/Meio)
+  spawnBot({ id: 'yard_def_mid', callsign: 'KRAKEN-BT', weaponId: 'AK47_RIFLE', x: 0.0, z: -24.5, isAlly: false, patrolAxis: 'X', patrolRange: 3.2, hasArmor: true });
+  spawnBot({ id: 'yard_def_siteA_truck', callsign: 'WRAITH-BT', weaponId: 'SNIPER_BOLT', x: 3.2, z: -25.5, isAlly: false, patrolAxis: 'Z', patrolRange: 3.5, hasArmor: true });
+  spawnBot({ id: 'yard_def_siteA_high', callsign: 'VOLT-BT', weaponId: 'P50_PISTOL', x: -3.2, z: -25.5, isAlly: false, patrolAxis: 'X', patrolRange: 1.8 });
+  spawnBot({ id: 'yard_def_siteB', callsign: 'SERAPH-BT', weaponId: 'M4_CARBINE', x: -1.8, z: -27.5, isAlly: false, patrolAxis: 'X', patrolRange: 3.0, hasArmor: true });
+  spawnBot({ id: 'yard_def_north_sniper', callsign: 'HAVOC-BT', weaponId: 'AK47_RIFLE', x: 1.8, z: -27.5, isAlly: false, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
 
-  // 4 Allied Attackers (Vanguard Operations Squad)
-  spawnBot({ id: 'yard_ally_1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -3.5, z: 32.0, isAlly: true, patrolAxis: 'Z', patrolRange: 5.5, patrolSpeed: 1.35, hasArmor: true });
-  spawnBot({ id: 'yard_ally_2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: 1.2, z: 31.0, isAlly: true, patrolAxis: 'Z', patrolRange: 6.0, patrolSpeed: 1.25, hasArmor: true });
-  spawnBot({ id: 'yard_ally_3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -11.5, z: 12.0, isAlly: true, patrolAxis: 'Z', patrolRange: 4.5, patrolSpeed: 1.2 });
-  spawnBot({ id: 'yard_ally_4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: 12.0, z: 8.0, isAlly: true, patrolAxis: 'Z', patrolRange: 4.5, patrolSpeed: 1.2 });
+  // 4 Allied Attackers (Vanguard Operations Squad — Nascem juntos ao lado do jogador na Base Sul igual CS)
+  spawnBot({ id: 'yard_ally_1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -2.2, z: 33.8, isAlly: true, patrolAxis: 'Z', patrolRange: 5.5, patrolSpeed: 1.35, hasArmor: true });
+  spawnBot({ id: 'yard_ally_2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: 2.2, z: 33.8, isAlly: true, patrolAxis: 'Z', patrolRange: 6.0, patrolSpeed: 1.25, hasArmor: true });
+  spawnBot({ id: 'yard_ally_3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -1.6, z: 36.2, isAlly: true, patrolAxis: 'Z', patrolRange: 4.5, patrolSpeed: 1.2 });
+  spawnBot({ id: 'yard_ally_4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: 1.6, z: 36.2, isAlly: true, patrolAxis: 'Z', patrolRange: 4.5, patrolSpeed: 1.2 });
 }
+

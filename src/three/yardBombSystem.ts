@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   playC4DetonationExplosion,
+  playC4KeypadDigitSound,
   playMatchEndFanfare,
   playRealBombPlantedVoice,
   playRealC4Beep,
@@ -37,6 +38,7 @@ export class YardBombSystem {
   private beepAccum = 0;
   private allyFireTimer = 0;
   private isPlantingHeld = false;
+  private lastKeypadDigitIdx = -1;
   private activeMode: DrillMode = 'YARD_BOMB_5V5';
 
   public info: YardBombHudInfo = {
@@ -64,6 +66,7 @@ export class YardBombSystem {
   public resetRound(mode: DrillMode = 'YARD_BOMB_5V5', keepMatchScore = false): void {
     this.activeMode = mode;
     this.isPlantingHeld = false;
+    this.lastKeypadDigitIdx = -1;
     this.beepAccum = 0;
     this.allyFireTimer = 0;
     this.c4MeshGroup.visible = false;
@@ -284,14 +287,21 @@ export class YardBombSystem {
         this.info.bombStatus = 'CARRIED';
         this.info.plantProgress = 0;
         this.isPlantingHeld = false;
+        this.lastKeypadDigitIdx = -1;
       }
     }
 
     if (playerAlive && this.isPlantingHeld && this.info.nearSite && this.info.bombStatus !== 'PLANTED') {
       this.info.bombStatus = 'PLANTING';
       this.info.plantProgress = Math.min(1, this.info.plantProgress + dt / 2.4);
+      const digitIdx = Math.min(7, Math.floor(this.info.plantProgress * 8));
+      if (digitIdx !== this.lastKeypadDigitIdx) {
+        this.lastKeypadDigitIdx = digitIdx;
+        playC4KeypadDigitSound(digitIdx);
+      }
       if (this.info.plantProgress >= 1) {
         this.isPlantingHeld = false;
+        this.lastKeypadDigitIdx = -1;
         this.info.bombStatus = 'PLANTED';
         this.info.plantedSite = this.info.nearSite;
         this.info.c4TimerSec = 40;

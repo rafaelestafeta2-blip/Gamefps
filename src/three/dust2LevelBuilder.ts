@@ -225,22 +225,12 @@ export async function loadDust2MapGeometry(
   }
 }
 
-/**
- * Disposes all geometries, materials, PBR textures, and spatial collider data
- * of the Dust2 `.glb` arena when the player exits the match back to the Lobby.
- */
 export function disposeDust2MapGeometry(bundle: Dust2LevelBundle): void {
   if (bundle.mapGeometryGroup) {
     bundle.mapGeometryGroup.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        if (child.geometry) {
-          child.geometry.dispose();
-        }
-        const mats = Array.isArray(child.material)
-          ? child.material
-          : child.material
-            ? [child.material]
-            : [];
+        if (child.geometry) child.geometry.dispose();
+        const mats = Array.isArray(child.material) ? child.material : child.material ? [child.material] : [];
         mats.forEach((m) => {
           const std = m as THREE.MeshStandardMaterial;
           if (std.map) std.map.dispose();
@@ -258,7 +248,6 @@ export function disposeDust2MapGeometry(bundle: Dust2LevelBundle): void {
     bundle.mapGeometryGroup = null;
   }
 
-  // Keep only bot hitboxes in shootableMeshes, removing environment meshes
   for (let i = bundle.shootableMeshes.length - 1; i >= 0; i--) {
     if (bundle.shootableMeshes[i].userData?.isEnvironment) {
       bundle.shootableMeshes.splice(i, 1);
@@ -277,12 +266,7 @@ function addDust2BombSiteBeacon(
 ): void {
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(2.1, 2.45, 28),
-    new THREE.MeshBasicMaterial({
-      color: colorHex,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.78,
-    })
+    new THREE.MeshBasicMaterial({ color: colorHex, side: THREE.DoubleSide, transparent: true, opacity: 0.78 })
   );
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(pos.x, pos.y + 0.05, pos.z);
@@ -309,11 +293,7 @@ function addDust2BombSiteBeacon(
   badgeTex.colorSpace = THREE.SRGBColorSpace;
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(1.3, 1.3),
-    new THREE.MeshBasicMaterial({
-      map: badgeTex,
-      transparent: true,
-      side: THREE.DoubleSide,
-    })
+    new THREE.MeshBasicMaterial({ map: badgeTex, transparent: true, side: THREE.DoubleSide })
   );
   sign.position.set(pos.x, pos.y + 2.35, pos.z);
   levelGroup.add(sign);
@@ -326,35 +306,17 @@ function spawnDust2Squads(
   isSoftwareGl: boolean
 ): void {
   const spawnBot = (opts: {
-    id: string;
-    x: number;
-    y: number;
-    z: number;
-    isAlly: boolean;
-    callsign: string;
-    weaponId: WeaponId;
-    patrolAxis?: 'X' | 'Z' | 'NONE';
-    patrolRange?: number;
-    patrolSpeed?: number;
-    hasArmor?: boolean;
+    id: string; x: number; y: number; z: number; isAlly: boolean;
+    callsign: string; weaponId: WeaponId; patrolAxis?: 'X' | 'Z' | 'NONE';
+    patrolRange?: number; patrolSpeed?: number; hasArmor?: boolean;
   }) => {
     const root = new THREE.Group();
     root.position.set(opts.x, opts.y, opts.z);
     const pivotGroup = new THREE.Group();
     root.add(pivotGroup);
 
-    const suitColor = opts.isAlly ? 0x927248 : 0x1e3a5f; // T Desert vs CT Navy
-    const headColor = opts.isAlly ? 0x451a03 : 0x0f172a;
-    const matSuit = new THREE.MeshStandardMaterial({
-      color: suitColor,
-      roughness: 0.72,
-      metalness: 0.18,
-    });
-    const matHead = new THREE.MeshStandardMaterial({
-      color: headColor,
-      roughness: 0.55,
-      metalness: 0.25,
-    });
+    const matSuit = new THREE.MeshStandardMaterial({ color: opts.isAlly ? 0x927248 : 0x1e3a5f, roughness: 0.72, metalness: 0.18 });
+    const matHead = new THREE.MeshStandardMaterial({ color: opts.isAlly ? 0x451a03 : 0x0f172a, roughness: 0.55, metalness: 0.25 });
 
     const legs = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.68, 0.2), matSuit);
     legs.position.set(0, 0.34, 0);
@@ -370,10 +332,7 @@ function spawnDust2Squads(
     headMesh.castShadow = !isSoftwareGl;
     pivotGroup.add(headMesh);
 
-    const visorMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.06, 0.04),
-      new THREE.MeshBasicMaterial({ color: opts.isAlly ? 0x38bdf8 : 0xf59e0b })
-    );
+    const visorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.04), new THREE.MeshBasicMaterial({ color: opts.isAlly ? 0x38bdf8 : 0xf59e0b }));
     visorMesh.position.set(0, 1.66, 0.12);
     pivotGroup.add(visorMesh);
 
@@ -381,11 +340,7 @@ function spawnDust2Squads(
     if (opts.hasArmor) {
       armorMesh = new THREE.Mesh(
         new THREE.BoxGeometry(0.46, 0.48, 0.06),
-        new THREE.MeshStandardMaterial({
-          color: opts.isAlly ? 0x38bdf8 : 0xf59e0b,
-          metalness: 0.75,
-          roughness: 0.3,
-        })
+        new THREE.MeshStandardMaterial({ color: opts.isAlly ? 0x38bdf8 : 0xf59e0b, metalness: 0.75, roughness: 0.3 })
       );
       armorMesh.position.set(0, 1.1, 0.14);
       if (!opts.isAlly) {
@@ -404,63 +359,35 @@ function spawnDust2Squads(
       headMesh.userData.hitZone = 'HEAD';
       shootableMeshes.push(torsoMesh, headMesh);
 
-      const lineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 1.64, 0.12),
-        new THREE.Vector3(0, 1.4, 14),
-      ]);
-      laserLine = new THREE.Line(
-        lineGeo,
-        new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.75 })
-      );
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 1.64, 0.12), new THREE.Vector3(0, 1.4, 14)]);
+      laserLine = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.75 }));
       laserLine.visible = false;
       pivotGroup.add(laserLine);
     }
 
     levelGroup.add(root);
     targets.push({
-      id: opts.id,
-      type: 'COMBAT_BOT',
-      sector: 'KILLHOUSE',
-      root,
-      pivotGroup,
-      headMesh,
-      torsoMesh,
-      armorMesh,
-      visorMesh,
-      laserLine,
-      basePosition: new THREE.Vector3(opts.x, opts.y, opts.z),
-      patrolOffset: Math.random() * Math.PI * 2,
-      patrolSpeed: opts.patrolSpeed ?? 1.0,
-      patrolAxis: opts.patrolAxis ?? 'X',
-      patrolRange: opts.patrolRange ?? 2.2,
-      maxHealth: 100,
-      health: 100,
-      armorHealth: opts.hasArmor ? 60 : 0,
-      isDown: false,
-      downTimer: 0,
-      hitTiltAngle: 0,
-      hitTiltVelocity: 0,
-      canShootBack: !opts.isAlly,
-      windupTimer: 0,
-      cooldownTimer: 1.4 + Math.random() * 1.5,
-      isTelegraphing: false,
-      isAlly: opts.isAlly,
-      callsign: opts.callsign,
-      team: opts.isAlly ? 'VANGUARD' : 'BLACKTHORN',
-      weaponId: opts.weaponId,
+      id: opts.id, type: 'COMBAT_BOT', sector: 'KILLHOUSE', root, pivotGroup, headMesh, torsoMesh, armorMesh, visorMesh, laserLine,
+      basePosition: new THREE.Vector3(opts.x, opts.y, opts.z), patrolOffset: Math.random() * Math.PI * 2,
+      patrolSpeed: opts.patrolSpeed ?? 1.0, patrolAxis: opts.patrolAxis ?? 'X', patrolRange: opts.patrolRange ?? 2.2,
+      maxHealth: 100, health: 100, armorHealth: opts.hasArmor ? 60 : 0, isDown: false, downTimer: 0,
+      hitTiltAngle: 0, hitTiltVelocity: 0, canShootBack: !opts.isAlly, windupTimer: 0,
+      cooldownTimer: 1.4 + Math.random() * 1.5, isTelegraphing: false,
+      isAlly: opts.isAlly, callsign: opts.callsign, team: opts.isAlly ? 'VANGUARD' : 'BLACKTHORN', weaponId: opts.weaponId,
     } as YardBotEntity);
   };
 
-  // 5 Counter-Terrorist Defenders (Blackthorn Mercenaries)
-  spawnBot({ id: 'dust2_ct_siteA', callsign: 'KRAKEN-BT', weaponId: 'AK47_RIFLE', x: 28.5, y: 7.2, z: -58.5, isAlly: false, patrolAxis: 'X', patrolRange: 2.2, hasArmor: true });
-  spawnBot({ id: 'dust2_ct_longA', callsign: 'WRAITH-BT', weaponId: 'SNIPER_BOLT', x: 35.0, y: 4.8, z: -34.0, isAlly: false, patrolAxis: 'Z', patrolRange: 3.5, hasArmor: true });
-  spawnBot({ id: 'dust2_ct_shortA', callsign: 'VOLT-BT', weaponId: 'P50_PISTOL', x: 2.0, y: 4.8, z: -36.5, isAlly: false, patrolAxis: 'Z', patrolRange: 2.5, hasArmor: true });
-  spawnBot({ id: 'dust2_ct_mid', callsign: 'SERAPH-BT', weaponId: 'M4_CARBINE', x: -11.0, y: 2.8, z: -36.0, isAlly: false, patrolAxis: 'X', patrolRange: 1.8, hasArmor: true });
-  spawnBot({ id: 'dust2_ct_siteB', callsign: 'HAVOC-BT', weaponId: 'AK47_RIFLE', x: -39.5, y: 4.8, z: -65.0, isAlly: false, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
+  // 5 Counter-Terrorist Defenders (Blackthorn — Nascem juntos no CT Spawn igual CS e se espalham pros Bombs A/B/Meio)
+  spawnBot({ id: 'dust2_ct_siteA', callsign: 'KRAKEN-BT', weaponId: 'AK47_RIFLE', x: -4.0, y: 1.6, z: -55.5, isAlly: false, patrolAxis: 'X', patrolRange: 2.2, hasArmor: true });
+  spawnBot({ id: 'dust2_ct_longA', callsign: 'WRAITH-BT', weaponId: 'SNIPER_BOLT', x: -8.5, y: 1.6, z: -55.5, isAlly: false, patrolAxis: 'Z', patrolRange: 3.5, hasArmor: true });
+  spawnBot({ id: 'dust2_ct_shortA', callsign: 'VOLT-BT', weaponId: 'P50_PISTOL', x: -6.2, y: 1.6, z: -53.5, isAlly: false, patrolAxis: 'Z', patrolRange: 2.5, hasArmor: true });
+  spawnBot({ id: 'dust2_ct_mid', callsign: 'SERAPH-BT', weaponId: 'M4_CARBINE', x: -3.8, y: 1.6, z: -58.0, isAlly: false, patrolAxis: 'X', patrolRange: 1.8, hasArmor: true });
+  spawnBot({ id: 'dust2_ct_siteB', callsign: 'HAVOC-BT', weaponId: 'AK47_RIFLE', x: -8.6, y: 1.6, z: -58.0, isAlly: false, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
 
-  // 4 Allied Attackers (Vanguard Operations Squad)
-  spawnBot({ id: 'dust2_t_ally1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -12.0, y: 8.0, z: 18.5, isAlly: true, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
-  spawnBot({ id: 'dust2_t_ally2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: 10.0, y: 4.8, z: 12.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.5, hasArmor: true });
-  spawnBot({ id: 'dust2_t_ally3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -11.5, y: 4.8, z: -12.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.0 });
-  spawnBot({ id: 'dust2_t_ally4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: -41.0, y: 5.6, z: -26.0, isAlly: true, patrolAxis: 'Z', patrolRange: 2.5 });
+  // 4 Allied Attackers (Vanguard — Nascem juntos ao lado do jogador no TR Spawn igual CS)
+  spawnBot({ id: 'dust2_t_ally1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -13.5, y: 8.0, z: 18.5, isAlly: true, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
+  spawnBot({ id: 'dust2_t_ally2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: -18.8, y: 8.0, z: 18.5, isAlly: true, patrolAxis: 'Z', patrolRange: 3.5, hasArmor: true });
+  spawnBot({ id: 'dust2_t_ally3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -14.5, y: 8.0, z: 21.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.0 });
+  spawnBot({ id: 'dust2_t_ally4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: -18.0, y: 8.0, z: 21.0, isAlly: true, patrolAxis: 'Z', patrolRange: 2.5 });
 }
+

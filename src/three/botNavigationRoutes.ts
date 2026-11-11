@@ -11,9 +11,11 @@ export interface BotNavData {
   patrolDir: 1 | -1;
   tacticalState:
     | 'PATROL'
+    | 'FOLLOW_PLAYER'
     | 'INVESTIGATE'
     | 'COMBAT'
     | 'RUSH_PLANTED'
+    | 'DEFEND_PLANTED'
     | 'PLANTING'
     | 'DEFUSING';
   lockedTargetId: string | null;
@@ -32,6 +34,7 @@ export interface BotNavData {
   avoidTimer: number;
   verticalVel: number;
   plantOrDefuseTimer: number;
+  lastKeypadDigit: number;
   visionRange: number;
   fieldOfView: number;
 }
@@ -51,12 +54,8 @@ const _losDir = new THREE.Vector3();
 const _navDir = new THREE.Vector3();
 const _steerDir = new THREE.Vector3();
 const _resolvedHoriz = { x: 0, z: 0 };
-const STEER_TEST_ANGLES = [0.55, -0.55, 1.05, -1.05, 1.55, -1.55, 2.2, -2.2];
+const STEER_TEST_ANGLES = [0.5, -0.5, 1.0, -1.0, 1.55, -1.55, 2.15, -2.15, 2.65, -2.65];
 
-/**
- * Interpola ângulos em radianos sempre pelo menor arco [-PI, +PI],
- * impedindo que o bot dê um giro de 360° de costas ao cruzar o limite sul (-PI / +PI).
- */
 export function dampAngleShortest(
   current: number,
   target: number,
@@ -68,20 +67,19 @@ export function dampAngleShortest(
 }
 
 /**
- * Rotas táticas completas de patrulha, avanço aos objetivos (Bomb Sites A/B)
- * e rotação pelo mapa para atacantes (Vanguard) e defensores (Blackthorn).
+ * Rotas táticas CS a partir da Base de Spawn de cada time até os Bomb Sites A, B e Meio.
  */
 export function getMapRoutes(mode: DrillMode): TacticalMapRoutes {
   const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
   if (mode === 'DUST2_BOMB_5V5') {
     return {
-      vgA: [v(-4, 4.8, 16), v(18, 4.8, 12), v(33.5, 4.8, -16), v(34, 4.8, -42), v(28.8, 7.2, -60.4), v(14, 6.0, -48)],
-      vgB: [v(-18, 6.0, 8), v(-38, 5.6, -16), v(-41, 4.8, -42), v(-40, 4.8, -67.2), v(-24, 3.2, -56)],
-      vgMid: [v(-11.5, 4.8, 4), v(-11, 2.8, -22), v(2, 4.8, -36.5), v(16, 6.0, -48), v(28.8, 7.2, -60.4), v(-11, 2.8, -36), v(-40, 4.8, -67.2)],
-      btA: [v(28.5, 7.2, -58.5), v(34.5, 4.8, -36), v(33.5, 4.8, -14), v(18, 4.8, 8), v(2, 4.8, -36.5), v(28.8, 7.2, -60.4)],
-      btB: [v(-39.5, 4.8, -65), v(-40.5, 4.8, -42), v(-38, 5.6, -18), v(-14, 4.8, -18), v(-11, 2.8, -36), v(-40, 4.8, -67.2)],
-      btMid: [v(-6.2, 1.6, -54), v(-11, 2.8, -36), v(-11, 4.8, -12), v(2, 4.8, -36.5), v(22, 6.0, -52), v(-33, 4.8, -56)],
+      vgA: [v(-4, 4.8, 16), v(18, 4.8, 12), v(33.5, 4.8, -16), v(34, 4.8, -42), v(28.8, 7.2, -60.4)],
+      vgB: [v(-18, 6.0, 10), v(-38, 5.6, -16), v(-41, 4.8, -42), v(-40, 4.8, -67.2)],
+      vgMid: [v(-11.5, 4.8, 6), v(-11, 2.8, -22), v(2, 4.8, -36.5), v(16, 6.0, -48), v(28.8, 7.2, -60.4)],
+      btA: [v(6, 2.4, -54), v(22, 6.0, -56), v(28.5, 7.2, -58.5), v(34.5, 4.8, -36), v(28.8, 7.2, -60.4)],
+      btB: [v(-16, 3.2, -56), v(-30, 4.8, -58), v(-39.5, 4.8, -65), v(-40.5, 4.8, -42), v(-40, 4.8, -67.2)],
+      btMid: [v(-8, 2.4, -46), v(-11, 2.8, -36), v(2, 4.8, -36.5), v(22, 6.0, -52), v(-30, 4.8, -58)],
       siteA: v(28.8, 7.2, -60.4),
       siteB: v(-40.0, 4.8, -67.2),
     };
@@ -89,27 +87,67 @@ export function getMapRoutes(mode: DrillMode): TacticalMapRoutes {
 
   if (mode === 'ASSAULT_BOMB_5V5') {
     return {
-      vgA: [v(-28, 0, 30), v(-27, 0, 18.5), v(-22.9, 0, 11.6), v(-12, 0, 8.5), v(-2.3, 0, 6.9)],
-      vgB: [v(-16, 0, 28), v(-9.5, 0, 20), v(-8.8, 0, 12.5), v(-2.3, 0, 6.9), v(-22.9, 0, 11.6)],
-      vgMid: [v(8.5, 0, 34), v(18.2, 0, 22), v(18.2, 0, 6.5), v(-2.3, 0, 6.9), v(-22.9, 0, 11.6)],
-      btA: [v(-21.1, 0, 6), v(-22.9, 0, 11.6), v(-26, 0, 22), v(-14, 0, 24), v(-8.8, 0, 12.5), v(-2.3, 0, 6.9)],
-      btB: [v(3.5, 0, 6.9), v(-2.3, 0, 6.9), v(-9.5, 0, 19), v(8.5, 0, 26), v(18, 0, 14), v(-22.9, 0, 11.6)],
-      btMid: [v(17.8, 0, 5.5), v(18, 0, 20), v(-8.7, 0, 22), v(-26, 0, 20), v(-22.9, 0, 11.6), v(-2.3, 0, 6.9)],
+      vgA: [v(-26.5, 0, 29), v(-26.5, 0, 19), v(-22.9, 0, 11.6)],
+      vgB: [v(-18, 0, 31), v(-10, 0, 21), v(-8.8, 0, 12.5), v(-2.3, 0, 6.9)],
+      vgMid: [v(-8, 0, 34), v(12, 0, 32), v(18, 0, 16), v(8, 0, 6.9), v(-2.3, 0, 6.9)],
+      btA: [v(-11, 0, 6.5), v(-18, 0, 9.5), v(-22.9, 0, 11.6), v(-25, 0, 19), v(-22.9, 0, 11.6)],
+      btB: [v(-2.3, 0, 6.9), v(-8.8, 0, 12.5), v(-9.5, 0, 20), v(-2.3, 0, 6.9)],
+      btMid: [v(8, 0, 6.2), v(17.8, 0, 10), v(17.8, 0, 22), v(-9, 0, 21), v(-22.9, 0, 11.6)],
       siteA: v(-22.9, 0, 11.6),
       siteB: v(-2.3, 0, 6.9),
     };
   }
 
   return {
-    vgA: [v(6, 0, 28), v(16, 0, 18), v(22, 0, 4), v(26, 0, -7.5), v(8, 0, -10), v(-21.5, 0, -6.5)],
-    vgB: [v(-8, 0, 28), v(-16, 0, 16), v(-20, 0, 2), v(-21.5, 0, -6.5), v(-4, 0, -8), v(26, 0, -7.5)],
-    vgMid: [v(0, 0, 26), v(-1, 0, 10), v(2, 0, -2), v(26, 0, -7.5), v(-21.5, 0, -6.5)],
-    btA: [v(24, 0, -18), v(26, 0, -7.5), v(22, 0, 8), v(12, 0, 18), v(0, 0, 6), v(-21.5, 0, -6.5)],
-    btB: [v(-20, 0, -18), v(-21.5, 0, -6.5), v(-19, 0, 10), v(-10, 0, 18), v(0, 0, 4), v(26, 0, -7.5)],
-    btMid: [v(2, 0, -20), v(-0.8, 0, -4), v(0, 0, 12), v(18, 0, 12), v(26, 0, -7.5), v(-18, 0, 10), v(-21.5, 0, -6.5)],
+    vgA: [v(0, 0, 24), v(12, 0, 16), v(21, 0, 4), v(26, 0, -7.5)],
+    vgB: [v(-1, 0, 24), v(-14, 0, 15), v(-20, 0, 2), v(-21.5, 0, -6.5)],
+    vgMid: [v(0, 0, 24), v(-0.5, 0, 11), v(0, 0, -4), v(16, 0, -8), v(26, 0, -7.5)],
+    btA: [v(12, 0, -21), v(23, 0, -16), v(26, 0, -7.5), v(21, 0, 5), v(26, 0, -7.5)],
+    btB: [v(-12, 0, -21), v(-20, 0, -15), v(-21.5, 0, -6.5), v(-19, 0, 6), v(-21.5, 0, -6.5)],
+    btMid: [v(0, 0, -18), v(-0.5, 0, -5), v(0, 0, 10), v(16, 0, 8), v(26, 0, -7.5)],
     siteA: v(26, 0, -7.5),
     siteB: v(-21.5, 0, -6.5),
   };
+}
+
+/**
+ * Guia o bot até o Bomb Site plantado (A ou B) usando o próximo waypoint de corredor
+ * quando ainda estiver distante, evitando bater em paredes no caminho.
+ */
+export function getWaypointTowardPlantedSite(
+  botPos: THREE.Vector3,
+  plantedSite: 'A' | 'B',
+  mode: DrillMode,
+  isAlly: boolean
+): THREE.Vector3 {
+  const routes = getMapRoutes(mode);
+  const sitePos = plantedSite === 'A' ? routes.siteA : routes.siteB;
+  const distToSite = Math.hypot(botPos.x - sitePos.x, botPos.z - sitePos.z);
+  if (distToSite <= 11.5) return sitePos;
+
+  const lane =
+    plantedSite === 'A'
+      ? isAlly
+        ? routes.vgA
+        : routes.btA
+      : isAlly
+        ? routes.vgB
+        : routes.btB;
+
+  let bestWp = sitePos;
+  let bestScore = Infinity;
+  for (let i = 0; i < lane.length; i++) {
+    const wp = lane[i];
+    const wpDistToSite = Math.hypot(wp.x - sitePos.x, wp.z - sitePos.z);
+    if (wpDistToSite >= distToSite - 2.0) continue;
+    const botDistToWp = Math.hypot(botPos.x - wp.x, botPos.z - wp.z);
+    const score = botDistToWp + wpDistToSite * 0.45;
+    if (score < bestScore) {
+      bestScore = score;
+      bestWp = wp;
+    }
+  }
+  return bestWp;
 }
 
 export function isTargetInFieldOfView(
@@ -227,7 +265,7 @@ export function moveBotWithPhysics(
   lockLookAtTarget?: THREE.Vector3 | null
 ): void {
   const bPos = bot.root.position;
-  const botRadius = 0.36;
+  const botRadius = 0.34;
 
   if (nav.avoidTimer > 0) nav.avoidTimer = Math.max(0, nav.avoidTimer - dt);
 
@@ -253,19 +291,19 @@ export function moveBotWithPhysics(
 
       let attempt = tryStepDirection(prevX, prevZ, bPos.y, moveDirX, moveDirZ, step, botRadius, colliders, activeGlbCollider);
 
-      if (attempt.movedDist < step * 0.55) {
+      if (attempt.movedDist < step * 0.6) {
         for (let i = 0; i < STEER_TEST_ANGLES.length; i++) {
           const ang = STEER_TEST_ANGLES[i] * (nav.strafeDir >= 0 ? 1 : -1);
           const cosA = Math.cos(ang);
           const sinA = Math.sin(ang);
           _steerDir.set(_navDir.x * cosA - _navDir.z * sinA, 0, _navDir.x * sinA + _navDir.z * cosA);
           const alt = tryStepDirection(prevX, prevZ, bPos.y, _steerDir.x, _steerDir.z, step, botRadius, colliders, activeGlbCollider);
-          if (alt.movedDist > attempt.movedDist * 1.35 && alt.movedDist > step * 0.45) {
+          if (alt.movedDist > attempt.movedDist * 1.25 && alt.movedDist > step * 0.4) {
             attempt = alt;
             moveDirX = _steerDir.x;
             moveDirZ = _steerDir.z;
             nav.avoidAngle = ang;
-            nav.avoidTimer = 0.5;
+            nav.avoidTimer = 0.55;
             break;
           }
         }
@@ -276,11 +314,11 @@ export function moveBotWithPhysics(
 
       if (attempt.movedDist < step * 0.3) {
         nav.stuckTimer += dt;
-        if (nav.stuckTimer > 0.35) {
+        if (nav.stuckTimer > 0.32) {
           nav.stuckTimer = 0;
           nav.strafeDir *= -1;
-          nav.avoidAngle = nav.strafeDir * 1.25;
-          nav.avoidTimer = 0.65;
+          nav.avoidAngle = nav.strafeDir * 1.45;
+          nav.avoidTimer = 0.75;
           if (!lockLookAtTarget && nav.waypoints.length > 0) {
             nav.wpIndex = (nav.wpIndex + 1) % nav.waypoints.length;
           }
