@@ -1,6 +1,25 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import {
+  playRealHitmarkerSound,
+  playRealPlayerHitGrunt,
+  preloadCharacterAndBombAudio,
+  stopMatchEndFanfare,
+  updatePlayerSprintPantingAudio,
+} from '../audio/characterAndBombAudio';
 import { soundEngine } from '../audio/soundEngine';
+import {
+  playBulletSnapAndWhizz,
+  playSpatialBotGunshot,
+  updateSpatialBotFootstepsAndHeartbeat,
+} from '../audio/spatialCombatAudio';
+import {
+  detectSurfaceMaterialFromMesh,
+  playMaterialImpact3D,
+  playShellCasingDrop3D,
+  triggerShellshockTinnitus,
+  triggerTacticalRadioCallout,
+} from '../audio/tacticalImmersionAudio';
 import { mobileHardware } from '../mobile/nativeHardware';
 import {
   BallisticShotTelemetry,
@@ -61,7 +80,12 @@ import {
   triggerBotHitAnimation,
   updateAllBotCharacters,
 } from './botCharacterSystem';
-import { updateSmartBotNavigation } from './botNavigationSystem';
+import { PlayerDeathThirdPersonController } from './playerDeathThirdPerson';
+import { PostMatchShowcase3D } from './postMatchShowcase3D';
+import {
+  alertBotsToPlayerCombat,
+  updateSmartBotNavigation,
+} from './botNavigationSystem';
 import {
   buildStanderTiroLevel,
   loadStanderTiroMapGeometry,
@@ -187,11 +211,13 @@ export class TacticalFPSEngine {
   private sniperChamberDuration = 1.25;
   private sniperReturnToScopeAfterBolt = false;
 
-  // Premium Cinematic Player Death Camera State
+  // Premium Cinematic Player Death Camera State (3rd-Person Mixamo Avatar)
   private isPlayerDying = false;
   private deathAnimElapsed = 0;
-  private deathSequenceDuration = 2.2;
+  private deathSequenceDuration = 2.85;
   private deathOnFinish: (() => void) | null = null;
+  private playerDeathTp!: PlayerDeathThirdPersonController;
+  private postMatchShowcase!: PostMatchShowcase3D;
 
   // Reload State Machine
   private reloadTimer = 0;
@@ -411,6 +437,14 @@ export class TacticalFPSEngine {
     this.textures = createProceduralTextures(this.renderer);
     this.weaponRig = buildTacticalWeaponRig(this.textures, this.isSoftwareGl);
     this.camera.add(this.weaponRig.root);
+    this.playerDeathTp = new PlayerDeathThirdPersonController(
+      this.scene,
+      this.isSoftwareGl
+    );
+    this.postMatchShowcase = new PostMatchShowcase3D(
+      this.scene,
+      this.isSoftwareGl
+    );
 
     const standerData = buildStanderTiroLevel(this.isSoftwareGl);
     this.standerTiroLevelData = standerData;
@@ -505,6 +539,7 @@ export class TacticalFPSEngine {
       this.isSoftwareGl,
       onProgress
     );
+    preloadCharacterAndBombAudio();
     this.grenadeSystem.prewarmShadersAndTextures(
       this.renderer,
       this.isSoftwareGl
@@ -602,6 +637,11 @@ export class TacticalFPSEngine {
   }
 
   public returnToMainMenu(): void {
+    stopMatchEndFanfare();
+    if (this.weaponRig?.root) {
+      this.postMatchShowcase?.stop(this.camera, this.weaponRig.root);
+      this.playerDeathTp?.stop(this.camera, this.weaponRig.root);
+    }
     this.cleanupMatchAssets();
     this.state.screen = 'MAIN_MENU';
     this.startLoop();
@@ -664,6 +704,23 @@ export class TacticalFPSEngine {
     this.emitHud();
   }
 
+  public cycleSpectator(dir: -1 | 1): void {
+    if (!this.playerDeathTp?.isSpectating()) return;
+    const specBot = this.playerDeathTp.cycleSpectateTarget(
+      this.targets as YardBotEntity[],
+      dir
+    );
+    if (specBot && this.yardBombSystem) {
+      soundEngine.playMechanicalSwitch(1.15);
+      this.yardBombSystem.info.isSpectating = true;
+      this.yardBombSystem.info.spectatedCallsign = specBot.callsign || 'VANGUARD-02';
+      this.yardBombSystem.info.spectatedWeapon = specBot.weaponId || 'M4_CARBINE';
+      this.yardBombSystem.info.spectatedHealth = Math.max(0, specBot.health);
+      this.state.yardBomb = { ...this.yardBombSystem.info };
+      this.emitHud();
+    }
+  }
+
   public registerKill(
     killerName: string,
     killerTeam: 'VANGUARD' | 'BLACKTHORN',
@@ -686,6 +743,23 @@ export class TacticalFPSEngine {
 
     const fresh = this.state.killfeed.filter((e) => now - e.timestamp < 4500);
     this.state.killfeed = [...fresh.slice(-4), entry];
+
+    if (
+      this.state.drillMode === 'YARD_BOMB_5V5' ||
+      this.state.drillMode === 'DUST2_BOMB_5V5' ||
+      this.state.drillMode === 'ASSAULT_BOMB_5V5'
+    ) {
+      this.yardBombSystem?.recordKillEvent(
+        killerName,
+        killerTeam,
+        victimName,
+        victimTeam,
+        isHeadshot,
+        this.primaryWeapon
+      );
+      this.state.yardBomb = { ...this.yardBombSystem.info };
+    }
+
     this.emitHud();
   }
 
@@ -694,15 +768,27 @@ export class TacticalFPSEngine {
     killerCallsign: string,
     killerTeam: 'BLACKTHORN' | 'VANGUARD',
     killerWeapon: WeaponId,
-    onFinish: () => void
+    onFinish: () => void,
+    killerPos?: THREE.Vector3 | null
   ): void {
     if (this.isPlayerDying) return;
     this.isPlayerDying = true;
     this.deathAnimElapsed = 0;
-    this.deathSequenceDuration = 2.2;
+    this.deathSequenceDuration = 2.85;
     this.deathOnFinish = onFinish;
     this.cameraShake = isHeadshot ? 0.048 : 0.028;
     this.state.damageFlashAlpha = 1.0;
+    this.grenadeSystem?.unequipFromHand();
+
+    this.playerDeathTp.startDeathSequence(
+      this.playerPos,
+      this.yaw,
+      this.state.stance,
+      this.state.activeWeapon,
+      isHeadshot,
+      this.weaponRig.root,
+      killerPos
+    );
 
     if (isHeadshot) {
       soundEngine.playHeadshotDeath();
@@ -1114,12 +1200,13 @@ export class TacticalFPSEngine {
     _hitNormal.set(0, 1, 0);
     this.fxPool.spawnImpactFX(blastCenter, _hitNormal, true, true);
 
-    // Camera trauma shake & strong physical phone vibration on Frag explosion
+    // Camera trauma shake, Shellshock Tinnitus & strong physical phone vibration on Frag explosion
     const playerDist = this.playerPos.distanceTo(blastCenter);
     const shakeFactor =
       playerDist < 28 ? Math.max(0.35, 1 - playerDist / 28) : 0.35;
     this.cameraShake = Math.max(this.cameraShake, 0.038 * shakeFactor);
     mobileHardware.vibrateExplosion(shakeFactor);
+    triggerShellshockTinnitus(blastCenter, this.playerPos);
 
     let targetsHitCount = 0;
     let killsCount = 0;
@@ -1182,6 +1269,7 @@ export class TacticalFPSEngine {
     if (targetsHitCount > 0) {
       this.state.hitMarkerAlpha = 1.0;
       this.state.hitMarkerIsCrit = killsCount > 0;
+      playRealHitmarkerSound(killsCount > 0);
       this.state.reloadTypeLabel =
         killsCount > 0
           ? `EXPLOSÃO FRAG! ${killsCount} ALVO(S) ELIMINADO(S) (+${killsCount * 120} XP)`
@@ -1583,10 +1671,14 @@ export class TacticalFPSEngine {
     if (this.weaponRig?.root) {
       this.weaponRig.root.position.y = 0;
       this.weaponRig.root.rotation.x = 0;
+      this.weaponRig.root.visible = true;
+      this.playerDeathTp?.stop(this.camera, this.weaponRig.root);
+      this.postMatchShowcase?.stop(this.camera, this.weaponRig.root);
     }
     this.sprintExhausted = false;
     this.sprintPoseAlpha = 0;
     if (!keepMatchScore) {
+      stopMatchEndFanfare();
       this.state.score = 0;
       this.state.hits = 0;
       this.state.shotsFired = 0;
@@ -1774,7 +1866,18 @@ export class TacticalFPSEngine {
       return;
     }
 
-    if (this.state.screen !== 'PLAYING' || this.isPlayerDying) return;
+    if (this.state.screen !== 'PLAYING') return;
+
+    if (this.playerDeathTp?.isSpectating()) {
+      if (e.code === 'KeyQ' || e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        this.cycleSpectator(-1);
+      } else if (e.code === 'KeyE' || e.code === 'ArrowRight' || e.code === 'KeyD') {
+        this.cycleSpectator(1);
+      }
+      return;
+    }
+
+    if (this.isPlayerDying) return;
 
     switch (e.code) {
       case 'Space':
@@ -2469,6 +2572,9 @@ export class TacticalFPSEngine {
       this.state.boltLockedBack,
       this.state.activeWeapon
     );
+    if (!this.state.suppressorAttached) {
+      alertBotsToPlayerCombat(this.targets, this.playerPos, null);
+    }
     mobileHardware.vibrateGunshot(
       this.state.suppressorAttached,
       this.state.boltLockedBack
@@ -2486,11 +2592,18 @@ export class TacticalFPSEngine {
       0.95 + Math.random() * 0.45
     );
 
-    // Eject spinning 5.56mm brass casing from ejection port
+    // Eject spinning 5.56mm brass casing from ejection port + 3D brass bounce sound on concrete
     this.weaponRig.ejectionPortWorldPos.getWorldPosition(_worldPos);
     this.camera.getWorldDirection(_forward);
     _right.crossVectors(_forward, _up).normalize();
     this.fxPool.spawnBrassCasing(_worldPos, _right, _up);
+    playShellCasingDrop3D(
+      this.playerPos,
+      this.playerPos,
+      this.yaw,
+      this.state.activeWeapon,
+      true
+    );
 
     // Perform Ballistic Raycast FIRST (aligned with exact current Sight/Crosshair vector before recoil kick & unscope!)
     this.yawObject.rotation.y = this.yaw;
@@ -2579,9 +2692,18 @@ export class TacticalFPSEngine {
       if (targetId && hitZone) {
         this.handleTargetHit(targetId, hitZone, dist, hit.point, _hitNormal);
       } else {
-        // Environment concrete/plywood impact
-        this.fxPool.spawnImpactFX(hit.point, _hitNormal, false, false);
-        soundEngine.playImpact('CONCRETE');
+        // Environment impact with 3D material acoustic differentiation (METAL / WOOD / CONCRETE)
+        const surfMat = detectSurfaceMaterialFromMesh(hitMesh, hit.point);
+        this.fxPool.spawnImpactFX(
+          hit.point,
+          _hitNormal,
+          surfMat === 'METAL',
+          false
+        );
+        playMaterialImpact3D(hit.point, _rayOrigin, this.yaw, surfMat);
+        if (surfMat === 'CONCRETE') {
+          soundEngine.playImpact('CONCRETE');
+        }
       }
     } else {
       // Tracer into the distance
@@ -2663,10 +2785,12 @@ export class TacticalFPSEngine {
     target.health -= damage;
     target.hitTiltVelocity = isSniper || isHead ? -16.0 : -7.5;
     triggerBotHitAnimation(target);
+    alertBotsToPlayerCombat(this.targets, this.playerPos, target);
 
     this.fxPool.spawnImpactFX(hitPoint, hitNormal, isHead || isSniper, isHead || isSniper);
     this.state.hitMarkerAlpha = 1.0;
     this.state.hitMarkerIsCrit = isHead || isSniper;
+    playRealHitmarkerSound(isHead || isSniper);
 
     if (isHead || isSniper) {
       if (isHead) this.state.headshots += 1;
@@ -2700,6 +2824,9 @@ export class TacticalFPSEngine {
       this.state.lastHitZone = 'KILL';
 
       const bot = target as YardBotEntity;
+      if (this.state.drillMode !== 'FREE_RANGE') {
+        triggerTacticalRadioCallout('TARGET_DOWN');
+      }
       this.registerKill(
         'VOCÊ',
         'VANGUARD',
@@ -2881,6 +3008,11 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'DUST2_BOMB_5V5' ||
       this.state.drillMode === 'ASSAULT_BOMB_5V5'
     ) {
+      const playerAlive =
+        this.state.health > 0 &&
+        !this.isPlayerDying &&
+        !this.playerDeathTp?.isActive();
+
       this.yardBombSystem.update(
         dt,
         this.playerPos,
@@ -2899,9 +3031,61 @@ export class TacticalFPSEngine {
         () => {
           this.returnToMainMenu();
         },
-        this.registerKill.bind(this)
+        this.registerKill.bind(this),
+        playerAlive
       );
+
+      if (this.playerDeathTp?.isSpectating()) {
+        const specBot = this.playerDeathTp.getSpectatedBot(
+          this.targets as YardBotEntity[]
+        );
+        if (specBot && this.yardBombSystem.info.roundState === 'PLAYING') {
+          this.yardBombSystem.info.isSpectating = true;
+          this.yardBombSystem.info.spectatedCallsign =
+            specBot.callsign || 'VANGUARD-02';
+          this.yardBombSystem.info.spectatedWeapon =
+            specBot.weaponId || 'M4_CARBINE';
+          this.yardBombSystem.info.spectatedHealth = Math.max(0, specBot.health);
+        } else {
+          this.yardBombSystem.info.isSpectating = false;
+        }
+      } else {
+        this.yardBombSystem.info.isSpectating = false;
+      }
+
       this.state.yardBomb = { ...this.yardBombSystem.info };
+
+      if (this.yardBombSystem.info.roundState === 'MATCH_OVER') {
+        if (!this.postMatchShowcase.isActive()) {
+          this.isPlayerDying = false;
+          this.playerDeathTp?.stop(this.camera, this.weaponRig.root);
+          this.yardBombSystem.info.isSpectating = false;
+          this.state.yardBomb = { ...this.yardBombSystem.info };
+          if (document.pointerLockElement) {
+            document.exitPointerLock();
+          }
+          this.postMatchShowcase.startShowcase(
+            this.yardBombSystem.info.squadStats || [],
+            this.weaponRig.root
+          );
+          this.emitHud();
+        }
+        this.postMatchShowcase.update(
+          dt,
+          this.yardBombSystem.info.squadStats || [],
+          this.yawObject,
+          this.pitchObject,
+          this.camera,
+          this.weaponRig.root
+        );
+        updatePlayerSprintPantingAudio(false, 0, false, dt);
+        this.hudSyncTimer += dt;
+        if (this.hudSyncTimer >= 0.09) {
+          this.hudSyncTimer = 0;
+          this.emitHud();
+        }
+        return;
+      }
     }
 
     if (this.state.killfeed.length > 0) {
@@ -3165,7 +3349,7 @@ export class TacticalFPSEngine {
 
   private updatePlayerMovementAndCollision(dt: number): void {
     // Se o jogador estiver morrendo, bloqueia imediatamente qualquer caminhada, pulo, agachamento ou tiro
-    if (this.isPlayerDying) {
+    if (this.isPlayerDying || this.playerDeathTp?.isActive()) {
       this.playerVel.set(0, 0, 0);
       this.touchMoveX = 0;
       this.touchMoveY = 0;
@@ -3177,58 +3361,46 @@ export class TacticalFPSEngine {
       this.state.isAds = false;
 
       this.deathAnimElapsed += dt;
-      const progress = Math.min(1, this.deathAnimElapsed / 1.5);
-      const easeOut = progress * (2 - progress);
-
-      const targetDeathY = THREE.MathUtils.lerp(1.68, 0.24, easeOut);
-      this.currentEyeHeight = THREE.MathUtils.damp(
-        this.currentEyeHeight,
-        targetDeathY,
-        9,
-        dt
-      );
-
-      const deathRoll = THREE.MathUtils.lerp(0, 0.48, easeOut);
-      this.camera.rotation.z = deathRoll;
-      this.pitch = THREE.MathUtils.damp(this.pitch, -0.38, 5, dt);
-
-      this.weaponRig.root.position.y = THREE.MathUtils.damp(
-        this.weaponRig.root.position.y,
-        -0.95,
-        8,
-        dt
-      );
-      this.weaponRig.root.rotation.x = THREE.MathUtils.damp(
-        this.weaponRig.root.rotation.x,
-        0.32,
-        6,
-        dt
-      );
-
       this.state.damageFlashAlpha = THREE.MathUtils.lerp(
-        1.0,
-        0.65,
+        0.92,
+        0.35,
         Math.min(1, this.deathAnimElapsed / 1.8)
       );
 
-      if (this.deathAnimElapsed >= this.deathSequenceDuration) {
+      const activeGlbCol =
+        this.state.drillMode === 'DUST2_BOMB_5V5'
+          ? this.dust2LevelData.collider
+          : this.state.drillMode === 'ASSAULT_BOMB_5V5'
+            ? this.assaultLevelData.collider
+            : null;
+
+      const activeColliders =
+        this.state.drillMode === 'YARD_BOMB_5V5'
+          ? this.yardLevelData.colliders
+          : this.state.drillMode === 'FREE_RANGE'
+            ? this.standerTiroLevelData.colliders
+            : this.facilityLevelData.colliders;
+
+      this.playerDeathTp.update(
+        dt,
+        this.deathAnimElapsed,
+        this.playerPos,
+        this.yawObject,
+        this.pitchObject,
+        this.camera,
+        this.weaponRig.root,
+        this.grenadeSystem,
+        activeColliders,
+        activeGlbCol,
+        this.targets as YardBotEntity[]
+      );
+
+      if (this.isPlayerDying && this.deathAnimElapsed >= this.deathSequenceDuration) {
         this.isPlayerDying = false;
-        this.weaponRig.root.position.y = 0;
-        this.weaponRig.root.rotation.x = 0;
-        this.camera.rotation.z = 0;
-        this.currentEyeHeight = 1.68;
         const cb = this.deathOnFinish;
         this.deathOnFinish = null;
         cb?.();
       }
-
-      this.yawObject.position.set(
-        this.playerPos.x,
-        this.playerPos.y + this.currentEyeHeight,
-        this.playerPos.z
-      );
-      this.yawObject.rotation.y = this.yaw;
-      this.pitchObject.rotation.x = this.pitch;
       return;
     }
 
@@ -3625,43 +3797,8 @@ export class TacticalFPSEngine {
     const shakePitch = this.cameraShake > 0.0001 ? Math.sin(this.elapsedTime * 42) * this.cameraShake : 0;
     const shakeYaw = this.cameraShake > 0.0001 ? Math.cos(this.elapsedTime * 34) * this.cameraShake * 0.5 : 0;
 
-    if (this.isPlayerDying) {
-      this.deathAnimElapsed += dt;
-      const progress = Math.min(1, this.deathAnimElapsed / 1.5);
-      const easeOut = progress * (2 - progress);
-
-      // Camera collapses from normal eye height (1.68m) down to floor (0.24m)
-      const targetDeathY = THREE.MathUtils.lerp(1.68, 0.24, easeOut);
-      this.currentEyeHeight = THREE.MathUtils.damp(this.currentEyeHeight, targetDeathY, 9, dt);
-
-      // Lateral camera roll onto shoulder/floor (approx 28 degrees sideways)
-      const deathRoll = THREE.MathUtils.lerp(0, 0.48, easeOut);
-      this.camera.rotation.z = deathRoll;
-
-      // Pitch dips downwards onto the ground
-      this.pitch = THREE.MathUtils.damp(this.pitch, -0.38, 5, dt);
-
-      // Arms & weapon drop limp out of view
-      this.weaponRig.root.position.y = THREE.MathUtils.damp(this.weaponRig.root.position.y, -0.95, 8, dt);
-      this.weaponRig.root.rotation.x = THREE.MathUtils.damp(this.weaponRig.root.rotation.x, 0.32, 6, dt);
-
-      // Deep cinematic blood vignette on death
-      this.state.damageFlashAlpha = THREE.MathUtils.lerp(1.0, 0.65, Math.min(1, this.deathAnimElapsed / 1.8));
-
-      if (this.deathAnimElapsed >= this.deathSequenceDuration) {
-        this.isPlayerDying = false;
-        this.weaponRig.root.position.y = 0;
-        this.weaponRig.root.rotation.x = 0;
-        this.camera.rotation.z = 0;
-        this.currentEyeHeight = 1.68;
-        const cb = this.deathOnFinish;
-        this.deathOnFinish = null;
-        cb?.();
-      }
-    } else {
-      const slideRoll = this.slideTimer > 0 ? -0.08 : 0;
-      this.camera.rotation.z = -this.leanCurrent * 0.24 + slideRoll;
-    }
+    const slideRoll = this.slideTimer > 0 ? -0.08 : 0;
+    this.camera.rotation.z = -this.leanCurrent * 0.24 + slideRoll;
 
     this.yawObject.position.set(
       leanWorldX,
@@ -3885,6 +4022,13 @@ export class TacticalFPSEngine {
       this.walkBobAmp = THREE.MathUtils.damp(this.walkBobAmp, 0, 10, dt);
     }
 
+    updatePlayerSprintPantingAudio(
+      this.state.stance === 'SPRINT',
+      horizSpeed,
+      this.state.health > 0 && !this.isPlayerDying && !this.playerDeathTp?.isActive(),
+      dt
+    );
+
     // Spring-damper mouse look sway
     const clampedDt = Math.min(dt, 0.033);
     this.swayPos.x += this.swayVel.x * clampedDt;
@@ -4014,7 +4158,10 @@ export class TacticalFPSEngine {
       !this.state.cantedActive &&
       this.state.adsAlpha > 0.82;
     this.weaponRig.root.visible =
-      !isSniperScoped && !this.grenadeSystem.isBusyOrHolding();
+      !this.isPlayerDying &&
+      !this.playerDeathTp?.isActive() &&
+      !isSniperScoped &&
+      !this.grenadeSystem.isBusyOrHolding();
 
     // 5. Mechanical Sub-Component Animations (Bolt Carrier, Selector, Reticle Parallax)
     if (this.state.boltLockedBack) {
@@ -4104,10 +4251,10 @@ export class TacticalFPSEngine {
     for (let i = 0; i < this.targets.length; i++) {
       const t = this.targets[i];
 
-      // 1. Patrol Motion on Active Range Targets
+      // 1. Patrol Motion on Active Range Rail Targets Only (COMBAT_BOT uses full AI pursuit!)
       if (t.type !== 'COMBAT_BOT' && !t.isDown && t.patrolAxis !== 'NONE' && t.patrolSpeed > 0) {
         const offset =
-          Math.sin(this.elapsedTime * t.patrolSpeed + t.patrolOffset) *
+          Math.sin(this.elapsedTime * t.patrolSpeed * 1.45 + t.patrolOffset) *
           t.patrolRange;
         if (t.patrolAxis === 'X') {
           t.root.position.x = t.basePosition.x + offset;
@@ -4146,122 +4293,15 @@ export class TacticalFPSEngine {
       if (!t.root.userData?.hasSkeletalCharacter) {
         t.pivotGroup.rotation.x = t.hitTiltAngle;
       }
-
-      // 3. Autonomous Combat Bot Return Fire (in TACTICAL_WAVE & KILLHOUSE_BLITZ)
-      if (
-        t.canShootBack &&
-        !(t as YardBotEntity).isAlly &&
-        (this.state.drillMode === 'TACTICAL_WAVE' ||
-          this.state.drillMode === 'KILLHOUSE_BLITZ')
-      ) {
-        const distToPlayer = t.root.position.distanceTo(_worldPos);
-        if (distToPlayer < 34) {
-          // Check line of sight from bot head to player eye position (throttled to ~10Hz per bot)
-          t.root.userData = t.root.userData || {};
-          t.root.userData.losTimer = (t.root.userData.losTimer || 0) + dt;
-          if (t.root.userData.losTimer >= 0.14 || t.root.userData.blockedByCover === undefined) {
-            t.root.userData.losTimer = 0;
-            _rayOrigin.set(
-              t.root.position.x,
-              t.root.position.y + 1.65,
-              t.root.position.z
-            );
-            _targetToPlayer.subVectors(_worldPos, _rayOrigin).normalize();
-
-            this.raycaster.set(_rayOrigin, _targetToPlayer);
-            this.raycaster.far = distToPlayer;
-            const envHits = this.raycaster.intersectObjects(
-              this.shootableMeshes,
-              false
-            );
-            const envBlocked =
-              envHits.length > 0 &&
-              Boolean(envHits[0].object.userData.isEnvironment) &&
-              envHits[0].distance < distToPlayer - 0.5;
-
-            t.root.userData.blockedByCover =
-              envBlocked ||
-              this.grenadeSystem.isLineOfSightBlockedBySmoke(
-                _rayOrigin,
-                _worldPos
-              );
-          }
-          const blockedByCover = Boolean(t.root.userData.blockedByCover);
-
-          if (!blockedByCover) {
-            // Rotate bot gently toward player
-            const desiredYaw = Math.atan2(
-              _worldPos.x - t.root.position.x,
-              _worldPos.z - t.root.position.z
-            );
-            t.root.rotation.y = THREE.MathUtils.damp(
-              t.root.rotation.y,
-              desiredYaw,
-              6,
-              dt
-            );
-
-            if (!t.isTelegraphing) {
-              t.cooldownTimer -= dt;
-              if (t.cooldownTimer <= 0) {
-                t.isTelegraphing = true;
-                t.windupTimer = 1.15; // Clear 1.15s visual + audio windup telegraph
-                soundEngine.playEnemyTelegraph();
-              }
-            } else {
-              t.windupTimer -= dt;
-              if (t.windupTimer <= 0) {
-                t.isTelegraphing = false;
-                t.cooldownTimer = 2.1 + Math.random() * 1.4;
-
-                // Bot fires tracer at player with real weapon sound!
-                triggerBotFireAnimation(t);
-                const botEntity = t as YardBotEntity;
-                soundEngine.playGunshot(false, false, botEntity.weaponId || 'AK47_RIFLE');
-                this.fxPool.spawnTracer(_rayOrigin, _worldPos, 0xef4444);
-                const isHeadshotHit = Math.random() < 0.35;
-                if (isHeadshotHit) {
-                  soundEngine.playImpact('HEADSHOT');
-                } else {
-                  soundEngine.playImpact('TORSO');
-                }
-                mobileHardware.vibrateDamage();
-                const baseDmg = this.state.drillMode === 'TACTICAL_WAVE' ? 16 : 9;
-                const dmg = isHeadshotHit ? Math.round(baseDmg * 2.4) : baseDmg;
-                this.state.health = Math.max(0, this.state.health - dmg);
-                this.state.damageFlashAlpha = isHeadshotHit ? 0.95 : 0.75;
-                this.cameraShake = isHeadshotHit ? 0.024 : 0.012;
-
-                if (this.state.health <= 0) {
-                  const botEntity = t as YardBotEntity;
-                  this.triggerPlayerDeathSequence(
-                    isHeadshotHit,
-                    botEntity.callsign || 'KRAKEN-BT',
-                    'BLACKTHORN',
-                    botEntity.weaponId || 'AK47_RIFLE',
-                    () => {
-                      this.state.screen = 'GAME_OVER';
-                      this.emitHud();
-                    }
-                  );
-                }
-                this.emitHud();
-              }
-            }
-          } else {
-            t.isTelegraphing = false;
-          }
-        }
-      }
     }
 
-    // 3.5. Sistema Tático de Navegação Inteligente nos Modos 5v5 (Yard, Dust2, Assault)
+    // 3. Sistema Tático de Navegação, Ronda e Perseguição Implacável (5v5 Bomb, Tactical Wave e Killhouse)
     const isBombMode =
       this.state.drillMode === 'YARD_BOMB_5V5' ||
       this.state.drillMode === 'DUST2_BOMB_5V5' ||
       this.state.drillMode === 'ASSAULT_BOMB_5V5';
 
-    if (isBombMode && this.targets.length > 0) {
+    if (this.state.drillMode !== 'FREE_RANGE' && this.targets.length > 0) {
       const activeGlbCollider =
         this.state.drillMode === 'DUST2_BOMB_5V5'
           ? this.dust2LevelData.collider
@@ -4269,22 +4309,29 @@ export class TacticalFPSEngine {
             ? this.assaultLevelData.collider
             : null;
 
+      const playerAlive =
+        this.state.health > 0 &&
+        !this.isPlayerDying &&
+        !this.playerDeathTp?.isActive();
+
       updateSmartBotNavigation(
         this.targets as YardBotEntity[],
         this.state.drillMode,
         _worldPos,
+        this.yaw,
         dt,
         this.yardBombSystem,
         this.fxPool,
         this.grenadeSystem,
         (dmg, isHeadshot, bot) => {
-          if (this.isPlayerDying) return;
+          if (this.isPlayerDying || this.playerDeathTp?.isActive()) return;
           if (isHeadshot) {
             soundEngine.playImpact('HEADSHOT');
           } else {
             soundEngine.playImpact('TORSO');
           }
           mobileHardware.vibrateDamage();
+          playRealPlayerHitGrunt(isHeadshot);
           this.state.health = Math.max(0, this.state.health - dmg);
           this.state.damageFlashAlpha = isHeadshot ? 0.95 : 0.75;
           this.cameraShake = isHeadshot ? 0.024 : 0.012;
@@ -4296,25 +4343,66 @@ export class TacticalFPSEngine {
               'BLACKTHORN',
               bot.weaponId || 'AK47_RIFLE',
               () => {
-                this.state.health = 100;
-                this.yardBombSystem.finishCurrentRound(
-                  'BLACKTHORN',
-                  isHeadshot
-                    ? 'OPERADOR VANGUARD ELIMINADO COM HEADSHOT CRÍTICO!'
-                    : 'OPERADOR VANGUARD NEUTRALIZADO EM COMBATE!',
-                  (xp, cash) => {
-                    this.addPlayerXp(xp);
-                    addPlayerCash(cash);
-                    this.state.score += xp;
-                  }
+                if (!isBombMode) {
+                  this.state.screen = 'GAME_OVER';
+                  this.emitHud();
+                  return;
+                }
+                const specBot = this.playerDeathTp.startSpectating(
+                  this.targets as YardBotEntity[]
                 );
+                if (specBot && this.yardBombSystem.info.roundState === 'PLAYING') {
+                  this.yardBombSystem.info.isSpectating = true;
+                  this.yardBombSystem.info.spectatedCallsign =
+                    specBot.callsign || 'VANGUARD-02';
+                  this.yardBombSystem.info.spectatedWeapon =
+                    specBot.weaponId || 'M4_CARBINE';
+                  this.yardBombSystem.info.spectatedHealth = Math.max(0, specBot.health);
+                  this.state.damageFlashAlpha = 0;
+                } else if (this.yardBombSystem.info.bombStatus !== 'PLANTED') {
+                  this.yardBombSystem.finishCurrentRound(
+                    'BLACKTHORN',
+                    isHeadshot
+                      ? 'ESQUADRÃO VANGUARD ELIMINADO COM HEADSHOT CRÍTICO!'
+                      : 'ESQUADRÃO VANGUARD NEUTRALIZADO EM COMBATE!',
+                    (xp, cash) => {
+                      this.addPlayerXp(xp);
+                      addPlayerCash(cash);
+                      this.state.score += xp;
+                    }
+                  );
+                }
                 this.state.yardBomb = { ...this.yardBombSystem.info };
                 this.emitHud();
-              }
+              },
+              bot.root.position
             );
           }
           this.emitHud();
         },
+        this.colliders,
+        activeGlbCollider,
+        playerAlive,
+        this.registerKill.bind(this)
+      );
+    }
+
+    // 3.8. Áudio Tático 3D Estilo Call of Duty: Passos de Inimigos por Proximidade + Batimento Cardíaco
+    if (this.state.drillMode !== 'FREE_RANGE') {
+      const activeGlbCollider =
+        this.state.drillMode === 'DUST2_BOMB_5V5'
+          ? this.dust2LevelData.collider
+          : this.state.drillMode === 'ASSAULT_BOMB_5V5'
+            ? this.assaultLevelData.collider
+            : null;
+      updateSpatialBotFootstepsAndHeartbeat(
+        this.targets,
+        _worldPos,
+        this.yaw,
+        this.state.health,
+        this.isPlayerDying || this.playerDeathTp?.isActive() || this.state.health <= 0,
+        dt,
+        this.grenadeSystem,
         this.colliders,
         activeGlbCollider
       );

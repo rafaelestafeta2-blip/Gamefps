@@ -30,6 +30,7 @@ interface TacticalHudOverlayProps {
   onPause: () => void;
   onPlantBomb?: () => void;
   onReturnToMenu?: () => void;
+  onCycleSpectator?: (dir: -1 | 1) => void;
 }
 
 export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
@@ -51,25 +52,31 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
   onPause,
   onPlantBomb,
   onReturnToMenu,
+  onCycleSpectator,
 }) => {
+  const isSpectating = Boolean(hud.yardBomb?.isSpectating);
+  const isMatchOver = hud.yardBomb?.roundState === 'MATCH_OVER';
   const isSniperScopeActive =
+    !isSpectating &&
+    !isMatchOver &&
     (hud.activeWeapon === 'SNIPER_BOLT' ||
       hud.activeWeapon === 'SNIPER_TACTICAL' ||
       hud.optic === 'lpvo') &&
     !hud.cantedActive &&
     hud.adsAlpha > 0.35;
 
-  const hipCrosshairOpacity = isSniperScopeActive
-    ? 0
-    : Math.max(
-        0,
-        (1 - hud.adsAlpha * 1.35) * (hud.reloadPhase === 'IDLE' ? 1 : 0.25)
-      );
+  const hipCrosshairOpacity =
+    isSniperScopeActive || isSpectating || isMatchOver
+      ? 0
+      : Math.max(
+          0,
+          (1 - hud.adsAlpha * 1.35) * (hud.reloadPhase === 'IDLE' ? 1 : 0.25)
+        );
 
   return (
     <>
       {/* Damage Vignette Flash & Critical Low Health Pulsing Blood Fringe */}
-      {(hud.damageFlashAlpha > 0.01 || hud.health < 35) && (
+      {!isSpectating && (hud.damageFlashAlpha > 0.01 || (hud.health > 0 && hud.health < 35)) && (
         <div
           className={`fixed inset-0 pointer-events-none z-15 transition-opacity ${
             hud.health < 35 ? 'animate-pulse bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(220,38,38,0.38)_100%)]' : ''
@@ -170,25 +177,28 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
             yardBomb={hud.yardBomb}
             onPlantBomb={() => onPlantBomb?.()}
             onReturnToMenu={onReturnToMenu}
+            onCycleSpectator={onCycleSpectator}
           />
         )}
 
       {/* TOP-RIGHT: SQUARE MINIMAP + UTILITY BUTTONS + OPTICS POPOVER */}
-      <HudTopRightControls
-        hud={hud}
-        onSelectOptic={onSelectOptic}
-        onToggleCanted={onToggleCanted}
-        onToggleSuppressor={onToggleSuppressor}
-        onCycleCharm={onCycleCharm}
-        onToggleLaser={onToggleLaser}
-        onToggleMute={onToggleMute}
-        onToggleDock={onToggleDock}
-        onToggleFullscreen={onToggleFullscreen}
-        onPause={onPause}
-      />
+      {!isMatchOver && (
+        <HudTopRightControls
+          hud={hud}
+          onSelectOptic={onSelectOptic}
+          onToggleCanted={onToggleCanted}
+          onToggleSuppressor={onToggleSuppressor}
+          onCycleCharm={onCycleCharm}
+          onToggleLaser={onToggleLaser}
+          onToggleMute={onToggleMute}
+          onToggleDock={onToggleDock}
+          onToggleFullscreen={onToggleFullscreen}
+          onPause={onPause}
+        />
+      )}
 
       {/* WALL WEAPON PICKUP ICON BUTTON */}
-      {hud.focusedWallWeapon && (
+      {!isSpectating && hud.focusedWallWeapon && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
           className="fixed top-20 left-1/2 -translate-x-1/2 pointer-events-auto z-40 select-none"
@@ -223,7 +233,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
       )}
 
       {/* TACTICAL ACTION / RELOAD / ATTACHMENT STATUS FEEDBACK BANNER */}
-      {hud.reloadTypeLabel && (
+      {!isSpectating && hud.reloadTypeLabel && (
         <div className="fixed bottom-18 left-1/2 -translate-x-1/2 pointer-events-none z-30 select-none font-mono">
           <div className="bg-black/80 border border-amber-400/50 rounded-lg px-3 py-1 text-[10px] sm:text-xs font-mono font-bold text-amber-300 tracking-wider uppercase shadow-lg whitespace-nowrap">
             {hud.reloadTypeLabel}
@@ -231,16 +241,18 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
         </div>
       )}
 
-      {/* BOTTOM-CENTER: WEAPON SLOTS + GRENADE SLOTS + HP BAR */}
-      <HudBottomWeaponDock
-        hud={hud}
-        onSelectWeapon={onSelectWeapon}
-        onToggleWeaponSlot={onToggleWeaponSlot}
-        onInspectWeapon={onInspectWeapon}
-        onCycleFireMode={onCycleFireMode}
-        onResupply={onResupply}
-        onThrowGrenade={onThrowGrenade}
-      />
+      {/* BOTTOM-CENTER: WEAPON SLOTS + GRENADE SLOTS + HP BAR (Hidden in Spectator Mode & Match Over) */}
+      {!isSpectating && !isMatchOver && (
+        <HudBottomWeaponDock
+          hud={hud}
+          onSelectWeapon={onSelectWeapon}
+          onToggleWeaponSlot={onToggleWeaponSlot}
+          onInspectWeapon={onInspectWeapon}
+          onCycleFireMode={onCycleFireMode}
+          onResupply={onResupply}
+          onThrowGrenade={onThrowGrenade}
+        />
+      )}
     </>
   );
 };

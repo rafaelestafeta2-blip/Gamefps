@@ -2738,6 +2738,28 @@ class TacticalSoundEngine {
       } catch {}
     }
   }
+
+  public getSpatialAudioState(): {
+    muted: boolean;
+    ctx: AudioContext | null;
+    noiseBuffer: AudioBuffer | null;
+    m4a1ShotBuffer: AudioBuffer | null;
+    ak47ShotBuffer: AudioBuffer | null;
+    sniperShotBuffer: AudioBuffer | null;
+    desertEagleBuffer: AudioBuffer | null;
+    footstepRunBuffer: AudioBuffer | null;
+  } {
+    return {
+      muted: this.muted,
+      ctx: this.ensureContext(),
+      noiseBuffer: this.noiseBuffer,
+      m4a1ShotBuffer: this.m4a1ShotBuffer,
+      ak47ShotBuffer: this.ak47ShotBuffer,
+      sniperShotBuffer: this.sniperShotBuffer,
+      desertEagleBuffer: this.desertEagleBuffer,
+      footstepRunBuffer: this.footstepRunBuffer,
+    };
+  }
 }
 
 export const soundEngine = new TacticalSoundEngine();

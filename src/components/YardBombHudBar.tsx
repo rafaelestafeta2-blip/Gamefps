@@ -1,19 +1,31 @@
 import React from 'react';
 import { YardBombHudInfo } from '../types/game';
 import { bindTap } from './hudTapUtils';
+import { PostMatchSummaryOverlay } from './PostMatchSummaryOverlay';
 import { BlackthornTeamEmblem, VanguardTeamEmblem } from './WarfaceClassIcons';
 
 interface YardBombHudBarProps {
   yardBomb: YardBombHudInfo;
   onPlantBomb: () => void;
   onReturnToMenu?: () => void;
+  onCycleSpectator?: (dir: -1 | 1) => void;
 }
 
 export const YardBombHudBar: React.FC<YardBombHudBarProps> = ({
   yardBomb,
   onPlantBomb,
   onReturnToMenu,
+  onCycleSpectator,
 }) => {
+  if (yardBomb.roundState === 'MATCH_OVER') {
+    return (
+      <PostMatchSummaryOverlay
+        yardBomb={yardBomb}
+        onCloseToMenu={onReturnToMenu}
+      />
+    );
+  }
+
   const isPlanted = yardBomb.bombStatus === 'PLANTED';
   const activeSeconds = isPlanted
     ? Math.ceil(yardBomb.c4TimerSec)
@@ -104,8 +116,63 @@ export const YardBombHudBar: React.FC<YardBombHudBarProps> = ({
         </div>
       </div>
 
+      {/* MODO ESPECTADOR TÁTICO 5V5 (Acompanhando aliados vivos até o fim da rodada) */}
+      {yardBomb.roundState === 'PLAYING' && yardBomb.isSpectating && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 pointer-events-auto select-none font-mono w-[min(92vw,440px)]"
+        >
+          <div className="bg-[#070b12]/92 border-2 border-sky-400/60 rounded-2xl p-3 shadow-[0_0_30px_rgba(14,165,233,0.35)] flex flex-col gap-2">
+            <div className="flex items-center justify-between text-[10px] border-b border-white/10 pb-1.5">
+              <span className="px-2 py-0.5 rounded bg-red-500/20 border border-red-400/50 text-red-300 font-bold uppercase tracking-wider">
+                VOCÊ FOI ELIMINADO
+              </span>
+              <span className="text-amber-300 font-bold uppercase tracking-wider">
+                RENASCIMENTO NA PRÓXIMA RODADA
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                {...bindTap(() => onCycleSpectator?.(-1))}
+                className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-sky-400/40 text-sky-200 font-display font-black text-xs tracking-wider uppercase active:scale-95 transition-transform cursor-pointer"
+              >
+                ◄ ANTERIOR [Q]
+              </button>
+
+              <div className="flex flex-col items-center text-center flex-1 min-w-0">
+                <span className="text-[9px] text-slate-400 uppercase tracking-widest">
+                  CÂMERA DE ESPECTADOR (ALIADO VIVO)
+                </span>
+                <span className="text-sm font-display font-black text-sky-300 truncate">
+                  {yardBomb.spectatedCallsign || 'VANGUARD-02'}
+                </span>
+                <div className="w-full max-w-[140px] h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1 border border-white/10">
+                  <div
+                    className="h-full bg-emerald-400 transition-all"
+                    style={{
+                      width: `${Math.max(0, Math.min(100, yardBomb.spectatedHealth ?? 100))}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <button
+                type="button"
+                {...bindTap(() => onCycleSpectator?.(1))}
+                className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-sky-400/40 text-sky-200 font-display font-black text-xs tracking-wider uppercase active:scale-95 transition-transform cursor-pointer"
+              >
+                PRÓXIMO [E] ►
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* INTERACTIVE PLANT C4 BUTTON WHEN INSIDE BOMB SITE A OR B */}
       {yardBomb.roundState === 'PLAYING' &&
+        !yardBomb.isSpectating &&
         yardBomb.nearSite &&
         yardBomb.bombStatus !== 'PLANTED' && (
           <div
@@ -186,76 +253,7 @@ export const YardBombHudBar: React.FC<YardBombHudBarProps> = ({
           </div>
         </div>
       )}
-
-      {/* MODAL FINAL DE ENCERRAMENTO DA PARTIDA (6 RODADAS — RETORNA AO MENU COM XP E DINHEIRO) */}
-      {yardBomb.roundState === 'MATCH_OVER' && (
-        <div
-          onPointerDown={(e) => e.stopPropagation()}
-          className="fixed inset-0 z-50 pointer-events-auto flex items-center justify-center bg-black/80 p-4 select-none"
-        >
-          <div
-            className={`max-w-lg w-full rounded-2xl border-2 p-6 text-center shadow-2xl bg-[#080d16] ${
-              yardBomb.matchWinner === 'VANGUARD'
-                ? 'border-sky-400 shadow-[0_0_50px_rgba(56,189,248,0.45)]'
-                : 'border-red-500 shadow-[0_0_50px_rgba(239,68,68,0.45)]'
-            }`}
-          >
-            <div className="flex justify-center mb-2">
-              {yardBomb.matchWinner === 'VANGUARD' ? (
-                <VanguardTeamEmblem className="w-14 h-14" />
-              ) : (
-                <BlackthornTeamEmblem className="w-14 h-14" />
-              )}
-            </div>
-            <div className="text-xs font-mono font-bold tracking-[0.22em] text-amber-400 uppercase">
-              PARTIDA ENCERRADA · MELHOR DE {yardBomb.maxRounds} RODADAS
-            </div>
-            <h2
-              className={`text-2xl sm:text-3xl font-display font-black tracking-wider uppercase mt-1 ${
-                yardBomb.matchWinner === 'VANGUARD' ? 'text-sky-300' : 'text-red-400'
-              }`}
-            >
-              {yardBomb.matchWinner} VENCEU A PARTIDA!
-            </h2>
-            <p className="text-xs font-mono text-slate-300 mt-1">
-              {yardBomb.roundWinReason}
-            </p>
-
-            <div className="my-4 py-3 px-4 rounded-xl bg-black/70 border border-white/15 flex items-center justify-center gap-6 font-display font-black text-xl tabular-nums">
-              <span className="text-sky-300">
-                VANGUARD {yardBomb.vanguardScore}
-              </span>
-              <span className="text-slate-500 text-sm">×</span>
-              <span className="text-red-400">
-                {yardBomb.blackthornScore} BLACKTHORN
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-4 font-mono">
-              <div className="bg-amber-500/15 border border-amber-400/40 rounded-xl py-2 px-3">
-                <div className="text-[10px] text-amber-200 uppercase">XP DE PATENTE GANHO</div>
-                <div className="text-lg font-black text-amber-400 tabular-nums">
-                  +{yardBomb.totalMatchXp} XP
-                </div>
-              </div>
-              <div className="bg-emerald-500/15 border border-emerald-400/40 rounded-xl py-2 px-3">
-                <div className="text-[10px] text-emerald-200 uppercase">CRÉDITOS GANHOS</div>
-                <div className="text-lg font-black text-emerald-400 tabular-nums">
-                  +${yardBomb.totalMatchCash.toLocaleString('pt-BR')}
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onReturnToMenu?.()}
-              className="w-full py-2.5 px-5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-black text-sm tracking-wider uppercase transition-colors cursor-pointer"
-            >
-              Voltar ao Menu Principal ({Math.ceil(yardBomb.roundTransitionSec)}s)
-            </button>
-          </div>
-        </div>
-      )}
     </>
   );
 };
+

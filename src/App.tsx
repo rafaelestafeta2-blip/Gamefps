@@ -284,25 +284,28 @@ export default function App() {
 
       {hud.screen === 'PLAYING' && (
         <>
-          <MobileTouchControls
-            hud={hud}
-            controlSettings={controlSettings}
-            onMove={(mx, my, sprint) => engineRef.current?.setTouchMovement(mx, my, sprint)}
-            onLookDelta={(dx, dy) => engineRef.current?.applyTouchLookDelta(dx, dy)}
-            onFireHeld={(held) => engineRef.current?.setTouchFireHeld(held)}
-            onToggleAds={() => engineRef.current?.toggleAds()}
-            onToggleWeaponSlot={() => engineRef.current?.toggleWeaponSlot()}
-            onReload={(speed) => engineRef.current?.triggerReload(speed)}
-            onBoltRack={() => engineRef.current?.triggerManualBoltRack()}
-            onMagCheck={() => engineRef.current?.triggerMagCheck()}
-            onInspectWeapon={() => engineRef.current?.triggerWeaponInspect()}
-            onJump={() => engineRef.current?.triggerJump()}
-            onCrouchOrSlide={() => engineRef.current?.toggleCrouchOrSlide()}
-            onToggleLean={(dir) => engineRef.current?.toggleLean(dir)}
-            onHoldBreath={(held) => engineRef.current?.setHoldBreath(held)}
-            onCycleZoom={() => engineRef.current?.cycleLpvoZoom()}
-            onThrowGrenade={(type) => engineRef.current?.throwGrenade(type)}
-          />
+          {!hud.yardBomb?.isSpectating &&
+            hud.yardBomb?.roundState !== 'MATCH_OVER' && (
+              <MobileTouchControls
+              hud={hud}
+              controlSettings={controlSettings}
+              onMove={(mx, my, sprint) => engineRef.current?.setTouchMovement(mx, my, sprint)}
+              onLookDelta={(dx, dy) => engineRef.current?.applyTouchLookDelta(dx, dy)}
+              onFireHeld={(held) => engineRef.current?.setTouchFireHeld(held)}
+              onToggleAds={() => engineRef.current?.toggleAds()}
+              onToggleWeaponSlot={() => engineRef.current?.toggleWeaponSlot()}
+              onReload={(speed) => engineRef.current?.triggerReload(speed)}
+              onBoltRack={() => engineRef.current?.triggerManualBoltRack()}
+              onMagCheck={() => engineRef.current?.triggerMagCheck()}
+              onInspectWeapon={() => engineRef.current?.triggerWeaponInspect()}
+              onJump={() => engineRef.current?.triggerJump()}
+              onCrouchOrSlide={() => engineRef.current?.toggleCrouchOrSlide()}
+              onToggleLean={(dir) => engineRef.current?.toggleLean(dir)}
+              onHoldBreath={(held) => engineRef.current?.setHoldBreath(held)}
+              onCycleZoom={() => engineRef.current?.cycleLpvoZoom()}
+              onThrowGrenade={(type) => engineRef.current?.throwGrenade(type)}
+            />
+          )}
 
           <TacticalHudOverlay
             hud={hud}
@@ -324,6 +327,7 @@ export default function App() {
             }}
             onPause={() => engineRef.current?.pauseGame()}
             onPlantBomb={() => engineRef.current?.triggerPlantBomb()}
+            onCycleSpectator={(dir) => engineRef.current?.cycleSpectator(dir)}
             onReturnToMenu={() => {
               setMatchmakingTargetMode(null);
               engineRef.current?.returnToMainMenu();

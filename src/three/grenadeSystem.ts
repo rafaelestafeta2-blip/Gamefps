@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { playRealGrenadeBounce } from '../audio/characterAndBombAudio';
 import { soundEngine } from '../audio/soundEngine';
 import { mobileHardware } from '../mobile/nativeHardware';
 import { GrenadeType } from '../types/game';
@@ -1307,7 +1308,9 @@ export class TacticalGrenadeSystem {
         if (hitWallX) {
           proj.vel.x *= -0.48;
           if (proj.bounces < 5) {
-            soundEngine.playGrenadeBounce(0.65);
+            if (!playRealGrenadeBounce(0.75)) {
+              soundEngine.playGrenadeBounce(0.65);
+            }
             proj.bounces++;
           }
         } else {
@@ -1317,7 +1320,9 @@ export class TacticalGrenadeSystem {
         if (hitWallZ) {
           proj.vel.z *= -0.48;
           if (proj.bounces < 5) {
-            soundEngine.playGrenadeBounce(0.65);
+            if (!playRealGrenadeBounce(0.75)) {
+              soundEngine.playGrenadeBounce(0.65);
+            }
             proj.bounces++;
           }
         } else {
@@ -1336,9 +1341,10 @@ export class TacticalGrenadeSystem {
             proj.vel.z *= 0.68;
             proj.angVel.multiplyScalar(0.55);
             if (proj.bounces < 5) {
-              soundEngine.playGrenadeBounce(
-                Math.min(1, Math.abs(proj.vel.y) / 4.0)
-              );
+              const bounceInt = Math.min(1, Math.abs(proj.vel.y) / 4.0);
+              if (!playRealGrenadeBounce(bounceInt)) {
+                soundEngine.playGrenadeBounce(bounceInt);
+              }
               proj.bounces++;
             }
           } else {

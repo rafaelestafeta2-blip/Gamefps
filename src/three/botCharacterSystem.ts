@@ -3,7 +3,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { WeaponId } from '../types/game';
-import { BotAnimController, BotAnimState, BotClipMap, buildProRiflePackClips, syncBotWeaponWithMixamoHands } from './botCharacterClips';
+import { BotAnimController, BotAnimState, BotClipMap, buildProRiflePackClips, selectDirectionalDeathState, syncBotWeaponWithMixamoHands, transitionBotAnim } from './botCharacterClips';
 import { createBotThirdPersonWeaponMesh } from './botWeaponProps';
 import { TacticalTargetEntity } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
@@ -50,14 +50,11 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
 
     const root = loaded.scene;
     root.updateMatrixWorld(true);
-
     allyMatMap = new Map();
     enemyMatMap = new Map();
 
     root.traverse((child) => {
-      if (child.name && child.name.startsWith('mixamorig')) {
-        child.name = child.name.replace(':', '');
-      }
+      if (child.name && child.name.startsWith('mixamorig')) child.name = child.name.replace(':', '');
       if (!(child as THREE.Mesh).isMesh) return;
       const mesh = child as THREE.Mesh;
       mesh.frustumCulled = false;
@@ -66,12 +63,10 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
       mats.forEach((m) => {
         const std = m as THREE.MeshStandardMaterial;
         if (!std || allyMatMap!.has(std.name)) return;
-
         if (std.map) {
           std.map.anisotropy = 4;
           std.map.colorSpace = THREE.SRGBColorSpace;
         }
-
         const allyMat = std.clone();
         allyMat.color.setHex(0xb8d4f8);
         allyMat.roughness = 0.62;
@@ -79,117 +74,133 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
         allyMatMap!.set(std.name, allyMat);
 
         const enemyMat = std.clone();
-        enemyMat.color.setHex(0xd6a49e);
-        enemyMat.roughness = 0.58;
-        enemyMat.metalness = 0.22;
+        enemyMat.color.setHex(0xf2b6a0);
+        enemyMat.roughness = 0.65;
+        enemyMat.metalness = 0.16;
         enemyMatMap!.set(std.name, enemyMat);
       });
     });
 
     sharedClips = buildProRiflePackClips(root, loaded.animations);
     templateScene = root;
-  })().catch((err) => {
-    console.warn('Pro.Rifle.Pack.glb load warning:', err);
-    loadPromise = null;
-  });
+  })().catch((err) => console.warn('ProRifleBotCharacter fallback:', err));
 
-  return loadPromise;
+  return Promise.resolve(loadPromise);
 }
 
-export function attachProRifleCharacterToBot(
-  bot: YardBotEntity,
-  _isSoftwareGl: boolean
-): void {
+export function cloneVanguardCharacterAvatar(isSoftwareGl: boolean): { modelRoot: THREE.Object3D; clips: BotClipMap } | null {
+  if (!templateScene || !sharedClips || !allyMatMap) return null;
+  const cloned = SkeletonUtils.clone(templateScene);
+  cloned.scale.setScalar(1.0);
+  cloned.position.set(0, 0, 0);
+  cloned.rotation.set(0, 0, 0);
+
+  cloned.traverse((child) => {
+    if (child.name && child.name.startsWith('mixamorig')) child.name = child.name.replace(':', '');
+    if ((child as THREE.Mesh).isMesh) {
+      const m = child as THREE.Mesh;
+      m.castShadow = !isSoftwareGl;
+      m.receiveShadow = false;
+      m.frustumCulled = false;
+      const std = m.material as THREE.MeshStandardMaterial;
+      if (std && allyMatMap!.has(std.name)) m.material = allyMatMap!.get(std.name)!;
+    }
+  });
+
+  return { modelRoot: cloned, clips: sharedClips };
+}
+
+export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: boolean): void {
   if (!templateScene || !sharedClips || !allyMatMap || !enemyMatMap) return;
-  if (bot.root.userData?.botAnimCtrl) return;
+  if (bot.root.userData?.hasSkeletalCharacter) return;
 
   ensureSharedHitMat();
 
-  bot.pivotGroup.children.forEach((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    if (mesh === bot.headMesh || mesh === bot.torsoMesh || mesh === bot.armorMesh) {
+  const hitPartIds = new Set<number>([bot.headMesh.id, bot.torsoMesh.id]);
+  if (bot.armorMesh) hitPartIds.add(bot.armorMesh.id);
+
+  const toRemove: THREE.Object3D[] = [];
+  for (let i = 0; i < bot.pivotGroup.children.length; i++) {
+    const child = bot.pivotGroup.children[i];
+    if (hitPartIds.has(child.id)) {
+      const mesh = child as THREE.Mesh;
       mesh.material = sharedInvisibleHitMat!;
       mesh.castShadow = false;
       mesh.receiveShadow = false;
     } else {
-      mesh.visible = false;
+      toRemove.push(child);
+    }
+  }
+  for (let i = 0; i < toRemove.length; i++) bot.pivotGroup.remove(toRemove[i]);
+
+  bot.headMesh.scale.set(1.22, 1.25, 1.22);
+  bot.headMesh.position.set(0, 1.56, 0.02);
+  bot.torsoMesh.scale.set(1.25, 1.45, 1.28);
+  bot.torsoMesh.position.set(0, 1.02, 0);
+  if (bot.armorMesh) {
+    bot.armorMesh.scale.set(1.28, 1.35, 1.3);
+    bot.armorMesh.position.set(0, 1.04, 0.01);
+  }
+
+  const cloned = SkeletonUtils.clone(templateScene);
+  cloned.scale.setScalar(1.0);
+  cloned.position.set(0, 0, 0);
+  cloned.rotation.set(0, 0, 0);
+
+  const matPalette = bot.isAlly ? allyMatMap : enemyMatMap;
+  let rHandBone: THREE.Object3D | null = null;
+  let lHandBone: THREE.Object3D | null = null;
+
+  cloned.traverse((child) => {
+    if (child.name && child.name.startsWith('mixamorig')) child.name = child.name.replace(':', '');
+    if (child.name === 'mixamorigRightHand') rHandBone = child;
+    else if (child.name === 'mixamorigLeftHand') lHandBone = child;
+
+    if ((child as THREE.Mesh).isMesh) {
+      const m = child as THREE.Mesh;
+      m.castShadow = !isSoftwareGl;
+      m.receiveShadow = false;
+      m.frustumCulled = false;
+      const std = m.material as THREE.MeshStandardMaterial;
+      if (std && matPalette.has(std.name)) m.material = matPalette.get(std.name)!;
     }
   });
 
-  bot.headMesh.position.set(0, 1.56, 0.04);
-  bot.headMesh.scale.set(1.15, 1.15, 1.15);
-  bot.torsoMesh.position.set(0, 1.1, 0.02);
-  bot.torsoMesh.scale.set(1.08, 1.18, 1.25);
+  bot.pivotGroup.add(cloned);
 
-  const clonedRoot = SkeletonUtils.clone(templateScene) as THREE.Group;
-  clonedRoot.name = `ProRifleModel_${bot.id}`;
-  clonedRoot.position.set(0, -bot.pivotGroup.position.y, 0);
+  const weaponChoices: WeaponId[] = ['AK47_RIFLE', 'M4_CARBINE', 'SNIPER_TACTICAL', 'SNIPER_BOLT', 'P50_PISTOL'];
+  const chosenWeapon =
+    bot.weaponId || weaponChoices[Math.abs(Math.round((bot.patrolOffset || 1) * 10)) % weaponChoices.length];
+  bot.weaponId = chosenWeapon;
 
-  const isAlly = Boolean(bot.isAlly);
-  const teamMatLookup = isAlly ? allyMatMap : enemyMatMap;
-
-  clonedRoot.traverse((child) => {
-    if (child.name && child.name.startsWith('mixamorig')) {
-      child.name = child.name.replace(':', '');
-    }
-    if (!(child as THREE.Mesh).isMesh) return;
-    const mesh = child as THREE.Mesh;
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    mesh.frustumCulled = false;
-
-    if (Array.isArray(mesh.material)) {
-      mesh.material = mesh.material.map((m) => teamMatLookup.get(m.name) || m);
-    } else if (mesh.material) {
-      mesh.material = teamMatLookup.get(mesh.material.name) || mesh.material;
-    }
-  });
-
-  const rHandBone = clonedRoot.getObjectByName('mixamorigRightHand') || null;
-  const lHandBone = clonedRoot.getObjectByName('mixamorigLeftHand') || null;
-
-  const weaponProp = createBotThirdPersonWeaponMesh(bot.weaponId as WeaponId, isAlly);
-  weaponProp.position.set(-0.08, 1.28, 0.16);
-  weaponProp.rotation.set(0.02, 0.04, 0);
+  const weaponProp = createBotThirdPersonWeaponMesh(chosenWeapon, isSoftwareGl);
+  weaponProp.position.set(-0.08, 1.26, 0.18);
   bot.pivotGroup.add(weaponProp);
-  bot.pivotGroup.add(clonedRoot);
 
-  const mixer = new THREE.AnimationMixer(clonedRoot);
-  const actions: Record<BotAnimState, THREE.AnimationAction> = {
-    RIFLE_IDLE: mixer.clipAction(sharedClips.RIFLE_IDLE),
-    RIFLE_WALK: mixer.clipAction(sharedClips.RIFLE_WALK),
-    RIFLE_RUN: mixer.clipAction(sharedClips.RIFLE_RUN),
-    RIFLE_AIM: mixer.clipAction(sharedClips.RIFLE_AIM),
-    RIFLE_FIRE: mixer.clipAction(sharedClips.RIFLE_FIRE),
-    RIFLE_CROUCH: mixer.clipAction(sharedClips.RIFLE_CROUCH),
-    RIFLE_CROUCH_WALK: mixer.clipAction(sharedClips.RIFLE_CROUCH_WALK),
-    RIFLE_HIT: mixer.clipAction(sharedClips.RIFLE_HIT),
-    RIFLE_DEATH: mixer.clipAction(sharedClips.RIFLE_DEATH),
-    RIFLE_DEATH_HEADSHOT: mixer.clipAction(sharedClips.RIFLE_DEATH_HEADSHOT),
-  };
+  const mixer = new THREE.AnimationMixer(cloned);
+  const actions = {} as Record<BotAnimState, THREE.AnimationAction>;
+  (Object.keys(sharedClips) as BotAnimState[]).forEach((stateKey) => {
+    const action = mixer.clipAction(sharedClips![stateKey]);
+    if (
+      stateKey === 'RIFLE_FIRE' ||
+      stateKey === 'RIFLE_THROW' ||
+      stateKey === 'RIFLE_HIT' ||
+      stateKey.startsWith('RIFLE_DEATH')
+    ) {
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+    } else {
+      action.setLoop(THREE.LoopRepeat, Infinity);
+    }
+    actions[stateKey] = action;
+  });
 
-  actions.RIFLE_DEATH.setLoop(THREE.LoopOnce, 1);
-  actions.RIFLE_DEATH.clampWhenFinished = true;
-  actions.RIFLE_DEATH_HEADSHOT.setLoop(THREE.LoopOnce, 1);
-  actions.RIFLE_DEATH_HEADSHOT.clampWhenFinished = true;
-
-  const crouchStance =
-    bot.patrolAxis === 'NONE' ||
-    bot.weaponId === 'SNIPER_BOLT' ||
-    bot.weaponId === 'SNIPER_TACTICAL';
-  const initialState: BotAnimState =
-    bot.patrolAxis !== 'NONE'
-      ? 'RIFLE_WALK'
-      : crouchStance
-        ? 'RIFLE_CROUCH'
-        : 'RIFLE_IDLE';
-  actions[initialState].play();
-  actions[initialState].time = (bot.patrolOffset || 0) * 0.4;
-  mixer.update(0.016);
+  const crouchStance = Boolean(bot.root.userData?.crouchStance);
+  const initialState: BotAnimState = crouchStance ? 'RIFLE_CROUCH' : 'RIFLE_IDLE';
+  actions[initialState].reset().play();
 
   const ctrl: BotAnimController = {
-    modelRoot: clonedRoot,
+    modelRoot: cloned,
     weaponProp,
     rHandBone,
     lHandBone,
@@ -198,8 +209,10 @@ export function attachProRifleCharacterToBot(
     currentState: initialState,
     prevX: bot.root.position.x,
     prevZ: bot.root.position.z,
+    smoothedSpeed: 0,
     hitReactTimer: 0,
     fireAnimTimer: 0,
+    throwAnimTimer: 0,
     deathElapsed: 0,
     lodAccumDt: 0,
     tacticalTimer: (bot.patrolOffset || 0) * 1.5,
@@ -211,36 +224,29 @@ export function attachProRifleCharacterToBot(
   bot.root.userData.hasSkeletalCharacter = true;
 }
 
-function transitionBotAnim(
-  ctrl: BotAnimController,
-  nextState: BotAnimState,
-  fadeSec = 0.16
-): void {
-  if (ctrl.currentState === nextState) return;
-  const prevAction = ctrl.actions[ctrl.currentState];
-  const nextAction = ctrl.actions[nextState];
-  if (!nextAction) return;
-
-  nextAction.reset();
-  nextAction.setEffectiveTimeScale(1);
-  nextAction.setEffectiveWeight(1);
-  if (prevAction) prevAction.crossFadeTo(nextAction, fadeSec, false);
-  nextAction.play();
-  ctrl.currentState = nextState;
-}
-
 export function triggerBotFireAnimation(bot: TacticalTargetEntity): void {
   const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
   if (!ctrl || bot.isDown) return;
-  ctrl.fireAnimTimer = 0.2;
-  transitionBotAnim(ctrl, 'RIFLE_FIRE', 0.04);
+  ctrl.fireAnimTimer = 0.18;
+  if (ctrl.currentState === 'RIFLE_IDLE' || ctrl.currentState === 'RIFLE_AIM') {
+    transitionBotAnim(ctrl, 'RIFLE_FIRE', 0.04);
+  }
+}
+
+export function triggerBotGrenadeAnimation(bot: TacticalTargetEntity): void {
+  const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
+  if (!ctrl || bot.isDown) return;
+  ctrl.throwAnimTimer = 0.56;
+  transitionBotAnim(ctrl, 'RIFLE_THROW', 0.06);
 }
 
 export function triggerBotHitAnimation(bot: TacticalTargetEntity): void {
   const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
   if (!ctrl || bot.isDown) return;
-  ctrl.hitReactTimer = 0.25;
-  transitionBotAnim(ctrl, 'RIFLE_HIT', 0.04);
+  ctrl.hitReactTimer = 0.22;
+  if (ctrl.currentState === 'RIFLE_IDLE' || ctrl.currentState === 'RIFLE_AIM') {
+    transitionBotAnim(ctrl, 'RIFLE_HIT', 0.04);
+  }
 }
 
 export function updateAllBotCharacters(
@@ -269,105 +275,109 @@ export function updateAllBotCharacters(
 
     if (t.isDown) {
       t.pivotGroup.rotation.x = 0;
-      const isDeathState =
-        ctrl.currentState === 'RIFLE_DEATH' ||
-        ctrl.currentState === 'RIFLE_DEATH_HEADSHOT';
-      if (!isDeathState) {
+      if (!ctrl.currentState.startsWith('RIFLE_DEATH')) {
         ctrl.deathElapsed = 0;
-        const deathState: BotAnimState =
-          Math.abs(t.hitTiltVelocity) > 12
-            ? 'RIFLE_DEATH_HEADSHOT'
-            : 'RIFLE_DEATH';
-        transitionBotAnim(ctrl, deathState, 0.08);
+        const wasCrouched = ctrl.currentState === 'RIFLE_CROUCH' || ctrl.currentState === 'RIFLE_CROUCH_WALK';
+        const isHeadshot = Math.abs(t.hitTiltVelocity) > 12;
+        transitionBotAnim(
+          ctrl,
+          selectDirectionalDeathState(t.root.position, t.root.rotation.y, playerPos, isHeadshot, wasCrouched),
+          0.08
+        );
       }
 
       ctrl.deathElapsed += dt;
-      if (ctrl.deathElapsed < 2.8) {
-        ctrl.mixer.update(dt);
-      }
+      if (ctrl.deathElapsed < 2.8) ctrl.mixer.update(dt);
 
-      const dropProgress = Math.min(1, ctrl.deathElapsed / 0.45);
-      const dropEase = 1 - Math.pow(1 - dropProgress, 2.2);
+      const dropEase = 1 - Math.pow(1 - Math.min(1, ctrl.deathElapsed / 0.45), 2.2);
       ctrl.weaponProp.position.set(
         THREE.MathUtils.lerp(-0.08, 0.28, dropEase),
         THREE.MathUtils.lerp(1.15, 0.04, dropEase),
         THREE.MathUtils.lerp(0.18, 0.22, dropEase)
       );
-      ctrl.weaponProp.rotation.set(
-        0,
-        THREE.MathUtils.lerp(0.04, 0.42, dropEase),
-        THREE.MathUtils.lerp(0, Math.PI / 2, dropEase)
-      );
+      ctrl.weaponProp.rotation.set(0, THREE.MathUtils.lerp(0.04, 0.42, dropEase), THREE.MathUtils.lerp(0, Math.PI / 2, dropEase));
 
       if (ctrl.deathElapsed > 2.4) {
-        const vanishAlpha = Math.min(1, (ctrl.deathElapsed - 2.4) / 0.5);
-        t.pivotGroup.position.y = -vanishAlpha * 0.45;
-        if (ctrl.deathElapsed >= 2.9) {
-          t.root.visible = false;
-        }
+        t.pivotGroup.position.y = -Math.min(1, (ctrl.deathElapsed - 2.4) / 0.5) * 0.45;
+        if (ctrl.deathElapsed >= 2.9) t.root.visible = false;
       }
       continue;
     }
 
     if (!t.root.visible) t.root.visible = true;
     t.pivotGroup.position.y = 0;
-
-    if (
-      ctrl.currentState === 'RIFLE_DEATH' ||
-      ctrl.currentState === 'RIFLE_DEATH_HEADSHOT'
-    ) {
+    if (ctrl.currentState.startsWith('RIFLE_DEATH')) {
       ctrl.deathElapsed = 0;
       transitionBotAnim(ctrl, ctrl.crouchStance ? 'RIFLE_CROUCH' : 'RIFLE_IDLE', 0.15);
     }
-
     t.pivotGroup.rotation.x = 0;
 
     const dx = t.root.position.x - ctrl.prevX;
     const dz = t.root.position.z - ctrl.prevZ;
     ctrl.prevX = t.root.position.x;
     ctrl.prevZ = t.root.position.z;
-    const speed = dt > 0.0001 ? Math.hypot(dx, dz) / dt : 0;
+    const rawSpeed = dt > 0.0001 ? Math.hypot(dx, dz) / dt : 0;
+    ctrl.smoothedSpeed = THREE.MathUtils.damp(ctrl.smoothedSpeed, rawSpeed, 11, dt);
+    const speed = ctrl.smoothedSpeed;
 
-    if (!t.isTelegraphing && speed > 0.08) {
-      const moveYaw = Math.atan2(dx, dz);
-      let diff = moveYaw - t.root.rotation.y;
+    if (!t.isTelegraphing && rawSpeed > 0.12) {
+      let diff = Math.atan2(dx, dz) - t.root.rotation.y;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
-      t.root.rotation.y += diff * Math.min(1, dt * 9);
+      t.root.rotation.y += diff * Math.min(1, dt * 10);
     }
 
     const wantTacticalCrouch =
-      ctrl.crouchStance ||
-      (t.isTelegraphing && Math.sin(ctrl.tacticalTimer * 1.8) > 0.25) ||
-      (speed <= 0.12 && Math.sin(ctrl.tacticalTimer * 0.9) > 0.45);
+      speed <= 0.18 && (ctrl.crouchStance || (t.isTelegraphing && Math.sin(ctrl.tacticalTimer * 1.4) > 0.45));
 
-    if (ctrl.hitReactTimer > 0) {
+    if (ctrl.throwAnimTimer > 0) {
+      ctrl.throwAnimTimer -= dt;
+    } else if (ctrl.hitReactTimer > 0) {
       ctrl.hitReactTimer -= dt;
-    } else if (ctrl.fireAnimTimer > 0) {
+    } else if (ctrl.fireAnimTimer > 0 && speed <= 0.18) {
       ctrl.fireAnimTimer -= dt;
-    } else if (t.isTelegraphing && speed <= 0.25) {
-      transitionBotAnim(ctrl, wantTacticalCrouch ? 'RIFLE_CROUCH' : 'RIFLE_AIM', 0.14);
-    } else if (speed > 2.4) {
-      transitionBotAnim(ctrl, 'RIFLE_RUN', 0.15);
-    } else if (speed > 0.08) {
-      transitionBotAnim(
-        ctrl,
-        wantTacticalCrouch ? 'RIFLE_CROUCH_WALK' : 'RIFLE_WALK',
-        0.16
-      );
+    } else if (t.isTelegraphing && speed <= 0.22) {
+      transitionBotAnim(ctrl, wantTacticalCrouch ? 'RIFLE_CROUCH' : 'RIFLE_AIM', 0.2);
+    } else if (t.isTelegraphing && speed > 0.22) {
+      if (ctrl.fireAnimTimer > 0) ctrl.fireAnimTimer = Math.max(0, ctrl.fireAnimTimer - dt);
+      const sinY = Math.sin(t.root.rotation.y);
+      const cosY = Math.cos(t.root.rotation.y);
+      const stepDist = Math.hypot(dx, dz) || 1;
+      const fwdDot = (dx * sinY + dz * cosY) / stepDist;
+      const sideDot = (dx * cosY - dz * sinY) / stepDist;
+      if (Math.abs(sideDot) > Math.abs(fwdDot) * 1.2) {
+        const leftState = speed > 1.7 ? 'RIFLE_RUN_LEFT' : 'RIFLE_WALK_LEFT';
+        const rightState = speed > 1.7 ? 'RIFLE_RUN_RIGHT' : 'RIFLE_WALK_RIGHT';
+        transitionBotAnim(ctrl, sideDot > 0 ? leftState : rightState, 0.2);
+      } else {
+        transitionBotAnim(ctrl, fwdDot >= -0.25 ? 'RIFLE_RUN' : 'RIFLE_WALK_BACK', 0.2);
+      }
+    } else if (speed > 1.35) {
+      if (ctrl.fireAnimTimer > 0) ctrl.fireAnimTimer = Math.max(0, ctrl.fireAnimTimer - dt);
+      transitionBotAnim(ctrl, 'RIFLE_RUN', 0.2);
+    } else if (speed > 0.12) {
+      if (ctrl.fireAnimTimer > 0) ctrl.fireAnimTimer = Math.max(0, ctrl.fireAnimTimer - dt);
+      transitionBotAnim(ctrl, 'RIFLE_WALK', 0.2);
     } else {
-      transitionBotAnim(ctrl, wantTacticalCrouch ? 'RIFLE_CROUCH' : 'RIFLE_IDLE', 0.18);
+      transitionBotAnim(ctrl, wantTacticalCrouch ? 'RIFLE_CROUCH' : 'RIFLE_IDLE', 0.22);
     }
 
-    const isCrouchedNow =
-      ctrl.currentState === 'RIFLE_CROUCH' ||
-      ctrl.currentState === 'RIFLE_CROUCH_WALK';
+    const activeAction = ctrl.actions[ctrl.currentState];
+    if (activeAction) {
+      if (ctrl.currentState.startsWith('RIFLE_RUN')) {
+        activeAction.setEffectiveTimeScale(THREE.MathUtils.clamp(speed / 3.1, 0.92, 1.28));
+      } else if (ctrl.currentState.startsWith('RIFLE_WALK')) {
+        activeAction.setEffectiveTimeScale(THREE.MathUtils.clamp(speed / 1.5, 0.88, 1.22));
+      }
+    }
+
+    const isCrouchedNow = ctrl.currentState === 'RIFLE_CROUCH' || ctrl.currentState === 'RIFLE_CROUCH_WALK';
     t.headMesh.position.y = isCrouchedNow ? 1.05 : 1.56;
     t.torsoMesh.position.y = isCrouchedNow ? 0.72 : 1.1;
     if (t.armorMesh) t.armorMesh.position.y = isCrouchedNow ? 0.72 : 1.08;
 
     const distSq = t.root.position.distanceToSquared(playerPos);
-    if (distSq < 900) {
+    if (distSq < 1200) {
       ctrl.mixer.update(dt);
     } else {
       ctrl.lodAccumDt += dt;

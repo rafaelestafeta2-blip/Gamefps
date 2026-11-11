@@ -51,6 +51,18 @@ export interface KillfeedEntry {
   timestamp: number;
 }
 
+export interface SquadOperatorStats {
+  callsign: string;
+  roleTitle: string;
+  weaponId: WeaponId;
+  kills: number;
+  deaths: number;
+  assists: number;
+  headshots: number;
+  score: number;
+  isPlayer: boolean;
+}
+
 export interface YardBombHudInfo {
   bombStatus: 'CARRIED' | 'PLANTING' | 'PLANTED' | 'DETONATED' | 'DEFUSED';
   plantedSite: 'A' | 'B' | null;
@@ -74,6 +86,11 @@ export interface YardBombHudInfo {
   lastRoundCash: number;
   totalMatchXp: number;
   totalMatchCash: number;
+  isSpectating?: boolean;
+  spectatedCallsign?: string;
+  spectatedWeapon?: WeaponId;
+  spectatedHealth?: number;
+  squadStats?: SquadOperatorStats[];
 }
 
 export interface BallisticShotTelemetry {

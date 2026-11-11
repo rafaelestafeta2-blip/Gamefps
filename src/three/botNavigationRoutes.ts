@@ -8,6 +8,7 @@ import { YardBotEntity } from './yardPropsBuilder';
 export interface BotNavData {
   waypoints: THREE.Vector3[];
   wpIndex: number;
+  patrolDir: 1 | -1;
   tacticalState:
     | 'PATROL'
     | 'INVESTIGATE'
@@ -15,14 +16,20 @@ export interface BotNavData {
     | 'RUSH_PLANTED'
     | 'PLANTING'
     | 'DEFUSING';
+  lockedTargetId: string | null;
+  chaseTimer: number;
   lastKnownPos: THREE.Vector3 | null;
   investigateTimer: number;
   fireCooldown: number;
+  burstShotsLeft: number;
+  burstShotTimer: number;
   grenadeCooldown: number;
   grenadesLeft: number;
   strafeTimer: number;
   strafeDir: number;
   stuckTimer: number;
+  avoidAngle: number;
+  avoidTimer: number;
   verticalVel: number;
   plantOrDefuseTimer: number;
   visionRange: number;
@@ -42,48 +49,66 @@ export interface TacticalMapRoutes {
 
 const _losDir = new THREE.Vector3();
 const _navDir = new THREE.Vector3();
+const _steerDir = new THREE.Vector3();
 const _resolvedHoriz = { x: 0, z: 0 };
+const STEER_TEST_ANGLES = [0.55, -0.55, 1.05, -1.05, 1.55, -1.55, 2.2, -2.2];
 
 /**
- * Rotas táticas calibradas com as coordenadas métricas reais dos corredores,
- * portas e Bomb Sites de cada mapa (`de_dust2`, `cs_assault` e `yard`).
+ * Interpola ângulos em radianos sempre pelo menor arco [-PI, +PI],
+ * impedindo que o bot dê um giro de 360° de costas ao cruzar o limite sul (-PI / +PI).
+ */
+export function dampAngleShortest(
+  current: number,
+  target: number,
+  lambda: number,
+  dt: number
+): number {
+  const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  return current + delta * (1 - Math.exp(-lambda * dt));
+}
+
+/**
+ * Rotas táticas completas de patrulha, avanço aos objetivos (Bomb Sites A/B)
+ * e rotação pelo mapa para atacantes (Vanguard) e defensores (Blackthorn).
  */
 export function getMapRoutes(mode: DrillMode): TacticalMapRoutes {
+  const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+
   if (mode === 'DUST2_BOMB_5V5') {
     return {
-      vgA: [new THREE.Vector3(-4, 4.8, 16), new THREE.Vector3(18, 4.8, 12), new THREE.Vector3(33.5, 4.8, -16), new THREE.Vector3(34, 4.8, -42), new THREE.Vector3(28.8, 7.2, -60.4)],
-      vgB: [new THREE.Vector3(-18, 6.0, 8), new THREE.Vector3(-38, 5.6, -16), new THREE.Vector3(-41, 4.8, -42), new THREE.Vector3(-40, 4.8, -67.2)],
-      vgMid: [new THREE.Vector3(-11.5, 4.8, 4), new THREE.Vector3(-11, 2.8, -22), new THREE.Vector3(2, 4.8, -36.5), new THREE.Vector3(16, 6.0, -48), new THREE.Vector3(28.8, 7.2, -60.4)],
-      btA: [new THREE.Vector3(28.5, 7.2, -58.5), new THREE.Vector3(34.5, 4.8, -36), new THREE.Vector3(22, 6.0, -52), new THREE.Vector3(28.8, 7.2, -60.4)],
-      btB: [new THREE.Vector3(-39.5, 4.8, -65), new THREE.Vector3(-33, 4.8, -56), new THREE.Vector3(-40.5, 4.8, -46), new THREE.Vector3(-40, 4.8, -67.2)],
-      btMid: [new THREE.Vector3(-6.2, 1.6, -54), new THREE.Vector3(-11, 2.8, -36), new THREE.Vector3(2, 4.8, -36.5), new THREE.Vector3(-11, 2.8, -36)],
-      siteA: new THREE.Vector3(28.8, 7.2, -60.4),
-      siteB: new THREE.Vector3(-40.0, 4.8, -67.2),
+      vgA: [v(-4, 4.8, 16), v(18, 4.8, 12), v(33.5, 4.8, -16), v(34, 4.8, -42), v(28.8, 7.2, -60.4), v(14, 6.0, -48)],
+      vgB: [v(-18, 6.0, 8), v(-38, 5.6, -16), v(-41, 4.8, -42), v(-40, 4.8, -67.2), v(-24, 3.2, -56)],
+      vgMid: [v(-11.5, 4.8, 4), v(-11, 2.8, -22), v(2, 4.8, -36.5), v(16, 6.0, -48), v(28.8, 7.2, -60.4), v(-11, 2.8, -36), v(-40, 4.8, -67.2)],
+      btA: [v(28.5, 7.2, -58.5), v(34.5, 4.8, -36), v(33.5, 4.8, -14), v(18, 4.8, 8), v(2, 4.8, -36.5), v(28.8, 7.2, -60.4)],
+      btB: [v(-39.5, 4.8, -65), v(-40.5, 4.8, -42), v(-38, 5.6, -18), v(-14, 4.8, -18), v(-11, 2.8, -36), v(-40, 4.8, -67.2)],
+      btMid: [v(-6.2, 1.6, -54), v(-11, 2.8, -36), v(-11, 4.8, -12), v(2, 4.8, -36.5), v(22, 6.0, -52), v(-33, 4.8, -56)],
+      siteA: v(28.8, 7.2, -60.4),
+      siteB: v(-40.0, 4.8, -67.2),
     };
   }
 
   if (mode === 'ASSAULT_BOMB_5V5') {
     return {
-      vgA: [new THREE.Vector3(-28, 0, 30), new THREE.Vector3(-27, 0, 18.5), new THREE.Vector3(-22.9, 0, 11.6)],
-      vgB: [new THREE.Vector3(-16, 0, 28), new THREE.Vector3(-9.5, 0, 20), new THREE.Vector3(-8.8, 0, 12.5), new THREE.Vector3(-2.3, 0, 6.9)],
-      vgMid: [new THREE.Vector3(8.5, 0, 34), new THREE.Vector3(18.2, 0, 22), new THREE.Vector3(18.2, 0, 2.5), new THREE.Vector3(14.5, 0, 0.2), new THREE.Vector3(-2.3, 0, 6.9)],
-      btA: [new THREE.Vector3(-21.1, 0, 6), new THREE.Vector3(-22.9, 0, 11.6), new THREE.Vector3(-16.5, 0, 19.5), new THREE.Vector3(-22.9, 0, 11.6)],
-      btB: [new THREE.Vector3(3.5, 0, 6.9), new THREE.Vector3(-2.3, 0, 6.9), new THREE.Vector3(-8.5, 0, 12.5), new THREE.Vector3(-2.3, 0, 6.9)],
-      btMid: [new THREE.Vector3(17.8, 0, 5.5), new THREE.Vector3(18, 0, 18), new THREE.Vector3(-8.7, 0, 22), new THREE.Vector3(-2.3, 0, 6.9)],
-      siteA: new THREE.Vector3(-22.9, 0, 11.6),
-      siteB: new THREE.Vector3(-2.3, 0, 6.9),
+      vgA: [v(-28, 0, 30), v(-27, 0, 18.5), v(-22.9, 0, 11.6), v(-12, 0, 8.5), v(-2.3, 0, 6.9)],
+      vgB: [v(-16, 0, 28), v(-9.5, 0, 20), v(-8.8, 0, 12.5), v(-2.3, 0, 6.9), v(-22.9, 0, 11.6)],
+      vgMid: [v(8.5, 0, 34), v(18.2, 0, 22), v(18.2, 0, 6.5), v(-2.3, 0, 6.9), v(-22.9, 0, 11.6)],
+      btA: [v(-21.1, 0, 6), v(-22.9, 0, 11.6), v(-26, 0, 22), v(-14, 0, 24), v(-8.8, 0, 12.5), v(-2.3, 0, 6.9)],
+      btB: [v(3.5, 0, 6.9), v(-2.3, 0, 6.9), v(-9.5, 0, 19), v(8.5, 0, 26), v(18, 0, 14), v(-22.9, 0, 11.6)],
+      btMid: [v(17.8, 0, 5.5), v(18, 0, 20), v(-8.7, 0, 22), v(-26, 0, 20), v(-22.9, 0, 11.6), v(-2.3, 0, 6.9)],
+      siteA: v(-22.9, 0, 11.6),
+      siteB: v(-2.3, 0, 6.9),
     };
   }
 
   return {
-    vgA: [new THREE.Vector3(6, 0, 28), new THREE.Vector3(16, 0, 18), new THREE.Vector3(22, 0, 4), new THREE.Vector3(26, 0, -7.5)],
-    vgB: [new THREE.Vector3(-8, 0, 28), new THREE.Vector3(-16, 0, 16), new THREE.Vector3(-20, 0, 2), new THREE.Vector3(-21.5, 0, -6.5)],
-    vgMid: [new THREE.Vector3(0, 0, 26), new THREE.Vector3(-1, 0, 10), new THREE.Vector3(2, 0, -2), new THREE.Vector3(11.5, 0, -15)],
-    btA: [new THREE.Vector3(24, 0, -18), new THREE.Vector3(26, 0, -8), new THREE.Vector3(28, 0, -2), new THREE.Vector3(26, 0, -8)],
-    btB: [new THREE.Vector3(-20, 0, -18), new THREE.Vector3(-21.5, 0, -6.5), new THREE.Vector3(-18, 0, 0), new THREE.Vector3(-21.5, 0, -6.5)],
-    btMid: [new THREE.Vector3(2, 0, -20), new THREE.Vector3(-0.8, 0, -4), new THREE.Vector3(2, 0, 4), new THREE.Vector3(-0.8, 0, 6.2)],
-    siteA: new THREE.Vector3(26, 0, -7.5),
-    siteB: new THREE.Vector3(-21.5, 0, -6.5),
+    vgA: [v(6, 0, 28), v(16, 0, 18), v(22, 0, 4), v(26, 0, -7.5), v(8, 0, -10), v(-21.5, 0, -6.5)],
+    vgB: [v(-8, 0, 28), v(-16, 0, 16), v(-20, 0, 2), v(-21.5, 0, -6.5), v(-4, 0, -8), v(26, 0, -7.5)],
+    vgMid: [v(0, 0, 26), v(-1, 0, 10), v(2, 0, -2), v(26, 0, -7.5), v(-21.5, 0, -6.5)],
+    btA: [v(24, 0, -18), v(26, 0, -7.5), v(22, 0, 8), v(12, 0, 18), v(0, 0, 6), v(-21.5, 0, -6.5)],
+    btB: [v(-20, 0, -18), v(-21.5, 0, -6.5), v(-19, 0, 10), v(-10, 0, 18), v(0, 0, 4), v(26, 0, -7.5)],
+    btMid: [v(2, 0, -20), v(-0.8, 0, -4), v(0, 0, 12), v(18, 0, 12), v(26, 0, -7.5), v(-18, 0, 10), v(-21.5, 0, -6.5)],
+    siteA: v(26, 0, -7.5),
+    siteB: v(-21.5, 0, -6.5),
   };
 }
 
@@ -91,12 +116,12 @@ export function isTargetInFieldOfView(
   botPos: THREE.Vector3,
   botYaw: number,
   targetPos: THREE.Vector3,
-  fovDegrees = 90
+  fovDegrees = 135
 ): boolean {
   const dx = targetPos.x - botPos.x;
   const dz = targetPos.z - botPos.z;
   const distSq = dx * dx + dz * dz;
-  if (distSq < 23.04) return true;
+  if (distSq < 72.25 || fovDegrees >= 350) return true;
   const dist = Math.sqrt(distSq);
   if (dist < 0.001) return true;
   const dot = (Math.sin(botYaw) * dx + Math.cos(botYaw) * dz) / dist;
@@ -163,6 +188,34 @@ export function isBotCollidingHorizontallyWithBoxes(
   return false;
 }
 
+function tryStepDirection(
+  prevX: number,
+  prevZ: number,
+  yBottom: number,
+  dirX: number,
+  dirZ: number,
+  step: number,
+  botRadius: number,
+  colliders?: ColliderBox[],
+  activeGlbCollider?: Dust2TriangleCollider | null
+): { x: number; z: number; movedDist: number } {
+  const candX = prevX + dirX * step;
+  const candZ = prevZ + dirZ * step;
+  let outX = prevX;
+  let outZ = prevZ;
+
+  if (activeGlbCollider && activeGlbCollider.ready) {
+    activeGlbCollider.resolveHorizontal(candX, candZ, yBottom, 1.72, botRadius, _resolvedHoriz);
+    outX = _resolvedHoriz.x;
+    outZ = _resolvedHoriz.z;
+  } else {
+    if (!isBotCollidingHorizontallyWithBoxes(candX, prevZ, yBottom, botRadius, colliders)) outX = candX;
+    if (!isBotCollidingHorizontallyWithBoxes(outX, candZ, yBottom, botRadius, colliders)) outZ = candZ;
+  }
+
+  return { x: outX, z: outZ, movedDist: Math.hypot(outX - prevX, outZ - prevZ) };
+}
+
 export function moveBotWithPhysics(
   bot: YardBotEntity,
   nav: BotNavData,
@@ -170,10 +223,13 @@ export function moveBotWithPhysics(
   moveSpeed: number,
   dt: number,
   colliders?: ColliderBox[],
-  activeGlbCollider?: Dust2TriangleCollider | null
+  activeGlbCollider?: Dust2TriangleCollider | null,
+  lockLookAtTarget?: THREE.Vector3 | null
 ): void {
   const bPos = bot.root.position;
   const botRadius = 0.36;
+
+  if (nav.avoidTimer > 0) nav.avoidTimer = Math.max(0, nav.avoidTimer - dt);
 
   if (moveSpeed > 0.05) {
     _navDir.subVectors(moveTarget, bPos);
@@ -181,35 +237,68 @@ export function moveBotWithPhysics(
     const dist = _navDir.length();
     if (dist > 0.1) {
       _navDir.normalize();
+
+      let moveDirX = _navDir.x;
+      let moveDirZ = _navDir.z;
+      if (nav.avoidTimer > 0 && Math.abs(nav.avoidAngle) > 0.01) {
+        const cosA = Math.cos(nav.avoidAngle);
+        const sinA = Math.sin(nav.avoidAngle);
+        moveDirX = _navDir.x * cosA - _navDir.z * sinA;
+        moveDirZ = _navDir.x * sinA + _navDir.z * cosA;
+      }
+
       const step = Math.min(dist, moveSpeed * dt);
       const prevX = bPos.x;
       const prevZ = bPos.z;
-      const candX = prevX + _navDir.x * step;
-      const candZ = prevZ + _navDir.z * step;
 
-      if (activeGlbCollider && activeGlbCollider.ready) {
-        activeGlbCollider.resolveHorizontal(candX, candZ, bPos.y, 1.72, botRadius, _resolvedHoriz);
-        bPos.x = _resolvedHoriz.x;
-        bPos.z = _resolvedHoriz.z;
-      } else {
-        if (!isBotCollidingHorizontallyWithBoxes(candX, prevZ, bPos.y, botRadius, colliders)) bPos.x = candX;
-        if (!isBotCollidingHorizontallyWithBoxes(bPos.x, candZ, bPos.y, botRadius, colliders)) bPos.z = candZ;
+      let attempt = tryStepDirection(prevX, prevZ, bPos.y, moveDirX, moveDirZ, step, botRadius, colliders, activeGlbCollider);
+
+      if (attempt.movedDist < step * 0.55) {
+        for (let i = 0; i < STEER_TEST_ANGLES.length; i++) {
+          const ang = STEER_TEST_ANGLES[i] * (nav.strafeDir >= 0 ? 1 : -1);
+          const cosA = Math.cos(ang);
+          const sinA = Math.sin(ang);
+          _steerDir.set(_navDir.x * cosA - _navDir.z * sinA, 0, _navDir.x * sinA + _navDir.z * cosA);
+          const alt = tryStepDirection(prevX, prevZ, bPos.y, _steerDir.x, _steerDir.z, step, botRadius, colliders, activeGlbCollider);
+          if (alt.movedDist > attempt.movedDist * 1.35 && alt.movedDist > step * 0.45) {
+            attempt = alt;
+            moveDirX = _steerDir.x;
+            moveDirZ = _steerDir.z;
+            nav.avoidAngle = ang;
+            nav.avoidTimer = 0.5;
+            break;
+          }
+        }
       }
 
-      if (Math.hypot(bPos.x - prevX, bPos.z - prevZ) < step * 0.35) {
+      bPos.x = attempt.x;
+      bPos.z = attempt.z;
+
+      if (attempt.movedDist < step * 0.3) {
         nav.stuckTimer += dt;
-        if (nav.stuckTimer > 0.45) {
+        if (nav.stuckTimer > 0.35) {
           nav.stuckTimer = 0;
           nav.strafeDir *= -1;
-          if (nav.waypoints.length > 0) nav.wpIndex = (nav.wpIndex + 1) % nav.waypoints.length;
+          nav.avoidAngle = nav.strafeDir * 1.25;
+          nav.avoidTimer = 0.65;
+          if (!lockLookAtTarget && nav.waypoints.length > 0) {
+            nav.wpIndex = (nav.wpIndex + 1) % nav.waypoints.length;
+          }
         }
       } else {
-        nav.stuckTimer = Math.max(0, nav.stuckTimer - dt * 2);
+        nav.stuckTimer = Math.max(0, nav.stuckTimer - dt * 2.5);
       }
 
-      const lookAngle = Math.atan2(_navDir.x, _navDir.z);
-      bot.root.rotation.y = THREE.MathUtils.damp(bot.root.rotation.y, lookAngle, 8.5, dt);
+      if (!lockLookAtTarget) {
+        const lookAngle = Math.atan2(moveDirX, moveDirZ);
+        bot.root.rotation.y = dampAngleShortest(bot.root.rotation.y, lookAngle, 10.5, dt);
+      }
     }
+  }
+
+  if (lockLookAtTarget) {
+    const enemyAngle = Math.atan2(lockLookAtTarget.x - bPos.x, lockLookAtTarget.z - bPos.z);
+    bot.root.rotation.y = dampAngleShortest(bot.root.rotation.y, enemyAngle, 14.0, dt);
   }
 
   const floorY =
