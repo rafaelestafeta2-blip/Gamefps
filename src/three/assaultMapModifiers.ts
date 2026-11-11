@@ -1,11 +1,10 @@
 import * as THREE from 'three';
 
 /**
- * Optimizes a baked GoldSrc lightmap material (`part1..part10` in `cs_assault.glb`):
- * 1. Disables mipmap & anisotropic bleeding across 0.5px lightmap atlas gutters
- *    (eliminating dark grid stripes on the floor and walls).
- * 2. Applies a lightweight gamma shadow-lift curve in the fragment shader so overly dark
- *    indoor warehouse corners, hostage rooms, under-bridge areas, and air vents are clearly visible.
+ * Otimiza os materiais de lightmap baked (`part1..part10` em `cs_assault.glb`):
+ * 1. Desativa mipmaps, anisotropia e neblina esbranquiçada (`fog: false`) para preservar
+ *    o contraste urbano rico e profundo das texturas originais.
+ * 2. Aplica uma curva tonal natural e equilibrada no shader sem lavar os tons escuros.
  */
 export function optimizeAssaultBakedMaterial(
   m: THREE.Material
@@ -29,12 +28,14 @@ export function optimizeAssaultBakedMaterial(
   if (m instanceof THREE.MeshBasicMaterial) {
     basicMat = m;
     basicMat.side = THREE.DoubleSide;
+    basicMat.fog = false;
   } else {
     basicMat = new THREE.MeshBasicMaterial({
       name: m?.name || 'assault_baked_light',
       map: tex,
       color: srcMat?.color ? srcMat.color.clone() : new THREE.Color(0xffffff),
       side: THREE.DoubleSide,
+      fog: false,
       transparent: Boolean(srcMat?.transparent),
       opacity: srcMat?.opacity ?? 1.0,
       alphaTest: srcMat?.alphaTest ?? 0,
@@ -42,14 +43,14 @@ export function optimizeAssaultBakedMaterial(
     m?.dispose();
   }
 
-  basicMat.customProgramCacheKey = () => 'assault_shadow_lift_v1';
+  basicMat.customProgramCacheKey = () => 'assault_premium_tone_v2';
   basicMat.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       `#ifdef USE_MAP
         vec4 sampledDiffuseColor = texture2D( map, vMapUv );
-        vec3 liftedRgb = pow(max(sampledDiffuseColor.rgb, vec3(0.0)), vec3(0.64)) * 1.24 + vec3(0.078);
-        diffuseColor.rgb *= min(liftedRgb, vec3(1.16));
+        vec3 naturalRgb = pow(max(sampledDiffuseColor.rgb, vec3(0.0)), vec3(0.86)) * 1.08 + vec3(0.012);
+        diffuseColor.rgb *= min(naturalRgb, vec3(1.06));
       #endif`
     );
   };
@@ -59,10 +60,91 @@ export function optimizeAssaultBakedMaterial(
 }
 
 /**
- * Removes closed door slabs (Backdoor "porta dos fundos", Interior Hostage Doors, West Gate),
- * opens the vertical Air Vent shaft between Upper Hostage Room (Y=3.2m) and Vent Duct (Y=10.9m),
- * and strips downward-facing ground brush undersides (`y <= 0.065`) so they never Z-fight
- * and cause dark stripes on the street/warehouse floor.
+ * Encolhe (inset) ligeiramente as bordas de cada ilha UV conectada no atlas 1024x1024
+ * em ~1.6px (`0.0016`) em direção ao centro da ilha, impedindo que a filtragem bilinear
+ * amostre a calha preta (`#000000`) que causa listras pretas no chão e nas calçadas.
+ */
+function insetAssaultUvIslands(
+  geom: THREE.BufferGeometry,
+  keptIndices: number[]
+): void {
+  const uvAttr = geom.attributes.uv as THREE.BufferAttribute | undefined;
+  if (!uvAttr || keptIndices.length === 0) return;
+
+  const vertCount = uvAttr.count;
+  const parent = new Int32Array(vertCount);
+  for (let i = 0; i < vertCount; i++) parent[i] = i;
+
+  const find = (x: number): number => {
+    let root = x;
+    while (parent[root] !== root) root = parent[root];
+    let curr = x;
+    while (curr !== root) {
+      const nxt = parent[curr];
+      parent[curr] = root;
+      curr = nxt;
+    }
+    return root;
+  };
+
+  for (let i = 0; i < keptIndices.length; i += 3) {
+    const a = find(keptIndices[i]);
+    const b = find(keptIndices[i + 1]);
+    const c = find(keptIndices[i + 2]);
+    if (a !== b) parent[b] = a;
+    if (a !== c) parent[c] = a;
+  }
+
+  const bounds = new Map<
+    number,
+    { minU: number; maxU: number; minV: number; maxV: number }
+  >();
+
+  for (let v = 0; v < vertCount; v++) {
+    const r = find(v);
+    const u = uvAttr.getX(v);
+    const w = uvAttr.getY(v);
+    let b = bounds.get(r);
+    if (!b) {
+      b = { minU: u, maxU: u, minV: w, maxV: w };
+      bounds.set(r, b);
+    } else {
+      if (u < b.minU) b.minU = u;
+      if (u > b.maxU) b.maxU = u;
+      if (w < b.minV) b.minV = w;
+      if (w > b.maxV) b.maxV = w;
+    }
+  }
+
+  const margin = 0.0016; // ~1.6px inset num atlas 1024x1024
+  for (let v = 0; v < vertCount; v++) {
+    const b = bounds.get(find(v));
+    if (!b) continue;
+    const spanU = b.maxU - b.minU;
+    const spanV = b.maxV - b.minV;
+    let u = uvAttr.getX(v);
+    let w = uvAttr.getY(v);
+
+    if (spanU > margin * 2.5) {
+      const midU = 0.5 * (b.minU + b.maxU);
+      const scaleU = (spanU - margin * 2) / spanU;
+      u = midU + (u - midU) * scaleU;
+    }
+    if (spanV > margin * 2.5) {
+      const midV = 0.5 * (b.minV + b.maxV);
+      const scaleV = (spanV - margin * 2) / spanV;
+      w = midV + (w - midV) * scaleV;
+    }
+    uvAttr.setXY(v, u, w);
+  }
+
+  uvAttr.needsUpdate = true;
+}
+
+/**
+ * Remove as portas fechadas, desbloqueia o duto vertical de ventilação,
+ * remove as fitas verticais de 2.5cm no asfalto e faces inferiores de calçadas/pisos
+ * que causavam Z-fighting, e aplica inset nas ilhas UV para eliminar listras pretas no chão.
  */
 export function openAssaultDoorsAndVents(
   mapTransformGroup: THREE.Group,
@@ -109,11 +191,15 @@ export function openAssaultDoorsAndVents(
       const minZ = Math.min(v0.z, v1.z, v2.z);
       const maxZ = Math.max(v0.z, v1.z, v2.z);
 
-      // 0. Downward-facing brush undersides at ground level (y <= 0.065m) that Z-fight with the floor
+      // 0a. Faces inferiores de brushes no chão/calçadas (y <= 0.45m) que causam Z-fighting
       const isGroundUndersideZFight =
-        triNormal.y < -0.85 && minY >= -0.05 && maxY <= 0.065;
+        triNormal.y < -0.85 && minY >= -0.08 && maxY <= 0.45;
 
-      // 1. Backdoor ("porta dos fundos") at East Warehouse Wall
+      // 0b. Fitas verticais de 2.5cm de altura no meio da rua (y em [0.00, 0.068]) que criam listras pretas
+      const isFloorMicroSeamRibbon =
+        minY >= -0.05 && maxY <= 0.068 && Math.abs(triNormal.y) < 0.5;
+
+      // 1. Porta dos fundos (Backdoor) na parede leste do galpão
       const isBackdoorSlab =
         minX >= 17.24 &&
         maxX <= 17.56 &&
@@ -122,7 +208,7 @@ export function openAssaultDoorsAndVents(
         minZ >= -0.68 &&
         maxZ <= 0.98;
 
-      // 2. Interior Lower & Upper Hostage Room Doors
+      // 2. Portas internas das salas de reféns (inferior e superior)
       const isLowerHostageDoor =
         minX >= 11.15 &&
         maxX <= 12.85 &&
@@ -146,7 +232,7 @@ export function openAssaultDoorsAndVents(
         maxZ <= -4.98 &&
         maxZ - minZ < 0.25;
 
-      // 3. Interior Hostage Room to Air Vent Shaft Blocker
+      // 3. Bloqueio vertical entre a Sala de Reféns e o Duto de Ventilação
       const isVentShaftBlocker =
         minX >= -0.85 &&
         maxX <= 0.85 &&
@@ -156,7 +242,7 @@ export function openAssaultDoorsAndVents(
         maxZ <= -13.38 &&
         (maxY - minY > 0.2 || maxZ - minZ > 0.2);
 
-      // 4. West Courtyard Gate next to SWAT Van
+      // 4. Portão oeste ao lado do furgão da SWAT
       const isWestCarGate =
         minX >= -30.9 &&
         maxX <= -30.35 &&
@@ -167,6 +253,7 @@ export function openAssaultDoorsAndVents(
 
       if (
         isGroundUndersideZFight ||
+        isFloorMicroSeamRibbon ||
         isBackdoorSlab ||
         isLowerHostageDoor ||
         isUpperHostageDoor ||
@@ -181,6 +268,8 @@ export function openAssaultDoorsAndVents(
       keptIndices.push(i0, i1, i2);
     }
 
+    insetAssaultUvIslands(geom, keptIndices);
+
     if (removedCount > 0) {
       geom.setIndex(keptIndices);
       geom.computeBoundingBox();
@@ -188,8 +277,8 @@ export function openAssaultDoorsAndVents(
     }
   });
 
-  // Add visually swung-open Backdoor leaf & Interior Vent Shaft ladder rungs
-  const doorMat = new THREE.MeshBasicMaterial({ color: 0x475569 });
+  // Folha da porta dos fundos aberta e degraus da escada do duto
+  const doorMat = new THREE.MeshBasicMaterial({ color: 0x475569, fog: false });
   const openDoorMesh = new THREE.Mesh(
     new THREE.BoxGeometry(1.52, 2.36, 0.08),
     doorMat
@@ -200,7 +289,7 @@ export function openAssaultDoorsAndVents(
   levelGroup.add(openDoorMesh);
 
   const rungGeo = new THREE.BoxGeometry(0.64, 0.04, 0.04);
-  const rungMat = new THREE.MeshBasicMaterial({ color: 0x64748b });
+  const rungMat = new THREE.MeshBasicMaterial({ color: 0x64748b, fog: false });
   for (let y = 3.5; y <= 8.5; y += 0.4) {
     const rung = new THREE.Mesh(rungGeo, rungMat);
     rung.position.set(0.0, y, -13.5);
@@ -208,3 +297,4 @@ export function openAssaultDoorsAndVents(
     levelGroup.add(rung);
   }
 }
+

@@ -3,143 +3,52 @@ import { soundEngine } from '../audio/soundEngine';
 import { DrillMode } from '../types/game';
 import { BallisticsFXPool } from './ballisticsPool';
 import { triggerBotFireAnimation } from './botCharacterSystem';
+import {
+  BotNavData,
+  checkBotLineOfSight,
+  getMapRoutes,
+  isTargetInFieldOfView,
+  moveBotWithPhysics,
+} from './botNavigationRoutes';
+import { Dust2TriangleCollider } from './dust2Collider';
 import { TacticalGrenadeSystem } from './grenadeSystem';
 import { ColliderBox } from './levelBuilder';
 import { YardBombSystem } from './yardBombSystem';
 import { YardBotEntity } from './yardPropsBuilder';
 
-export interface BotNavData {
-  waypoints: THREE.Vector3[];
-  wpIndex: number;
-  tacticalState: 'PATROL' | 'INVESTIGATE' | 'COMBAT' | 'RUSH_PLANTED' | 'PLANTING' | 'DEFUSING';
-  lastKnownPos: THREE.Vector3 | null;
-  investigateTimer: number;
-  fireCooldown: number;
-  grenadeCooldown: number;
-  strafeTimer: number;
-  strafeDir: number;
-  plantOrDefuseTimer: number;
-  visionRange: number;
-  fieldOfView: number;
-}
+export type { BotNavData };
 
 const _navDir = new THREE.Vector3();
 const _botHead = new THREE.Vector3();
 const _targetEye = new THREE.Vector3();
+const _strafeTarget = new THREE.Vector3();
+const _throwDir = new THREE.Vector3();
 
-// Rotas táticas de waypoints para os mapas 5v5 (Dust2, Assault, Yard)
-function getMapRoutes(mode: DrillMode) {
-  if (mode === 'DUST2_BOMB_5V5') {
-    return {
-      vgA: [new THREE.Vector3(12, 0.4, 38), new THREE.Vector3(22, 0.4, 20), new THREE.Vector3(24, 0.4, 2), new THREE.Vector3(22, 0.4, -14)],
-      vgB: [new THREE.Vector3(-8, 0.4, 36), new THREE.Vector3(-18, 0.4, 18), new THREE.Vector3(-24, 0.4, 0), new THREE.Vector3(-26, 0.4, -12)],
-      vgMid: [new THREE.Vector3(2, 0.4, 32), new THREE.Vector3(0, 0.4, 12), new THREE.Vector3(6, 0.4, -4), new THREE.Vector3(20, 0.4, -12)],
-      btA: [new THREE.Vector3(20, 0.4, -20), new THREE.Vector3(22, 0.4, -14), new THREE.Vector3(25, 0.4, -8), new THREE.Vector3(22, 0.4, -14)],
-      btB: [new THREE.Vector3(-22, 0.4, -22), new THREE.Vector3(-26, 0.4, -12), new THREE.Vector3(-22, 0.4, -6), new THREE.Vector3(-26, 0.4, -12)],
-      btMid: [new THREE.Vector3(0, 0.4, -18), new THREE.Vector3(2, 0.4, -6), new THREE.Vector3(-4, 0.4, 4), new THREE.Vector3(0, 0.4, -12)],
-      siteA: new THREE.Vector3(22, 0.4, -14),
-      siteB: new THREE.Vector3(-26, 0.4, -12),
-    };
-  }
+let globalBotGrenadeCooldown = 14.0;
 
-  if (mode === 'ASSAULT_BOMB_5V5') {
-    return {
-      vgA: [new THREE.Vector3(-6, 0, 32), new THREE.Vector3(-14, 0, 16), new THREE.Vector3(-18, 0, 0), new THREE.Vector3(-12, 0, -8)],
-      vgB: [new THREE.Vector3(8, 0, 32), new THREE.Vector3(16, 0, 18), new THREE.Vector3(18, 0, 2), new THREE.Vector3(10, 0, -6)],
-      vgMid: [new THREE.Vector3(0, 0, 28), new THREE.Vector3(2, 0, 12), new THREE.Vector3(-2, 0, 0), new THREE.Vector3(0, 0, -10)],
-      btA: [new THREE.Vector3(-14, 0, -14), new THREE.Vector3(-12, 0, -8), new THREE.Vector3(-16, 0, -4), new THREE.Vector3(-12, 0, -8)],
-      btB: [new THREE.Vector3(12, 0, -14), new THREE.Vector3(10, 0, -6), new THREE.Vector3(14, 0, -2), new THREE.Vector3(10, 0, -6)],
-      btMid: [new THREE.Vector3(0, 0, -16), new THREE.Vector3(-2, 0, -6), new THREE.Vector3(4, 0, 2), new THREE.Vector3(0, 0, -8)],
-      siteA: new THREE.Vector3(-12, 0, -8),
-      siteB: new THREE.Vector3(10, 0, -6),
-    };
-  }
-
-  // YARD_BOMB_5V5
-  return {
-    vgA: [new THREE.Vector3(6, 0, 28), new THREE.Vector3(16, 0, 18), new THREE.Vector3(22, 0, 4), new THREE.Vector3(26, 0, -7.5)],
-    vgB: [new THREE.Vector3(-8, 0, 28), new THREE.Vector3(-16, 0, 16), new THREE.Vector3(-20, 0, 2), new THREE.Vector3(-21.5, 0, -6.5)],
-    vgMid: [new THREE.Vector3(0, 0, 26), new THREE.Vector3(-1, 0, 10), new THREE.Vector3(2, 0, -2), new THREE.Vector3(11.5, 0, -15)],
-    btA: [new THREE.Vector3(24, 0, -18), new THREE.Vector3(26, 0, -8), new THREE.Vector3(28, 0, -2), new THREE.Vector3(26, 0, -8)],
-    btB: [new THREE.Vector3(-20, 0, -18), new THREE.Vector3(-21.5, 0, -6.5), new THREE.Vector3(-18, 0, 0), new THREE.Vector3(-21.5, 0, -6.5)],
-    btMid: [new THREE.Vector3(2, 0, -20), new THREE.Vector3(-0.8, 0, -4), new THREE.Vector3(2, 0, 4), new THREE.Vector3(-0.8, 0, 6.2)],
-    siteA: new THREE.Vector3(26, 0, -7.5),
-    siteB: new THREE.Vector3(-21.5, 0, -6.5),
-  };
-}
-
-/**
- * Verificação de campo de visão (FOV cone de 90 graus) e percepção de passos próximos.
- */
-function isTargetInFieldOfView(botPos: THREE.Vector3, botYaw: number, targetPos: THREE.Vector3, fovDegrees = 90): boolean {
-  const dx = targetPos.x - botPos.x;
-  const dz = targetPos.z - botPos.z;
-  const distSq = dx * dx + dz * dz;
-
-  // Passo/presença tática próxima (< 4.8m) é detectada independentemente da orientação
-  if (distSq < 23.04) return true;
-
-  const dist = Math.sqrt(distSq);
-  if (dist < 0.001) return true;
-
-  const fwdX = Math.sin(botYaw);
-  const fwdZ = Math.cos(botYaw);
-  const dot = (fwdX * dx + fwdZ * dz) / dist;
-  const minDot = Math.cos(THREE.MathUtils.degToRad(fovDegrees * 0.5));
-  return dot >= minDot;
-}
-
-/**
- * Verificação de linha de visão (Raycast contra caixas de colisão de paredes do mapa).
- */
-function checkLineOfSight(from: THREE.Vector3, to: THREE.Vector3, colliders?: ColliderBox[]): boolean {
-  if (!colliders || colliders.length === 0) return true;
-
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const dz = to.z - from.z;
-  if (Math.hypot(dx, dy, dz) < 0.001) return true;
-
-  const invX = 1 / (dx || 0.000001);
-  const invY = 1 / (dy || 0.000001);
-  const invZ = 1 / (dz || 0.000001);
-
-  for (let i = 0; i < colliders.length; i++) {
-    const c = colliders[i];
-    if (c.maxY - c.minY < 0.8) continue; // Pula pisos finos
-
-    const t1 = (c.minX - from.x) * invX;
-    const t2 = (c.maxX - from.x) * invX;
-    const t3 = (c.minY - from.y) * invY;
-    const t4 = (c.maxY - from.y) * invY;
-    const t5 = (c.minZ - from.z) * invZ;
-    const t6 = (c.maxZ - from.z) * invZ;
-
-    const tmin = Math.max(Math.max(Math.min(t1, t2), Math.min(t3, t4)), Math.min(t5, t6));
-    const tmax = Math.min(Math.min(Math.max(t1, t2), Math.max(t3, t4)), Math.max(t5, t6));
-
-    if (tmax >= tmin && tmin >= 0 && tmin <= 1) {
-      return false; // Linha de visão bloqueada por parede
-    }
-  }
-  return true;
-}
-
-function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): BotNavData {
-  if (bot.root.userData?.navData) {
-    return bot.root.userData.navData as BotNavData;
+function getOrInitBotNav(
+  bot: YardBotEntity,
+  mode: DrillMode,
+  index: number
+): BotNavData {
+  const existing = bot.root.userData?.navData as BotNavData | undefined;
+  if (existing && existing.waypoints && existing.waypoints.length > 0) {
+    return existing;
   }
 
   const routes = getMapRoutes(mode);
-  let waypoints: THREE.Vector3[];
-
-  if (bot.isAlly) {
-    const laneChoice = index % 3;
-    waypoints = laneChoice === 0 ? routes.vgA : laneChoice === 1 ? routes.vgB : routes.vgMid;
-  } else {
-    const laneChoice = index % 3;
-    waypoints = laneChoice === 0 ? routes.btA : laneChoice === 1 ? routes.btB : routes.btMid;
-  }
+  const laneChoice = index % 3;
+  const waypoints = bot.isAlly
+    ? laneChoice === 0
+      ? routes.vgA
+      : laneChoice === 1
+        ? routes.vgB
+        : routes.vgMid
+    : laneChoice === 0
+      ? routes.btA
+      : laneChoice === 1
+        ? routes.btB
+        : routes.btMid;
 
   const navData: BotNavData = {
     waypoints: waypoints.map((p) => p.clone()),
@@ -148,9 +57,13 @@ function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): Bo
     lastKnownPos: null,
     investigateTimer: 0,
     fireCooldown: 0.7 + Math.random() * 1.0,
-    grenadeCooldown: 5.0 + Math.random() * 8.0,
+    grenadeCooldown: 14.0 + Math.random() * 12.0,
+    // Apenas 1 granada por rodada para operadores específicos (sem spam caótico)
+    grenadesLeft: index % 3 === 0 ? 1 : 0,
     strafeTimer: 0,
     strafeDir: Math.random() > 0.5 ? 1 : -1,
+    stuckTimer: 0,
+    verticalVel: 0,
     plantOrDefuseTimer: 0,
     visionRange: 30.0,
     fieldOfView: 90.0,
@@ -162,11 +75,7 @@ function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): Bo
 }
 
 /**
- * Sistema ProBotAI:
- * - FSM: PATROL -> INVESTIGATE -> COMBAT -> RUSH_PLANTED / DEFUSING / PLANTING
- * - Percepção: visionRange (30m), FOV (90°), detecção por passos próximos e linha de visão (LoS)
- * - Combate: > 6.0m avança em corrida tática; <= 6.0m strafe lateral evasivo a cada 2.0s enquanto dispara
- * - Investigação: perseguição até a última posição conhecida ao perder linha de visão
+ * Sistema ProBotAI com Física Real, Colisão de Paredes, Gravidade e Uso Tático de Granadas.
  */
 export function updateSmartBotNavigation(
   bots: YardBotEntity[],
@@ -176,12 +85,20 @@ export function updateSmartBotNavigation(
   yardBomb: YardBombSystem,
   fxPool: BallisticsFXPool,
   grenadeSystem: TacticalGrenadeSystem,
-  onDealDamageToPlayer: (dmg: number, isHeadshot: boolean, bot: YardBotEntity) => void,
-  colliders?: ColliderBox[]
+  onDealDamageToPlayer: (
+    dmg: number,
+    isHeadshot: boolean,
+    bot: YardBotEntity
+  ) => void,
+  colliders?: ColliderBox[],
+  activeGlbCollider?: Dust2TriangleCollider | null
 ): void {
   const routes = getMapRoutes(mode);
   const isC4Planted = yardBomb.info.bombStatus === 'PLANTED';
-  const plantedSitePos = yardBomb.info.plantedSite === 'A' ? routes.siteA : routes.siteB;
+  const plantedSitePos =
+    yardBomb.info.plantedSite === 'A' ? routes.siteA : routes.siteB;
+
+  globalBotGrenadeCooldown = Math.max(0, globalBotGrenadeCooldown - dt);
 
   for (let i = 0; i < bots.length; i++) {
     const bot = bots[i];
@@ -197,17 +114,26 @@ export function updateSmartBotNavigation(
     let targetEnemyPos: THREE.Vector3 | null = null;
     let isTargetPlayer = false;
 
-    // 1. Percepção Tática com FOV de 90° e Linha de Visão Real (LoS)
+    // 1. Percepção Tática com FOV de 90° e Linha de Visão Real contra Paredes e Fumaça
     if (!bot.isAlly) {
       const distToPlayer = bPos.distanceTo(playerPos);
-      if (distToPlayer <= nav.visionRange) {
-        if (isTargetInFieldOfView(bPos, bot.root.rotation.y, playerPos, nav.fieldOfView)) {
-          _targetEye.set(playerPos.x, playerPos.y + 1.35, playerPos.z);
-          if (checkLineOfSight(_botHead, _targetEye, colliders)) {
-            targetEnemyPos = playerPos;
-            isTargetPlayer = true;
-            nav.lastKnownPos = playerPos.clone();
-          }
+      if (
+        distToPlayer <= nav.visionRange &&
+        isTargetInFieldOfView(bPos, bot.root.rotation.y, playerPos, nav.fieldOfView)
+      ) {
+        _targetEye.set(playerPos.x, playerPos.y + 1.35, playerPos.z);
+        if (
+          checkBotLineOfSight(
+            _botHead,
+            _targetEye,
+            grenadeSystem,
+            colliders,
+            activeGlbCollider
+          )
+        ) {
+          targetEnemyPos = playerPos;
+          isTargetPlayer = true;
+          nav.lastKnownPos = playerPos.clone();
         }
       }
     } else {
@@ -217,9 +143,20 @@ export function updateSmartBotNavigation(
         if (!other.isDown && !other.isAlly) {
           const oPos = other.root.position;
           const d = bPos.distanceTo(oPos);
-          if (d < nearestDist && isTargetInFieldOfView(bPos, bot.root.rotation.y, oPos, nav.fieldOfView)) {
+          if (
+            d < nearestDist &&
+            isTargetInFieldOfView(bPos, bot.root.rotation.y, oPos, nav.fieldOfView)
+          ) {
             _targetEye.set(oPos.x, oPos.y + 1.4, oPos.z);
-            if (checkLineOfSight(_botHead, _targetEye, colliders)) {
+            if (
+              checkBotLineOfSight(
+                _botHead,
+                _targetEye,
+                grenadeSystem,
+                colliders,
+                activeGlbCollider
+              )
+            ) {
               nearestDist = d;
               targetEnemyPos = oPos;
               nav.lastKnownPos = oPos.clone();
@@ -231,8 +168,7 @@ export function updateSmartBotNavigation(
 
     // 2. Máquina de Estados Tática (FSM)
     if (isC4Planted && !bot.isAlly) {
-      const distToC4 = bPos.distanceTo(plantedSitePos);
-      if (distToC4 <= 2.2) {
+      if (bPos.distanceTo(plantedSitePos) <= 2.4) {
         nav.tacticalState = 'DEFUSING';
         bot.isTelegraphing = false;
         nav.plantOrDefuseTimer += dt;
@@ -240,7 +176,11 @@ export function updateSmartBotNavigation(
           nav.plantOrDefuseTimer = 0;
           yardBomb.info.bombStatus = 'DEFUSED';
           soundEngine.playMechanicalSwitch(1.6);
-          yardBomb.finishCurrentRound('BLACKTHORN', 'BOMBA C4 DESARMADA PELA BLACKTHORN!', () => {});
+          yardBomb.finishCurrentRound(
+            'BLACKTHORN',
+            'BOMBA C4 DESARMADA PELA BLACKTHORN!',
+            () => {}
+          );
         }
       } else {
         nav.tacticalState = 'RUSH_PLANTED';
@@ -250,22 +190,27 @@ export function updateSmartBotNavigation(
       nav.tacticalState = 'COMBAT';
       bot.isTelegraphing = true;
     } else if (nav.tacticalState === 'COMBAT') {
-      // Perdeu o alvo de vista -> transiciona para INVESTIGATE na última posição conhecida
       nav.tacticalState = 'INVESTIGATE';
       nav.investigateTimer = 0;
       bot.isTelegraphing = false;
     } else if (nav.tacticalState === 'INVESTIGATE') {
       bot.isTelegraphing = false;
       nav.investigateTimer += dt;
-      if (!nav.lastKnownPos || bPos.distanceTo(nav.lastKnownPos) < 2.0 || nav.investigateTimer > 6.0) {
-        // Investigação concluída sem avistar o inimigo -> retorna à patrulha
+      if (
+        !nav.lastKnownPos ||
+        Math.hypot(bPos.x - nav.lastKnownPos.x, bPos.z - nav.lastKnownPos.z) < 2.0 ||
+        nav.investigateTimer > 6.0
+      ) {
         nav.tacticalState = 'PATROL';
         nav.lastKnownPos = null;
       }
     } else if (!isC4Planted && bot.isAlly) {
-      const distSiteA = bPos.distanceTo(routes.siteA);
-      const distSiteB = bPos.distanceTo(routes.siteB);
-      if ((distSiteA <= 3.2 || distSiteB <= 3.2) && yardBomb.info.bombStatus === 'CARRIED') {
+      const distSiteA = Math.hypot(bPos.x - routes.siteA.x, bPos.z - routes.siteA.z);
+      const distSiteB = Math.hypot(bPos.x - routes.siteB.x, bPos.z - routes.siteB.z);
+      if (
+        (distSiteA <= 3.2 || distSiteB <= 3.2) &&
+        yardBomb.info.bombStatus === 'CARRIED'
+      ) {
         nav.tacticalState = 'PLANTING';
         bot.isTelegraphing = false;
         nav.plantOrDefuseTimer += dt;
@@ -284,78 +229,77 @@ export function updateSmartBotNavigation(
       bot.isTelegraphing = false;
     }
 
-    // 3. Execução de Movimentação e Comportamento Tático
+    // 3. Seleção de Alvo de Movimento e Velocidade
     let moveTarget: THREE.Vector3;
-    let moveSpeed = 2.4; // Velocidade base de caminhada (RIFLE_WALK)
+    let moveSpeed = 2.4;
 
     if (nav.tacticalState === 'RUSH_PLANTED') {
       moveTarget = plantedSitePos;
-      moveSpeed = 3.4; // Sprint de urgência (RIFLE_RUN)
+      moveSpeed = 3.4;
     } else if (nav.tacticalState === 'DEFUSING' || nav.tacticalState === 'PLANTING') {
       moveTarget = bPos;
       moveSpeed = 0;
     } else if (nav.tacticalState === 'COMBAT' && targetEnemyPos) {
-      const distToEnemy = bPos.distanceTo(targetEnemyPos);
-      if (distToEnemy > 6.0) {
-        // Se estiver longe (> 6m), avança em corrida na direção do inimigo
+      if (bPos.distanceTo(targetEnemyPos) > 6.5) {
         moveTarget = targetEnemyPos;
-        moveSpeed = 3.4; // Ativa RIFLE_RUN
+        moveSpeed = 3.2;
       } else {
-        // Se estiver a <= 6m, realiza strafe lateral evasivo a cada 2.0s enquanto atira
         nav.strafeTimer += dt;
         if (nav.strafeTimer > 2.0) {
-          strafeDirectionInvert(nav);
+          nav.strafeDir *= -1;
+          nav.strafeTimer = 0;
         }
         _navDir.subVectors(targetEnemyPos, bPos).normalize();
-        const perpX = -_navDir.z * nav.strafeDir * 2.2;
-        const perpZ = _navDir.x * nav.strafeDir * 2.2;
-        moveTarget = new THREE.Vector3(bPos.x + perpX, bPos.y, bPos.z + perpZ);
-        moveSpeed = 1.6;
+        _strafeTarget.set(
+          bPos.x - _navDir.z * nav.strafeDir * 2.2,
+          bPos.y,
+          bPos.z + _navDir.x * nav.strafeDir * 2.2
+        );
+        moveTarget = _strafeTarget;
+        moveSpeed = 1.65;
       }
     } else if (nav.tacticalState === 'INVESTIGATE' && nav.lastKnownPos) {
-      // Corre para averiguar o último ponto onde o inimigo foi visto
       moveTarget = nav.lastKnownPos;
-      moveSpeed = 3.0; // Ativa RIFLE_RUN durante investigação
+      moveSpeed = 2.9;
+    } else if (nav.waypoints.length > 0) {
+      const curWp = nav.waypoints[nav.wpIndex];
+      if (Math.hypot(bPos.x - curWp.x, bPos.z - curWp.z) < 1.8) {
+        nav.wpIndex = (nav.wpIndex + 1) % nav.waypoints.length;
+      }
+      moveTarget = nav.waypoints[nav.wpIndex];
+      moveSpeed = 2.4;
     } else {
-      // Patrulha normal pelo percurso do mapa
-      if (nav.waypoints.length > 0) {
-        const curWp = nav.waypoints[nav.wpIndex];
-        if (Math.hypot(bPos.x - curWp.x, bPos.z - curWp.z) < 1.6) {
-          nav.wpIndex = (nav.wpIndex + 1) % nav.waypoints.length;
-        }
-        moveTarget = nav.waypoints[nav.wpIndex];
-        moveSpeed = 2.4;
-      } else {
-        moveTarget = bPos;
-        moveSpeed = 0;
-      }
+      moveTarget = bPos;
+      moveSpeed = 0;
     }
 
-    // 4. Atualização de Posição e Rotação Suave do Bot
-    if (moveSpeed > 0.05) {
-      _navDir.subVectors(moveTarget, bPos);
-      _navDir.y = 0;
-      const dist = _navDir.length();
-      if (dist > 0.1) {
-        _navDir.normalize();
-        const step = Math.min(dist, moveSpeed * dt);
-        bot.root.position.x += _navDir.x * step;
-        bot.root.position.z += _navDir.z * step;
+    // 4. Física Real: Colisão de Paredes + Gravidade no Piso
+    moveBotWithPhysics(
+      bot,
+      nav,
+      moveTarget,
+      moveSpeed,
+      dt,
+      colliders,
+      activeGlbCollider
+    );
 
-        const lookAngle = Math.atan2(_navDir.x, _navDir.z);
-        bot.root.rotation.y = THREE.MathUtils.damp(bot.root.rotation.y, lookAngle, 8.5, dt);
-      }
-    }
-
-    // Mira voltada diretamente para o inimigo quando em combate
     if (nav.tacticalState === 'COMBAT' && targetEnemyPos) {
-      const enemyAngle = Math.atan2(targetEnemyPos.x - bPos.x, targetEnemyPos.z - bPos.z);
-      bot.root.rotation.y = THREE.MathUtils.damp(bot.root.rotation.y, enemyAngle, 10, dt);
+      const enemyAngle = Math.atan2(
+        targetEnemyPos.x - bPos.x,
+        targetEnemyPos.z - bPos.z
+      );
+      bot.root.rotation.y = THREE.MathUtils.damp(
+        bot.root.rotation.y,
+        enemyAngle,
+        10,
+        dt
+      );
     }
 
-    // 5. Disparo Tático com Som Real da Arma e Muzzle Flash
+    // 5. Disparo Tático e Lançamento Controlado de Granada (Máx 1 por bot elegível + Cooldown Global)
     if (nav.tacticalState === 'COMBAT' && targetEnemyPos && nav.fireCooldown <= 0) {
-      nav.fireCooldown = 0.55 + Math.random() * 0.75;
+      nav.fireCooldown = 0.6 + Math.random() * 0.75;
       triggerBotFireAnimation(bot);
 
       const weapon = bot.weaponId || 'AK47_RIFLE';
@@ -366,14 +310,24 @@ export function updateSmartBotNavigation(
       fxPool.spawnTracer(_botHead, _targetEye, bot.isAlly ? 0x38bdf8 : 0xef4444);
 
       if (isTargetPlayer) {
-        const isHeadshot = Math.random() < 0.28;
-        const dmg = isHeadshot ? 34 : 14;
+        const isHeadshot = Math.random() < 0.25;
+        const dmg = isHeadshot ? 30 : 12;
         onDealDamageToPlayer(dmg, isHeadshot, bot);
       }
 
-      // Lançamento Tático de Granadas
-      if (nav.grenadeCooldown <= 0 && Math.random() < 0.35) {
-        nav.grenadeCooldown = 16.0 + Math.random() * 12.0;
+      const distToEnemy = bPos.distanceTo(targetEnemyPos);
+      if (
+        nav.grenadesLeft > 0 &&
+        nav.grenadeCooldown <= 0 &&
+        globalBotGrenadeCooldown <= 0 &&
+        distToEnemy >= 9.0 &&
+        distToEnemy <= 24.0 &&
+        Math.random() < 0.18
+      ) {
+        nav.grenadesLeft -= 1;
+        nav.grenadeCooldown = 35.0;
+        globalBotGrenadeCooldown = 25.0;
+
         const isSmoke = Math.random() < 0.45;
         if (isSmoke) {
           soundEngine.playSmokeGrenadeVoice();
@@ -382,16 +336,13 @@ export function updateSmartBotNavigation(
         }
         soundEngine.playGrenadeThrow();
 
-        const throwDir = new THREE.Vector3().subVectors(targetEnemyPos, _botHead).normalize();
-        const throwImpulse = throwDir.multiplyScalar(14).add(new THREE.Vector3(0, 5.5, 0));
-        grenadeSystem.spawnBotGrenade(_botHead, throwImpulse, isSmoke ? 'SMOKE' : 'FRAG');
+        _throwDir
+          .subVectors(targetEnemyPos, _botHead)
+          .normalize()
+          .multiplyScalar(13.5);
+        _throwDir.y += 4.8;
+        grenadeSystem.spawnBotGrenade(_botHead, _throwDir, isSmoke ? 'SMOKE' : 'FRAG');
       }
     }
   }
-}
-
-// Inversão de strafe lateral a cada ciclo de evasão
-function strafeDirectionInvert(nav: BotNavData): void {
-  nav.strafeDir *= -1;
-  nav.strafeTimer = 0;
 }

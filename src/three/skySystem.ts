@@ -96,10 +96,13 @@ export class TacticalSkySystem {
       if (uniforms.cloudDensity) uniforms.cloudDensity.value = 0.5;
       if (uniforms.cloudElevation) uniforms.cloudElevation.value = 0.48;
 
-      this.outdoorFallbackBg.setHex(0xcbd5e1);
+      this.outdoorFallbackBg.setHex(isAssault ? 0x1e293b : 0xcbd5e1);
       this.scene.background = this.outdoorFallbackBg;
       this.scene.fog = fogEnabled
-        ? new THREE.FogExp2(0xcbd5e1, isAssault ? 0.0036 : 0.0048)
+        ? new THREE.FogExp2(
+            isAssault ? 0x1e293b : 0xcbd5e1,
+            isAssault ? 0.0011 : 0.0048
+          )
         : null;
 
       this.keyLightTarget.position.set(isAssault ? -18 : 0, 0, isAssault ? 18 : 0);
@@ -107,7 +110,7 @@ export class TacticalSkySystem {
         .copy(this.keyLightTarget.position)
         .addScaledVector(this.sunDirection, 80);
       this.keyLight.color.setHex(0xfffbeb);
-      this.keyLight.intensity = 1.95;
+      this.keyLight.intensity = isAssault ? 1.55 : 1.95;
       this.updateShadowFrustum(isAssault ? 65 : 52, 165);
     } else {
       this.indoorBgColor.setHex(0x070a10);

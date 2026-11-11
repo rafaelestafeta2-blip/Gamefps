@@ -408,11 +408,11 @@ function spawnAssaultSquads(
   spawnBot({ id: 'assault_bt_siteA', callsign: 'KRAKEN-BT', weaponId: 'AK47_RIFLE', x: -21.1, y: 0.0, z: 6.0, isAlly: false, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
   spawnBot({ id: 'assault_bt_dock', callsign: 'WRAITH-BT', weaponId: 'SNIPER_BOLT', x: -8.7, y: 0.0, z: 22.0, isAlly: false, patrolAxis: 'X', patrolRange: 2.8, hasArmor: true });
   spawnBot({ id: 'assault_bt_siteB', callsign: 'HAVOC-BT', weaponId: 'AK47_RIFLE', x: 3.5, y: 0.0, z: 6.9, isAlly: false, patrolAxis: 'Z', patrolRange: 2.6, hasArmor: true });
-  spawnBot({ id: 'assault_bt_catwalk', callsign: 'SERAPH-BT', weaponId: 'M4_CARBINE', x: -9.7, y: 3.2, z: -6.9, isAlly: false, patrolAxis: 'X', patrolRange: 2.0, hasArmor: true });
+  spawnBot({ id: 'assault_bt_catwalk', callsign: 'SERAPH-BT', weaponId: 'M4_CARBINE', x: -11.5, y: 0.0, z: 5.5, isAlly: false, patrolAxis: 'X', patrolRange: 2.0, hasArmor: true });
   spawnBot({ id: 'assault_bt_east', callsign: 'VOLT-BT', weaponId: 'P50_PISTOL', x: 17.8, y: 0.0, z: 5.5, isAlly: false, patrolAxis: 'Z', patrolRange: 2.8, hasArmor: true });
 
-  spawnBot({ id: 'assault_vg_1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -40.3, y: 3.73, z: 36.7, isAlly: true, patrolAxis: 'X', patrolRange: 2.2, hasArmor: true });
-  spawnBot({ id: 'assault_vg_2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: -36.0, y: 0.0, z: 13.3, isAlly: true, patrolAxis: 'Z', patrolRange: 3.2, hasArmor: true });
+  spawnBot({ id: 'assault_vg_1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -29.5, y: 0.0, z: 32.5, isAlly: true, patrolAxis: 'X', patrolRange: 2.2, hasArmor: true });
+  spawnBot({ id: 'assault_vg_2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: -32.0, y: 0.0, z: 18.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.2, hasArmor: true });
   spawnBot({ id: 'assault_vg_3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -14.3, y: 0.0, z: 23.9, isAlly: true, patrolAxis: 'X', patrolRange: 2.8 });
-  spawnBot({ id: 'assault_vg_4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: 8.5, y: 0.0, z: 42.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.0 });
+  spawnBot({ id: 'assault_vg_4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: 8.5, y: 0.0, z: 38.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.0 });
 }

@@ -127,19 +127,19 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
   levelGroup.add(floorRayMesh);
   shootableMeshes.push(floorRayMesh);
 
-  // 2. Iluminação Tática Premium com Contraste Realista (Sem saturação branca e com profundidade de sombras)
-  const rangeHemiFill = new THREE.HemisphereLight(0x334155, 0x0f172a, 0.75);
+  // 2. Iluminação Natural Equilibrada para Valorizar as Texturas e Vidros Originais do GLB
+  const rangeHemiFill = new THREE.HemisphereLight(0xf8fafc, 0x64748b, 1.05);
   rangeHemiFill.position.set(0, 3.5, 0);
   levelGroup.add(rangeHemiFill);
 
-  // Foco linear quente (3500K) sobre as bancadas e baias de tiro
-  const overheadLight = new THREE.DirectionalLight(0xffedd5, 1.15);
+  // Luz principal de teto sobre as baias e bancadas de madeira/vidro
+  const overheadLight = new THREE.DirectionalLight(0xfffbeb, 0.95);
   overheadLight.position.set(-6, 3.8, 3.0);
   overheadLight.castShadow = false;
   levelGroup.add(overheadLight);
 
-  // Iluminação direcionada suave ao longo das raias até os alvos
-  const downrangeLight = new THREE.DirectionalLight(0x94a3b8, 0.7);
+  // Iluminação uniforme ao longo das raias até o fundo do estande
+  const downrangeLight = new THREE.DirectionalLight(0xe2e8f0, 0.85);
   downrangeLight.position.set(12, 3.8, 3.0);
   downrangeLight.castShadow = false;
   levelGroup.add(downrangeLight);

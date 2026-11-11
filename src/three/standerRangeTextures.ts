@@ -11,17 +11,6 @@ export interface StanderDarkTextures {
 
 let cachedTextures: StanderDarkTextures | null = null;
 
-interface SharedStanderMaterials {
-  lightLum: THREE.MeshBasicMaterial;
-  glass: THREE.MeshBasicMaterial;
-  decalLine: THREE.MeshBasicMaterial;
-  floorCeil: THREE.MeshLambertMaterial;
-  wall: THREE.MeshLambertMaterial;
-  wood: THREE.MeshLambertMaterial;
-  plasticBlack: THREE.MeshLambertMaterial;
-}
-
-let sharedMats: SharedStanderMaterials | null = null;
 
 /**
  * Texturas premium de estande de tiro tático moderno (padrão Sig Sauer Academy / John Wick Continental):
@@ -197,75 +186,84 @@ export function getStanderDarkRangeTextures(): StanderDarkTextures {
   return cachedTextures;
 }
 
-function getSharedStanderMaterials(): SharedStanderMaterials {
-  if (sharedMats) return sharedMats;
-  const tex = getStanderDarkRangeTextures();
-
-  sharedMats = {
-    lightLum: new THREE.MeshBasicMaterial({ color: 0xfff4e6 }),
-    glass: new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
-      transparent: true,
-      opacity: 0.18,
-      depthWrite: false,
-    }),
-    decalLine: new THREE.MeshBasicMaterial({
-      color: 0xeab308,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-    }),
-    floorCeil: new THREE.MeshLambertMaterial({
-      map: tex.rubberFloorMap,
-      color: 0xffffff,
-    }),
-    wall: new THREE.MeshLambertMaterial({
-      map: tex.acousticWallMap,
-      color: 0xffffff,
-    }),
-    wood: new THREE.MeshLambertMaterial({
-      color: 0x3d2b1f, // Madeira escura nogueira nobre de bancada armaria
-    }),
-    plasticBlack: new THREE.MeshLambertMaterial({
-      color: 0x181c24,
-    }),
-  };
-  return sharedMats;
-}
-
 /**
- * Aplica os materiais realistas de estande tático premium à cena do Stander.
+ * Preserva 100% das texturas originais embutidas no arquivo `stander_tiro.glb`
+ * (`ConcreteClear01`, `TileWall03a`, `TileWall03b`, `ConctereWall14a`, `WoodCherry5`,
+ * `DecalLine01White`, `Metall03`, `Number1..5`, etc.) e restaura o vidro translúcido
+ * original (`_ShootingRange01GlassClear`), convertendo apenas o shader pesado
+ * `MeshPhysicalMaterial` para materiais leves de 60 FPS mobile.
  */
 export function applyDarkTacticalMaterialsToStanderGlb(
   gltfScene: THREE.Group
 ): void {
-  const mats = getSharedStanderMaterials();
+  const convertedCache = new Map<THREE.Material, THREE.Material>();
+
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    name: '_ShootingRange01GlassClear',
+    color: new THREE.Color(0xdbeafe),
+    transparent: true,
+    opacity: 0.28,
+    roughness: 0.08,
+    metalness: 0.1,
+    reflectivity: 0.9,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+
+  const lightLumMat = new THREE.MeshBasicMaterial({
+    name: '_ShootingRange01LightLum',
+    color: new THREE.Color(0xfffbeb),
+  });
 
   gltfScene.traverse((child) => {
     if (!(child as THREE.Mesh).isMesh) return;
     const mesh = child as THREE.Mesh;
 
     const mapSingleMat = (m: THREE.Material): THREE.Material => {
-      const matName = m?.name || '';
-      if (matName.includes('LightLum')) return mats.lightLum;
-      if (matName.includes('GlassClear')) return mats.glass;
-      if (matName.includes('DecalLine')) return mats.decalLine;
-      if (
-        matName.includes('ConcreteClear01') ||
-        matName.includes('ConcreteClear09')
-      ) {
-        return mats.floorCeil;
+      if (!m) return m;
+      const cached = convertedCache.get(m);
+      if (cached) return cached;
+
+      const matName = m.name || '';
+      const src = m as THREE.MeshStandardMaterial & THREE.MeshPhysicalMaterial;
+
+      if (matName.includes('GlassClear') || src.transparent) {
+        mesh.renderOrder = 2;
+        convertedCache.set(m, glassMat);
+        return glassMat;
       }
-      if (
-        matName.includes('TileWall') ||
-        matName.includes('ConctereWall') ||
-        matName.includes('PlasticWhite')
-      ) {
-        return mats.wall;
+
+      if (matName.includes('LightLum')) {
+        convertedCache.set(m, lightLumMat);
+        return lightLumMat;
       }
-      if (matName.includes('WoodCherry')) return mats.wood;
-      if (matName.includes('PlasticBlack')) return mats.plasticBlack;
-      return m;
+
+      if (src.map) {
+        src.map.colorSpace = THREE.SRGBColorSpace;
+        src.map.needsUpdate = true;
+      }
+
+      const isDecal = matName.includes('DecalLine') || matName.includes('Number');
+      const nextMat = new THREE.MeshLambertMaterial({
+        name: matName,
+        map: src.map || null,
+        normalMap: src.normalMap || null,
+        color: src.map
+          ? new THREE.Color(0xffffff)
+          : src.color
+            ? src.color.clone()
+            : new THREE.Color(0xffffff),
+        transparent: Boolean(src.transparent),
+        opacity: src.opacity ?? 1.0,
+        alphaTest: src.alphaTest ?? 0,
+        side: src.side ?? THREE.FrontSide,
+        polygonOffset: isDecal,
+        polygonOffsetFactor: isDecal ? -1 : 0,
+        polygonOffsetUnits: isDecal ? -1 : 0,
+      });
+
+      convertedCache.set(m, nextMat);
+      return nextMat;
     };
 
     if (Array.isArray(mesh.material)) {
@@ -275,3 +273,4 @@ export function applyDarkTacticalMaterialsToStanderGlb(
     }
   });
 }
+

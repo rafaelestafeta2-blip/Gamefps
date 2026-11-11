@@ -1705,7 +1705,7 @@ export class TacticalFPSEngine {
     this.state.isCrouchingToggled = false;
     this.state.isProneToggled = false;
 
-    // Reset all targets
+    // Reset all targets to their exact spawn positions & fresh AI navigation state
     let activeCount = 0;
     this.targets.forEach((t) => {
       t.isDown = false;
@@ -1713,6 +1713,13 @@ export class TacticalFPSEngine {
       t.health = t.maxHealth;
       t.armorHealth = t.armorMesh ? 60 : 0;
       if (t.armorMesh) t.armorMesh.visible = true;
+      t.root.visible = true;
+      t.root.position.copy(t.basePosition);
+      if (t.root.userData) {
+        t.root.userData.navData = undefined;
+        t.root.userData.prevPos = undefined;
+      }
+      t.pivotGroup.position.y = 0;
       t.pivotGroup.rotation.x = 0;
       t.hitTiltAngle = 0;
       t.hitTiltVelocity = 0;
@@ -1767,7 +1774,7 @@ export class TacticalFPSEngine {
       return;
     }
 
-    if (this.state.screen !== 'PLAYING') return;
+    if (this.state.screen !== 'PLAYING' || this.isPlayerDying) return;
 
     switch (e.code) {
       case 'Space':
@@ -1902,7 +1909,7 @@ export class TacticalFPSEngine {
   };
 
   private onMouseDown = (e: MouseEvent) => {
-    if (this.state.screen !== 'PLAYING') return;
+    if (this.state.screen !== 'PLAYING' || this.isPlayerDying) return;
 
     // Ignore clicks on DOM UI controls (like the bottom dock)
     if (e.target !== this.renderer.domElement) return;
@@ -1932,7 +1939,7 @@ export class TacticalFPSEngine {
   };
 
   private onMouseMove = (e: MouseEvent) => {
-    if (this.state.screen !== 'PLAYING') return;
+    if (this.state.screen !== 'PLAYING' || this.isPlayerDying) return;
     if (!this.state.pointerLocked && !this.mouseButtonsHeld.has(0) && !this.mouseButtonsHeld.has(2)) {
       return;
     }
@@ -2287,6 +2294,7 @@ export class TacticalFPSEngine {
   // BALLISTICS & WEAPON FIRING
   // =========================================================================
   private attemptFireWeapon(): void {
+    if (this.isPlayerDying || this.state.health <= 0) return;
     // If the player is holding a grenade in hand, pressing Fire pulls the pin & throws the grenade!
     if (
       this.state.equippedGrenade !== null ||
@@ -3156,6 +3164,74 @@ export class TacticalFPSEngine {
   }
 
   private updatePlayerMovementAndCollision(dt: number): void {
+    // Se o jogador estiver morrendo, bloqueia imediatamente qualquer caminhada, pulo, agachamento ou tiro
+    if (this.isPlayerDying) {
+      this.playerVel.set(0, 0, 0);
+      this.touchMoveX = 0;
+      this.touchMoveY = 0;
+      this.touchSprinting = false;
+      this.touchFireHeld = false;
+      this.burstRemaining = 0;
+      this.slideTimer = 0;
+      this.jumpBufferTimer = 0;
+      this.state.isAds = false;
+
+      this.deathAnimElapsed += dt;
+      const progress = Math.min(1, this.deathAnimElapsed / 1.5);
+      const easeOut = progress * (2 - progress);
+
+      const targetDeathY = THREE.MathUtils.lerp(1.68, 0.24, easeOut);
+      this.currentEyeHeight = THREE.MathUtils.damp(
+        this.currentEyeHeight,
+        targetDeathY,
+        9,
+        dt
+      );
+
+      const deathRoll = THREE.MathUtils.lerp(0, 0.48, easeOut);
+      this.camera.rotation.z = deathRoll;
+      this.pitch = THREE.MathUtils.damp(this.pitch, -0.38, 5, dt);
+
+      this.weaponRig.root.position.y = THREE.MathUtils.damp(
+        this.weaponRig.root.position.y,
+        -0.95,
+        8,
+        dt
+      );
+      this.weaponRig.root.rotation.x = THREE.MathUtils.damp(
+        this.weaponRig.root.rotation.x,
+        0.32,
+        6,
+        dt
+      );
+
+      this.state.damageFlashAlpha = THREE.MathUtils.lerp(
+        1.0,
+        0.65,
+        Math.min(1, this.deathAnimElapsed / 1.8)
+      );
+
+      if (this.deathAnimElapsed >= this.deathSequenceDuration) {
+        this.isPlayerDying = false;
+        this.weaponRig.root.position.y = 0;
+        this.weaponRig.root.rotation.x = 0;
+        this.camera.rotation.z = 0;
+        this.currentEyeHeight = 1.68;
+        const cb = this.deathOnFinish;
+        this.deathOnFinish = null;
+        cb?.();
+      }
+
+      this.yawObject.position.set(
+        this.playerPos.x,
+        this.playerPos.y + this.currentEyeHeight,
+        this.playerPos.z
+      );
+      this.yawObject.rotation.y = this.yaw;
+      this.pitchObject.rotation.x = this.pitch;
+      return;
+    }
+
     // Check if a low ceiling (such as Yard's crouch-only wall breaches or Dust2 tunnels) is directly above the player
     let lowCeilingAbove = false;
     const checkR = 0.32;
@@ -4186,6 +4262,13 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'ASSAULT_BOMB_5V5';
 
     if (isBombMode && this.targets.length > 0) {
+      const activeGlbCollider =
+        this.state.drillMode === 'DUST2_BOMB_5V5'
+          ? this.dust2LevelData.collider
+          : this.state.drillMode === 'ASSAULT_BOMB_5V5'
+            ? this.assaultLevelData.collider
+            : null;
+
       updateSmartBotNavigation(
         this.targets as YardBotEntity[],
         this.state.drillMode,
@@ -4195,6 +4278,7 @@ export class TacticalFPSEngine {
         this.fxPool,
         this.grenadeSystem,
         (dmg, isHeadshot, bot) => {
+          if (this.isPlayerDying) return;
           if (isHeadshot) {
             soundEngine.playImpact('HEADSHOT');
           } else {
@@ -4231,7 +4315,8 @@ export class TacticalFPSEngine {
           }
           this.emitHud();
         },
-        this.colliders
+        this.colliders,
+        activeGlbCollider
       );
     }
 
