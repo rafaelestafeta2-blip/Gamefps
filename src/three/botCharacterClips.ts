@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { alignWeaponPropToMixamoHands } from './botWeaponProps';
 import { YardBotEntity } from './yardPropsBuilder';
 
 export type BotAnimState =
@@ -44,13 +45,6 @@ export interface BotAnimController {
   tacticalTimer: number;
   crouchStance: boolean;
 }
-
-const _rHandWorld = new THREE.Vector3();
-const _lHandWorld = new THREE.Vector3();
-const _rHandLocal = new THREE.Vector3();
-const _lHandLocal = new THREE.Vector3();
-const _handDir = new THREE.Vector3();
-const _lookTargetWorld = new THREE.Vector3();
 
 function normalizeMixamoClip(clip: THREE.AnimationClip): THREE.AnimationClip {
   const cloned = clip.clone();
@@ -222,33 +216,16 @@ export function syncBotWeaponWithMixamoHands(
   ctrl: BotAnimController,
   isCrouched: boolean
 ): void {
-  if (ctrl.rHandBone && ctrl.lHandBone) {
-    ctrl.rHandBone.getWorldPosition(_rHandWorld);
-    ctrl.lHandBone.getWorldPosition(_lHandWorld);
-    _rHandLocal.copy(_rHandWorld);
-    _lHandLocal.copy(_lHandWorld);
-    t.pivotGroup.worldToLocal(_rHandLocal);
-    t.pivotGroup.worldToLocal(_lHandLocal);
-
-    _handDir.subVectors(_lHandLocal, _rHandLocal);
-    if (_handDir.lengthSq() > 0.002) {
-      _handDir.normalize();
-      const kickBack = ctrl.fireAnimTimer > 0 ? 0.03 : 0;
-      ctrl.weaponProp.position
-        .copy(_rHandLocal)
-        .addScaledVector(_handDir, 0.14 - kickBack);
-      ctrl.weaponProp.position.y += 0.025;
-
-      _lookTargetWorld
-        .copy(_lHandWorld)
-        .addScaledVector(_lHandWorld.clone().sub(_rHandWorld), 2.0);
-      ctrl.weaponProp.lookAt(_lookTargetWorld);
-      return;
-    }
-  }
-
-  ctrl.weaponProp.position.set(-0.08, isCrouched ? 0.78 : 1.26, 0.18);
-  ctrl.weaponProp.rotation.set(0.02, 0.04, 0);
+  t.pivotGroup.updateMatrixWorld(true);
+  const kickBack = ctrl.fireAnimTimer > 0 ? 0.03 : 0;
+  alignWeaponPropToMixamoHands(
+    ctrl.weaponProp,
+    t.pivotGroup,
+    ctrl.rHandBone,
+    ctrl.lHandBone,
+    kickBack,
+    isCrouched ? 0.78 : 1.2
+  );
 }
 
 export function transitionBotAnim(

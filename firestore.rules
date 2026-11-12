@@ -1,42 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    // Collection: /players/{userId}
-    // Document ID: {userId} (matches request.auth.uid)
-    // Fields:
-    //   - uid: string (required, immutable)
-    //   - callsign: string (required, 1..32 chars)
-    //   - callsignLocked: bool (optional, once true callsign cannot change)
-    //   - email: string (optional, <= 160 chars)
-    //   - avatarDataUrl: string (optional, <= 60000 chars)
-    //   - playerXp: number (required, >= 0)
-    //   - rankLevel: number (required, 1..70)
-    //   - rankTitle: string (required, <= 64 chars)
-    //   - playerCash: number (required, >= 0)
-    //   - activeWeapon: string (required, <= 40 chars)
-    //   - unlockedWeapons: list of strings (required, <= 25 items)
-    //   - totalKills: number (required, >= 0)
-    //   - totalDeaths: number (required, >= 0)
-    //   - totalAssists: number (required, >= 0)
-    //   - totalHeadshots: number (required, >= 0)
-    //   - matchesPlayed: number (required, >= 0)
-    //   - matchesWon: number (required, >= 0)
-    //   - bombsPlanted: number (required, >= 0)
-    //   - unlockedAchievements: list of strings (required, <= 50 items)
-    //   - createdAt: string (required, immutable, <= 40 chars)
-    //   - updatedAt: string (required, <= 40 chars)
-    //
-    // Collection: /usernames/{usernameLower}
-    // Document ID: lowercase unique username
-    // Fields:
-    //   - callsign: string
-    //   - uid: string
-    //   - createdAt: string
-    // ===============================================================
-
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -45,12 +9,16 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
     function isValidOptionalString(data, field, maxLen) {
       return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
     }
 
     function isNonNegativeNumber(val) {
-      return val is number && val >= 0 && val <= 999999999;
+      return val is number && val >= 0 && val <= 9999999999999;
     }
 
     function isValidPlayerProfile(data) {
@@ -67,11 +35,13 @@ service cloud.firestore {
           'activeWeapon', 'unlockedWeapons',
           'totalKills', 'totalDeaths', 'totalAssists', 'totalHeadshots',
           'matchesPlayed', 'matchesWon', 'bombsPlanted',
-          'unlockedAchievements', 'createdAt', 'updatedAt'
+          'unlockedAchievements', 'economyVersion', 'mmr', 'createdAt', 'updatedAt'
         ])
         && data.uid is string && data.uid == request.auth.uid
         && data.callsign is string && data.callsign.size() >= 1 && data.callsign.size() <= 32
         && (!('callsignLocked' in data) || data.callsignLocked is bool)
+        && (!('economyVersion' in data) || isNonNegativeNumber(data.economyVersion))
+        && (!('mmr' in data) || isNonNegativeNumber(data.mmr))
         && isValidOptionalString(data, 'email', 160)
         && isValidOptionalString(data, 'avatarDataUrl', 60000)
         && isNonNegativeNumber(data.playerXp)
@@ -92,29 +62,113 @@ service cloud.firestore {
         && data.updatedAt is string && data.updatedAt.size() <= 40;
     }
 
+    function isValidMultiplayerRoom(data) {
+      return data.keys().hasAll([
+          'roomId', 'hostUid', 'arenaMode', 'isPrivate', 'status',
+          'currentRound', 'vanguardScore', 'blackthornScore',
+          'bombStatus', 'plantedSite', 'players', 'updatedAtMs', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'roomId', 'hostUid', 'arenaMode', 'isPrivate', 'queueType', 'averageMmr',
+          'status', 'currentRound', 'vanguardScore', 'blackthornScore',
+          'bombStatus', 'plantedSite', 'players', 'lastHitEvent',
+          'updatedAtMs', 'createdAt'
+        ])
+        && data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 16
+        && data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128
+        && data.arenaMode is string && data.arenaMode in ['DUST2_BOMB_5V5', 'ASSAULT_BOMB_5V5', 'YARD_BOMB_5V5']
+        && data.isPrivate is bool
+        && (!('queueType' in data) || (data.queueType is string && data.queueType in ['CASUAL', 'RANKED', 'Casual', 'Ranked']))
+        && (!('averageMmr' in data) || isNonNegativeNumber(data.averageMmr))
+        && data.status is string && data.status in ['WAITING', 'PLAYING', 'FINISHED']
+        && isNonNegativeNumber(data.currentRound)
+        && isNonNegativeNumber(data.vanguardScore)
+        && isNonNegativeNumber(data.blackthornScore)
+        && data.bombStatus is string && data.bombStatus in ['CARRIED', 'PLANTED', 'DEFUSED', 'DETONATED']
+        && data.plantedSite is string && data.plantedSite in ['NONE', 'A', 'B']
+        && data.players is map && data.players.size() <= 12
+        && (!('queueType' in data) || !(data.queueType in ['RANKED', 'Ranked']) || data.status != 'PLAYING' || data.players.size() == 10)
+        && isNonNegativeNumber(data.updatedAtMs)
+        && data.createdAt is string && data.createdAt.size() <= 40;
+    }
+
+    function isValidSocialInbox(data) {
+      return data.keys().hasAll(['uid', 'friends', 'requests', 'invites', 'updatedAtMs'])
+        && data.keys().hasOnly(['uid', 'friends', 'requests', 'invites', 'updatedAtMs'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.friends is map && data.friends.size() <= 100
+        && data.requests is map && data.requests.size() <= 50
+        && data.invites is map && data.invites.size() <= 30
+        && isNonNegativeNumber(data.updatedAtMs);
+    }
+
+    function isValidDirectChat(data) {
+      return data.keys().hasAll(['chatId', 'participants', 'messages', 'updatedAtMs'])
+        && data.keys().hasOnly(['chatId', 'participants', 'messages', 'updatedAtMs'])
+        && data.chatId is string && data.chatId.size() >= 3 && data.chatId.size() <= 260
+        && data.participants is list && data.participants.size() == 2
+        && request.auth.uid in data.participants
+        && data.messages is list && data.messages.size() <= 60
+        && isNonNegativeNumber(data.updatedAtMs);
+    }
+
     match /players/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidPlayerProfile(request.resource.data);
+      allow get: if isAuthenticated() && isValidId(userId);
+      allow create: if isOwner(userId) && isValidId(userId) && isValidPlayerProfile(request.resource.data);
       allow update: if isOwner(userId)
+        && isValidId(userId)
         && isValidPlayerProfile(request.resource.data)
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.createdAt == resource.data.createdAt
         && (!('callsignLocked' in resource.data) || !resource.data.callsignLocked || request.resource.data.callsign == resource.data.callsign);
-      allow delete: if isOwner(userId);
+      allow delete: if isOwner(userId) && isValidId(userId);
     }
 
     match /usernames/{usernameLower} {
-      allow read: if isAuthenticated();
+      allow get: if isAuthenticated() && isValidId(usernameLower);
       allow create: if isAuthenticated()
+        && isValidId(usernameLower)
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.keys().hasAll(['callsign', 'uid', 'createdAt'])
         && request.resource.data.keys().hasOnly(['callsign', 'uid', 'createdAt'])
         && request.resource.data.callsign is string
         && request.resource.data.callsign.size() >= 2
         && request.resource.data.callsign.size() <= 24
-        && request.resource.data.uid is string
-        && request.resource.data.createdAt is string;
+        && request.resource.data.uid is string && request.resource.data.uid.size() <= 128
+        && request.resource.data.createdAt is string && request.resource.data.createdAt.size() <= 40;
       allow update, delete: if false;
+    }
+
+    match /rooms/{roomId} {
+      allow get: if isAuthenticated() && isValidId(roomId);
+      allow list: if isAuthenticated() && resource.data.isPrivate == false;
+      allow create: if isAuthenticated()
+        && isValidId(roomId)
+        && request.resource.data.hostUid == request.auth.uid
+        && isValidMultiplayerRoom(request.resource.data);
+      allow update: if isAuthenticated()
+        && isValidId(roomId)
+        && isValidMultiplayerRoom(request.resource.data)
+        && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAuthenticated() && isValidId(roomId) && resource.data.hostUid == request.auth.uid;
+    }
+
+    match /social_inboxes/{userId} {
+      allow get: if isAuthenticated() && isValidId(userId);
+      allow create, update: if isAuthenticated()
+        && isValidId(userId)
+        && request.resource.data.uid == userId
+        && isValidSocialInbox(request.resource.data);
+      allow delete: if isOwner(userId) && isValidId(userId);
+    }
+
+    match /direct_chats/{chatId} {
+      allow get: if isAuthenticated() && isValidId(chatId);
+      allow create, update: if isAuthenticated()
+        && isValidId(chatId)
+        && isValidDirectChat(request.resource.data);
+      allow delete: if false;
     }
 
     match /{document=**} {

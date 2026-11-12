@@ -33,6 +33,7 @@ export interface FirestoreErrorInfo {
 
 // Inicializa o Firebase SDK com a configuração provisionada
 const app = initializeApp(firebaseConfig);
+export { firebaseConfig };
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 

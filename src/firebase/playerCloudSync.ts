@@ -1,4 +1,4 @@
-import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, onSnapshot, setDoc, Unsubscribe } from 'firebase/firestore';
 import { evaluateUnlockedAchievements } from '../progression/achievementsData';
 import { getRankForXp, registerCloudProgressionHook } from '../progression/ranks';
@@ -6,10 +6,10 @@ import { WeaponId } from '../types/game';
 import {
   auth,
   db,
-  googleProvider,
   handleFirestoreError,
   OperationType,
 } from './firebaseClient';
+import { performGoogleSignIn, performGoogleSignOut } from './googleAuthService';
 import {
   CloudSyncState,
   compressAvatarFileToDataUrl,
@@ -55,7 +55,7 @@ export async function pushProfileToFirestoreNow(): Promise<void> {
   const payload: PlayerCloudProfile = {
     ...state.profile,
     uid: user.uid,
-    email: (user.email || state.profile.email || '').slice(0, 150),
+    email: '',
     updatedAt: new Date().toISOString(),
   };
 
@@ -158,21 +158,17 @@ export function subscribePlayerProfile(listener: SyncListener): () => void {
 }
 
 export async function signInWithGoogleAccount(): Promise<boolean> {
-  try {
-    state.syncError = null;
-    state.isSyncing = true;
-    emitState();
-    await signInWithPopup(auth, googleProvider);
-    return true;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    state.syncError = msg.includes('popup-closed')
-      ? 'Janela de login do Google foi fechada.'
-      : 'Não foi possível concluir o login com Google.';
+  state.syncError = null;
+  state.isSyncing = true;
+  emitState();
+  const res = await performGoogleSignIn();
+  if (!res.ok) {
+    state.syncError = res.error || 'Não foi possível concluir o login com Google.';
     state.isSyncing = false;
     emitState();
     return false;
   }
+  return true;
 }
 
 export async function signOutGoogleAccount(): Promise<void> {
@@ -180,7 +176,7 @@ export async function signOutGoogleAccount(): Promise<void> {
     firestoreUnsub();
     firestoreUnsub = null;
   }
-  await signOut(auth);
+  await performGoogleSignOut();
   state.isGoogleLinked = false;
   emitState();
 }
@@ -235,6 +231,9 @@ export function recordCombatTelemetryDelta(delta: {
   const matchesWon = p.matchesWon + (delta.matchesWon || 0);
   const bombsPlanted = p.bombsPlanted + (delta.bombsPlanted || 0);
   const activeWeapon = delta.activeWeapon || p.activeWeapon;
+  const currentMmr = Number(p.mmr) > 0 ? Number(p.mmr) : 1000;
+  const mmrDelta = (delta.matchesPlayed || 0) > 0 ? ((delta.matchesWon || 0) > 0 ? 25 : -18) : 0;
+  const nextMmr = Math.max(100, currentMmr + mmrDelta);
 
   const unlockedAchievements = evaluateUnlockedAchievements({
     playerXp: p.playerXp, rankLevel: p.rankLevel, playerCash: p.playerCash,
@@ -245,16 +244,8 @@ export function recordCombatTelemetryDelta(delta: {
   }, p.unlockedAchievements);
 
   state.profile = {
-    ...p,
-    activeWeapon,
-    totalKills,
-    totalDeaths,
-    totalAssists,
-    totalHeadshots,
-    matchesPlayed,
-    matchesWon,
-    bombsPlanted,
-    unlockedAchievements,
+    ...p, activeWeapon, totalKills, totalDeaths, totalAssists, totalHeadshots,
+    matchesPlayed, matchesWon, bombsPlanted, mmr: nextMmr, unlockedAchievements,
     updatedAt: new Date().toISOString(),
   };
   persistLocalProfile(state.profile);
@@ -385,6 +376,7 @@ export async function resetPlayerAccountEntirely(): Promise<void> {
     unlockedAchievements: [],
     unlockedWeapons: computeUnlockedWeaponsForXp(0),
     economyVersion: 2,
+    mmr: 1000,
     updatedAt: nowIso,
   };
   persistLocalProfile(state.profile);

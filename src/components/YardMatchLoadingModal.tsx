@@ -1,7 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
-import { DrillMode } from '../types/game';
 import { BLACKTHORN_ROSTER, VANGUARD_ROSTER } from '../data/matchRoster';
+import {
+  isOnlineMatchActive,
+  publishLocalLoadProgress,
+  subscribeOnlineRoom,
+} from '../multiplayer/onlineRoomService';
+import { OnlineRoomState } from '../multiplayer/onlineTypes';
+import { DrillMode } from '../types/game';
 import {
   BlackthornTeamEmblem,
   OperatorTacticalAvatar,
@@ -20,16 +26,14 @@ interface YardMatchLoadingModalProps {
   onComplete: () => void;
 }
 
-const YARD_BG_SCREENSHOT =
-  '/assets/aistudio/fba31cbf1a9790a5d2a3dce1a17a2b999cec04ce_9bd05733.jpg';
-const DUST2_BG_SCREENSHOT =
-  '/assets/aistudio/Screenshot_20261109_205345_Chrome_9cb4d380.jpg';
-const ASSAULT_BG_SCREENSHOT =
-  '/assets/aistudio/Screenshot_20261109_230919_YouTube_bbce4935.jpg';
+const YARD_BG_SCREENSHOT = '/assets/aistudio/fba31cbf1a9790a5d2a3dce1a17a2b999cec04ce_9bd05733.jpg';
+const DUST2_BG_SCREENSHOT = '/assets/aistudio/Screenshot_20261109_205345_Chrome_9cb4d380.jpg';
+const ASSAULT_BG_SCREENSHOT = '/assets/aistudio/Screenshot_20261109_230919_YouTube_bbce4935.jpg';
 const YARD_RADAR_IMAGE = '/assets/aistudio/Yard_Map_Radar_7754e5f9.webp';
 
 const TUTORIAL_STORAGE_KEY = 'kinetic_plant_bomb_tutorial_played';
 const BRIEFING_DURATION_MS = 40000;
+const ONLINE_BARRIER_TIMEOUT_MS = 25000;
 
 export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   mode = 'YARD_BOMB_5V5',
@@ -41,22 +45,18 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   const [isArenaReady, setIsArenaReady] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(40);
   const [isFirstTimeTutorial, setIsFirstTimeTutorial] = useState(false);
-  const [statusText, setStatusText] = useState(
-    'INICIALIZANDO THREE.LOADINGMANAGER & DRACOLOADER...'
-  );
+  const [statusText, setStatusText] = useState('INICIALIZANDO THREE.LOADINGMANAGER & DRACOLOADER...');
+  const [onlineRoom, setOnlineRoom] = useState<OnlineRoomState | null>(null);
+
   const completedRef = useRef(false);
+  const localMapReadyRef = useRef(false);
+  const lastProgressSentRef = useRef(-1);
+
   const isDust2 = mode === 'DUST2_BOMB_5V5';
   const isAssault = mode === 'ASSAULT_BOMB_5V5';
-  const mapCodeLabel = isDust2
-    ? 'DE_DUST2'
-    : isAssault
-      ? 'CS_ASSAULT'
-      : 'YARD';
-  const bgScreenshot = isDust2
-    ? DUST2_BG_SCREENSHOT
-    : isAssault
-      ? ASSAULT_BG_SCREENSHOT
-      : YARD_BG_SCREENSHOT;
+  const mapCodeLabel = isDust2 ? 'DE_DUST2' : isAssault ? 'CS_ASSAULT' : 'YARD';
+  const bgScreenshot = isDust2 ? DUST2_BG_SCREENSHOT : isAssault ? ASSAULT_BG_SCREENSHOT : YARD_BG_SCREENSHOT;
+  const isOnline = isOnlineMatchActive();
 
   const finishLoading = () => {
     if (completedRef.current) return;
@@ -66,9 +66,27 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   };
 
   useEffect(() => {
+    const unsub = subscribeOnlineRoom((room) => setOnlineRoom(room));
+    return () => unsub();
+  }, []);
+
+  // Barreira de sincronização online: libera a partida assim que TODOS os jogadores da sala chegarem a 100%
+  useEffect(() => {
+    if (!isOnline || !localMapReadyRef.current || !onlineRoom) return;
+    const players = Object.values(onlineRoom.players || {});
+    if (players.length === 0) return;
+    const allReady = players.every((p) => p.isLoaded === true || (p.loadProgress ?? 0) >= 100);
+    if (allReady) {
+      setStatusText('TODOS OS OPERADORES CONECTADOS E COMPILADOS (100%) — INICIANDO!');
+      const t = window.setTimeout(() => finishLoading(), 450);
+      return () => window.clearTimeout(t);
+    }
+  }, [isOnline, onlineRoom, isArenaReady]);
+
+  useEffect(() => {
     let firstTime = false;
     try {
-      firstTime = localStorage.getItem(TUTORIAL_STORAGE_KEY) !== 'true';
+      firstTime = !isOnline && localStorage.getItem(TUTORIAL_STORAGE_KEY) !== 'true';
     } catch {}
 
     if (firstTime) {
@@ -79,13 +97,13 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       } catch {}
     }
 
-    const revealTimer = window.setTimeout(() => {
-      setShowRoster(true);
-    }, 650);
-
+    const revealTimer = window.setTimeout(() => setShowRoster(true), 500);
     let cancelled = false;
-    let mapReady = false;
     const startTime = performance.now();
+
+    if (isOnline) {
+      publishLocalLoadProgress(5, false);
+    }
 
     const runRealPreparation = async () => {
       try {
@@ -95,14 +113,21 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
             const clamped = Math.min(100, Math.max(0, Math.round(pct)));
             setProgress((prev) => Math.max(prev, clamped));
             setStatusText(label);
+            if (isOnline && clamped - lastProgressSentRef.current >= 20 && clamped < 100) {
+              lastProgressSentRef.current = clamped;
+              publishLocalLoadProgress(clamped, false);
+            }
           });
         }
         if (cancelled) return;
-        mapReady = true;
+        localMapReadyRef.current = true;
         setProgress(100);
         setIsArenaReady(true);
 
-        if (!firstTime) {
+        if (isOnline) {
+          publishLocalLoadProgress(100, true);
+          setStatusText('AGUARDANDO TODOS OS JOGADORES DA SALA CARREGAREM OS RECURSOS 3D...');
+        } else if (!firstTime) {
           window.setTimeout(() => {
             if (!cancelled) finishLoading();
           }, 350);
@@ -110,10 +135,11 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       } catch (err) {
         console.error('Erro ao preparar arena 3D:', err);
         if (!cancelled) {
-          mapReady = true;
+          localMapReadyRef.current = true;
           setProgress(100);
           setIsArenaReady(true);
-          finishLoading();
+          if (isOnline) publishLocalLoadProgress(100, true);
+          else finishLoading();
         }
       }
     };
@@ -122,13 +148,13 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
 
     const tick = window.setInterval(() => {
       const elapsed = performance.now() - startTime;
-      const remainingSec = Math.max(
-        0,
-        Math.ceil((BRIEFING_DURATION_MS - elapsed) / 1000)
-      );
+      const remainingSec = Math.max(0, Math.ceil((BRIEFING_DURATION_MS - elapsed) / 1000));
       setSecondsLeft(remainingSec);
 
-      if (firstTime && mapReady && elapsed >= BRIEFING_DURATION_MS && !completedRef.current) {
+      if (isOnline && localMapReadyRef.current && elapsed >= ONLINE_BARRIER_TIMEOUT_MS && !completedRef.current) {
+        window.clearInterval(tick);
+        finishLoading();
+      } else if (firstTime && localMapReadyRef.current && elapsed >= BRIEFING_DURATION_MS && !completedRef.current) {
         window.clearInterval(tick);
         finishLoading();
       }
@@ -140,43 +166,40 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       window.clearInterval(tick);
       soundEngine.stopPlantBombTutorial();
     };
-  }, [mode, onPrepareMap]);
+  }, [mode, onPrepareMap, isOnline]);
 
   const totalBlocks = 18;
   const filledBlocks = Math.round((progress / 100) * totalBlocks);
 
+  const onlinePlayers = onlineRoom ? Object.values(onlineRoom.players || {}) : [];
+  const onlineReadyCount = onlinePlayers.filter((p) => p.isLoaded || (p.loadProgress ?? 0) >= 100).length;
+
+  const vanguardDisplay = isOnline
+    ? onlinePlayers.filter((p) => p.team === 'VANGUARD').map((p) => ({
+        callsign: p.callsign,
+        title: p.isLoaded || (p.loadProgress ?? 0) >= 100 ? '✓ 100% PRONTO' : `CARREGANDO ${p.loadProgress ?? 0}%`,
+        classId: 'FUZILEIRO' as WarfaceClassId, isPlayer: true, isReady: Boolean(p.isLoaded || (p.loadProgress ?? 0) >= 100),
+      }))
+    : VANGUARD_ROSTER.map((op) => ({ ...op, isReady: isArenaReady }));
+
+  const blackthornDisplay = isOnline
+    ? onlinePlayers.filter((p) => p.team === 'BLACKTHORN').map((p) => ({
+        callsign: p.callsign,
+        title: p.isLoaded || (p.loadProgress ?? 0) >= 100 ? '✓ 100% PRONTO' : `CARREGANDO ${p.loadProgress ?? 0}%`,
+        classId: 'ENGENHEIRO' as WarfaceClassId, isReady: Boolean(p.isLoaded || (p.loadProgress ?? 0) >= 100),
+      }))
+    : BLACKTHORN_ROSTER.map((op) => ({ ...op, isReady: isArenaReady }));
+
   return (
     <div className="fixed inset-0 z-50 bg-[#05080f] text-white select-none overflow-hidden flex flex-col justify-between font-sans">
-      {/* 1. FOTO REAL DO MAPA EM TELA CHEIA */}
       <div className="absolute inset-0">
-        <img
-          src={bgScreenshot}
-          alt={`Mapa ${mapCodeLabel}`}
-          referrerPolicy="no-referrer"
-          className={`w-full h-full object-cover object-center transition-all duration-700 ${
-            showRoster ? 'scale-105 brightness-[0.38]' : 'scale-100 brightness-95'
-          }`}
-        />
-        <div
-          className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-700 ${
-            showRoster ? 'opacity-22' : 'opacity-0'
-          }`}
-        >
-          <img
-            src={YARD_RADAR_IMAGE}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="w-[62vw] max-w-[540px] max-h-[75vh] object-contain"
-          />
+        <img src={bgScreenshot} alt={`Mapa ${mapCodeLabel}`} referrerPolicy="no-referrer" className={`w-full h-full object-cover object-center transition-all duration-700 ${showRoster ? 'scale-105 brightness-[0.38]' : 'scale-100 brightness-95'}`} />
+        <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-700 ${showRoster ? 'opacity-22' : 'opacity-0'}`}>
+          <img src={YARD_RADAR_IMAGE} alt="" referrerPolicy="no-referrer" className="w-[62vw] max-w-[540px] max-h-[75vh] object-contain" />
         </div>
-        <div
-          className={`absolute inset-0 bg-gradient-to-b from-[#04070e]/90 via-[#050912]/65 to-[#04070e]/95 transition-opacity duration-700 ${
-            showRoster ? 'opacity-100' : 'opacity-35'
-          }`}
-        />
+        <div className={`absolute inset-0 bg-gradient-to-b from-[#04070e]/90 via-[#050912]/65 to-[#04070e]/95 transition-opacity duration-700 ${showRoster ? 'opacity-100' : 'opacity-35'}`} />
       </div>
 
-      {/* BANNER INICIAL DA FOTO DO MAPA */}
       {!showRoster && (
         <div className="relative z-20 m-auto text-center px-6 py-4 rounded-2xl bg-black/70 border border-amber-400/50 shadow-2xl">
           <div className="text-xs font-mono font-bold text-amber-400 tracking-[0.25em] uppercase">
@@ -186,12 +209,11 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
             MAPA: {mapCodeLabel} (BOMB 5V5)
           </h1>
           <p className="text-xs font-mono text-slate-300 mt-1">
-            Preparando terreno 3D e posicionando esquadrões Vanguard vs Blackthorn...
+            Sincronizando recursos 3D e aguardando jogadores da sala...
           </p>
         </div>
       )}
 
-      {/* 2. TOP HEADER */}
       <header
         className={`relative z-10 px-4 sm:px-8 pt-2.5 sm:pt-3.5 flex items-center justify-between transition-all duration-500 ${
           showRoster ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'
@@ -202,9 +224,9 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
             <span className="text-xs sm:text-sm font-display font-black tracking-[0.16em] text-slate-100 uppercase">
               KINETIC: MOBILE
             </span>
-            {isFirstTimeTutorial && (
-              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-amber-300 text-[9px] font-mono font-bold animate-pulse">
-                🎙️ BRIEFING DO COMANDANTE
+            {isOnline && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 text-[9px] font-mono font-bold">
+                🌐 SINCRONIZAÇÃO ONLINE ({onlineReadyCount}/{onlinePlayers.length} PRONTOS)
               </span>
             )}
           </div>
@@ -214,14 +236,10 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
         </div>
 
         <div className="hidden md:flex items-center gap-3 bg-[#070d17]/85 border border-white/15 rounded-lg px-3 py-1">
-          {(
-            ['FUZILEIRO', 'MEDICO', 'ENGENHEIRO', 'FRANCO_ATIRADOR'] as WarfaceClassId[]
-          ).map((cId) => (
+          {(['FUZILEIRO', 'MEDICO', 'ENGENHEIRO', 'FRANCO_ATIRADOR'] as WarfaceClassId[]).map((cId) => (
             <div key={cId} className="flex items-center gap-1.5">
               <WarfaceClassIcon classId={cId} className="w-4 h-4" />
-              <span className="text-[9px] font-mono font-bold text-slate-200">
-                {WARFACE_CLASS_META[cId].label}
-              </span>
+              <span className="text-[9px] font-mono font-bold text-slate-200">{WARFACE_CLASS_META[cId].label}</span>
             </div>
           ))}
         </div>
@@ -233,12 +251,9 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
         </div>
       </header>
 
-      {/* 3. CONFRONTO 5v5: VANGUARD vs BLACKTHORN */}
       <div
         className={`relative z-10 flex-1 grid grid-cols-12 gap-2 sm:gap-4 px-3 sm:px-8 py-1 items-center max-w-6xl w-full mx-auto transition-all duration-500 ${
-          showRoster
-            ? 'opacity-100 scale-100 translate-y-0'
-            : 'opacity-0 scale-95 translate-y-6 pointer-events-none'
+          showRoster ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-6 pointer-events-none'
         }`}
       >
         <div className="col-span-5 flex flex-col gap-1 sm:gap-1.5">
@@ -249,12 +264,12 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
             <VanguardTeamEmblem className="w-6 h-6 sm:w-8 sm:h-8 shrink-0" />
           </div>
 
-          {VANGUARD_ROSTER.map((op) => (
+          {vanguardDisplay.map((op) => (
             <div
               key={op.callsign}
               className={`relative h-9 sm:h-11 rounded border overflow-hidden flex items-center justify-between bg-[#081523]/90 transition-transform ${
-                op.isPlayer
-                  ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.35)]'
+                op.isReady
+                  ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.3)]'
                   : 'border-sky-400/55 shadow-[0_0_10px_rgba(56,189,248,0.18)]'
               }`}
             >
@@ -264,21 +279,14 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
               </div>
               <div className="flex-1 px-2 flex items-center justify-between min-w-0">
                 <div className="min-w-0">
-                  <div
-                    className={`text-[10px] sm:text-xs font-display font-black tracking-wide truncate ${
-                      op.isPlayer ? 'text-amber-300' : 'text-white'
-                    }`}
-                  >
+                  <div className="text-[10px] sm:text-xs font-display font-black tracking-wide truncate text-amber-300">
                     {op.callsign}
                   </div>
-                  <div className="text-[8px] sm:text-[9px] font-mono text-sky-300/90 uppercase tracking-wider truncate">
+                  <div className={`text-[8px] sm:text-[9px] font-mono uppercase tracking-wider truncate ${op.isReady ? 'text-emerald-300 font-bold' : 'text-sky-300/90'}`}>
                     {op.title}
                   </div>
                 </div>
-                <WarfaceClassIcon
-                  classId={op.classId}
-                  className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 ml-1.5"
-                />
+                <WarfaceClassIcon classId={op.classId} className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 ml-1.5" />
               </div>
             </div>
           ))}
@@ -287,14 +295,7 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
         <div className="col-span-2 flex flex-col items-center justify-center text-center relative">
           <div className="relative w-14 h-14 sm:w-20 sm:h-20 rounded-full flex items-center justify-center border border-white/20 bg-[#070c14]/90 shadow-[0_0_30px_rgba(56,189,248,0.35)]">
             <div className="absolute inset-0 rounded-full border-2 border-l-sky-400 border-t-sky-300 border-r-red-500 border-b-amber-400 opacity-85" />
-            <span className="font-display font-black text-base sm:text-2xl tracking-wider text-white">
-              VS
-            </span>
-          </div>
-          <div className="mt-2 hidden sm:block text-[9px] font-display font-bold tracking-widest uppercase leading-tight">
-            <span className="text-sky-300">VANGUARD OPERATIONS</span>
-            <span className="text-slate-400 block my-0.5">VS</span>
-            <span className="text-red-400">BLACKTHORN MERCENARIES</span>
+            <span className="font-display font-black text-base sm:text-2xl tracking-wider text-white">VS</span>
           </div>
         </div>
 
@@ -306,21 +307,20 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
             </h2>
           </div>
 
-          {BLACKTHORN_ROSTER.map((op) => (
+          {blackthornDisplay.map((op) => (
             <div
               key={op.callsign}
-              className="relative h-9 sm:h-11 rounded border border-red-500/55 bg-[#1b0a10]/90 shadow-[0_0_10px_rgba(239,68,68,0.18)] overflow-hidden flex items-center justify-between"
+              className={`relative h-9 sm:h-11 rounded border bg-[#1b0a10]/90 overflow-hidden flex items-center justify-between ${
+                op.isReady ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.3)]' : 'border-red-500/55'
+              }`}
             >
               <div className="flex-1 px-2 flex items-center justify-between min-w-0">
-                <WarfaceClassIcon
-                  classId={op.classId}
-                  className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 mr-1.5"
-                />
+                <WarfaceClassIcon classId={op.classId} className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 mr-1.5" />
                 <div className="min-w-0 text-right">
                   <div className="text-[10px] sm:text-xs font-display font-black tracking-wide text-white truncate">
                     {op.callsign}
                   </div>
-                  <div className="text-[8px] sm:text-[9px] font-mono text-red-300/90 uppercase tracking-wider truncate">
+                  <div className={`text-[8px] sm:text-[9px] font-mono uppercase tracking-wider truncate ${op.isReady ? 'text-emerald-300 font-bold' : 'text-red-300/90'}`}>
                     {op.title}
                   </div>
                 </div>
@@ -334,11 +334,18 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
         </div>
       </div>
 
-      {/* 4. RODAPÉ: BARRA SEGMENTADA AZUL CIANO + STATUS REAL DE SHADERS/MALHA */}
       <footer className="relative z-10 px-4 sm:px-8 pb-2.5 sm:pb-4 pt-1.5 bg-[#050811]/85 border-t border-white/10">
         <div className="max-w-xl mx-auto flex flex-col items-center">
           <div className="flex items-center gap-2 text-[10px] sm:text-xs font-display font-bold tracking-[0.2em] text-sky-200 uppercase mb-1">
             <span>LOADING MATCH ({Math.round(progress)}%)</span>
+            {isOnline && (
+              <>
+                <span className="text-slate-400">·</span>
+                <span className="text-emerald-400 font-mono">
+                  SALA: {onlineReadyCount}/{onlinePlayers.length} CARREGADOS
+                </span>
+              </>
+            )}
             {isFirstTimeTutorial && (
               <>
                 <span className="text-slate-400">·</span>
@@ -354,23 +361,12 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
                 <div
                   key={idx}
                   className={`h-2.5 sm:h-3 rounded-[1px] transition-colors duration-100 ${
-                    active
-                      ? 'bg-sky-300 shadow-[0_0_8px_rgba(125,211,252,0.95)]'
-                      : 'bg-sky-950/50'
+                    active ? 'bg-sky-300 shadow-[0_0_8px_rgba(125,211,252,0.95)]' : 'bg-sky-950/50'
                   }`}
                 />
               );
             })}
           </div>
-
-          {isArenaReady && (
-            <button
-              onClick={finishLoading}
-              className="mt-1.5 px-3 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 active:scale-95 border border-amber-400/60 rounded text-[9px] font-mono font-bold text-amber-300 tracking-wider transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_10px_rgba(245,158,11,0.25)]"
-            >
-              <span>⚡ ARENA 100% COMPILADA — ENTRAR AGORA</span>
-            </button>
-          )}
         </div>
 
         <div className="flex items-center justify-between text-[10px] sm:text-xs font-mono text-slate-300 mt-1.5">
@@ -378,9 +374,7 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
             <span className="text-slate-400 block text-[9px]">Modo de Jogo:</span>
             <span className="font-bold text-white">Plant the Bomb (5 vs 5)</span>
           </div>
-          <div className="text-center px-2 truncate max-w-md text-[10px] text-sky-300">
-            {statusText}
-          </div>
+          <div className="text-center px-2 truncate max-w-md text-[10px] text-sky-300">{statusText}</div>
           <div className="text-right">
             <span className="text-slate-400 block text-[9px]">META DA PARTIDA:</span>
             <span className="font-bold text-amber-400 tabular-nums">6 Rodadas</span>

@@ -5,7 +5,10 @@ import {
   cloneVanguardCharacterAvatar,
   preloadProRifleBotCharacter,
 } from './botCharacterSystem';
-import { createBotThirdPersonWeaponMesh } from './botWeaponProps';
+import {
+  alignWeaponPropToMixamoHands,
+  createBotThirdPersonWeaponMesh,
+} from './botWeaponProps';
 
 interface PodiumOperatorSlot {
   slotGroup: THREE.Group;
@@ -35,12 +38,6 @@ const PODIUM_SLOTS: Array<{
   { x: 2.08, y: 0.15, z: -0.22, yaw: -0.24, pose: 'RIFLE_AIM' },  // #5 Flanco Direito
 ];
 
-const _rHandWorld = new THREE.Vector3();
-const _lHandWorld = new THREE.Vector3();
-const _rHandLocal = new THREE.Vector3();
-const _lHandLocal = new THREE.Vector3();
-const _handDir = new THREE.Vector3();
-const _lookTargetWorld = new THREE.Vector3();
 const _camTarget = new THREE.Vector3();
 
 /**
@@ -272,31 +269,12 @@ export class PostMatchShowcase3D {
     for (let i = 0; i < this.slots.length; i++) {
       const slot = this.slots[i];
       if (!slot.weaponProp) continue;
-
-      if (slot.rHandBone && slot.lHandBone) {
-        slot.rHandBone.getWorldPosition(_rHandWorld);
-        slot.lHandBone.getWorldPosition(_lHandWorld);
-        _rHandLocal.copy(_rHandWorld);
-        _lHandLocal.copy(_lHandWorld);
-        slot.slotGroup.worldToLocal(_rHandLocal);
-        slot.slotGroup.worldToLocal(_lHandLocal);
-
-        _handDir.subVectors(_lHandLocal, _rHandLocal);
-        if (_handDir.lengthSq() > 0.002) {
-          _handDir.normalize();
-          slot.weaponProp.position.copy(_rHandLocal).addScaledVector(_handDir, 0.14);
-          slot.weaponProp.position.y += 0.025;
-
-          _lookTargetWorld
-            .copy(_lHandWorld)
-            .addScaledVector(_lHandWorld.clone().sub(_rHandWorld), 2.0);
-          slot.weaponProp.lookAt(_lookTargetWorld);
-          continue;
-        }
-      }
-
-      slot.weaponProp.position.set(-0.08, 1.26, 0.18);
-      slot.weaponProp.rotation.set(0.02, 0.04, 0);
+      alignWeaponPropToMixamoHands(
+        slot.weaponProp,
+        slot.slotGroup,
+        slot.rHandBone,
+        slot.lHandBone
+      );
     }
   }
 

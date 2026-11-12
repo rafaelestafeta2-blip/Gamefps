@@ -47,6 +47,7 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
   };
 
   const handleEnterCommand = () => {
+    if (!syncState.isGoogleLinked) return;
     soundEngine.playMenuSelect();
     soundEngine.playMenuMusic();
     void mobileHardware.enterFullscreenLandscape();
@@ -283,13 +284,9 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
                 </span>
               </button>
 
-              <button
-                type="button"
-                onClick={handleEnterCommand}
-                className="w-full py-1.5 px-2.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/15 font-mono text-[9.5px] font-bold text-slate-300 hover:text-white tracking-wider uppercase transition-all cursor-pointer"
-              >
-                JOGAR COMO CONVIDADO (OFFLINE)
-              </button>
+              <div className="py-1 px-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-center font-mono text-[8.5px] font-bold text-amber-300 uppercase tracking-wider">
+                🔒 ACESSO EXCLUSIVO COM CONTA GOOGLE REAL
+              </div>
             </div>
           )}
         </div>

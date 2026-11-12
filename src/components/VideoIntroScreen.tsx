@@ -5,7 +5,7 @@ interface VideoIntroScreenProps {
 }
 
 const TRAILER_VIDEO_URL =
-  'https://github.com/rafaelestafeta2-blip/Gamesfps/releases/download/V2/Warface.-.Trailer.-.Dublado.1080p.1.mp4';
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/bf1a19c7c359b2da36980520d39e584a52cc1fea/VID-20261112-WA0005.mp4';
 
 /**
   * Video Intro Screen que reproduz o trailer oficial dublado após a splash screen

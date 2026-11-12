@@ -50,6 +50,20 @@ export default function App() {
           state.profile.activeWeapon
         );
       }
+      if (state.authReady && !state.isGoogleLinked) {
+        setHud((prev) => {
+          if (
+            prev.screen === 'MAIN_MENU' ||
+            prev.screen === 'PLAYING' ||
+            prev.screen === 'PAUSED' ||
+            prev.screen === 'TITLE'
+          ) {
+            engineRef.current?.setScreenState('AUTH_LOGIN');
+            return { ...prev, screen: 'AUTH_LOGIN' };
+          }
+          return prev;
+        });
+      }
     });
     return () => {
       unsub();
@@ -114,9 +128,7 @@ export default function App() {
   };
 
   const handleStartWarfaceMatchmaking = (targetMode: DrillMode) => {
-    if (!engineRef.current) return;
     setMatchmakingTargetMode(targetMode);
-    launchMatchNow('FREE_RANGE');
   };
 
   const handleSelectWeapon = (weaponId: WeaponId) => {
@@ -330,24 +342,27 @@ export default function App() {
             }}
           />
 
-          {hud.drillMode === 'FREE_RANGE' &&
-            matchmakingTargetMode &&
-            !loadingBombMode && (
-              <WarfaceMatchmakingWidget
-                selectedMode={matchmakingTargetMode}
-                onChangeMode={(nextMode) => setMatchmakingTargetMode(nextMode)}
-                onMatchReady={(readyMode) => {
-                  setMatchmakingTargetMode(null);
-                  if (document.pointerLockElement) {
-                    document.exitPointerLock();
-                  }
-                  setLoadingBombMode(readyMode);
-                }}
-                onCancelSearch={() => setMatchmakingTargetMode(null)}
-              />
-            )}
         </>
       )}
+
+      {matchmakingTargetMode &&
+        !loadingBombMode &&
+        (hud.screen === 'MAIN_MENU' ||
+          hud.screen === 'TITLE' ||
+          (hud.screen === 'PLAYING' && hud.drillMode === 'FREE_RANGE')) && (
+          <WarfaceMatchmakingWidget
+            selectedMode={matchmakingTargetMode}
+            onChangeMode={(nextMode) => setMatchmakingTargetMode(nextMode)}
+            onMatchReady={(readyMode) => {
+              setMatchmakingTargetMode(null);
+              if (document.pointerLockElement) {
+                document.exitPointerLock();
+              }
+              setLoadingBombMode(readyMode);
+            }}
+            onCancelSearch={() => setMatchmakingTargetMode(null)}
+          />
+        )}
 
       {(hud.screen === 'PAUSED' ||
         hud.screen === 'TITLE' ||

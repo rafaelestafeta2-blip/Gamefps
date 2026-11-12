@@ -7,6 +7,7 @@ import {
   subscribePlayerProfile,
   syncProgressionFromLocal,
 } from '../firebase/playerCloudSync';
+import { subscribeSocialInbox } from '../firebase/friendsSocialService';
 import { GameSettings } from '../graphics/graphicsSettings';
 import { mobileHardware } from '../mobile/nativeHardware';
 import {
@@ -16,11 +17,15 @@ import {
   loadSavedPlayerXp,
 } from '../progression/ranks';
 import { DrillMode, WeaponId } from '../types/game';
+import { CompetitiveRankedScreen } from './CompetitiveRankedScreen';
+import { FriendsSocialModal } from './FriendsSocialModal';
 import { GraphicsSettingsPanel } from './GraphicsSettingsPanel';
+import { MainMenuOverlays } from './MainMenuOverlays';
 import { MainMenuPlayPanel } from './MainMenuPlayPanel';
 import { MainMenuRanksModal } from './MainMenuRanksModal';
 import { MainMenuTopNav } from './MainMenuTopNav';
 import { MenuBackground } from './MenuBackground';
+import { OnlineLobbyModal } from './OnlineLobbyModal';
 import { PlayerProfileModal } from './PlayerProfileModal';
 import { WeaponInspectionModal } from './WeaponInspectionModal';
 
@@ -70,22 +75,32 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     'PLAY' | 'WEAPON' | 'RANKS' | 'BATTLE_PASS' | 'SETTINGS'
   >('PLAY');
   const [showNewsModal, setShowNewsModal] = useState(false);
+  const [showEventsModal, setShowEventsModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showFriendsModal, setShowFriendsModal] = useState(false);
+  const [socialBadgeCount, setSocialBadgeCount] = useState(0);
+  const [showOnlineLobby, setShowOnlineLobby] = useState(false);
+  const [showRankedScreen, setShowRankedScreen] = useState(false);
+  const [onlineLobbyArena, setOnlineLobbyArena] = useState<DrillMode>('DUST2_BOMB_5V5');
   const [syncState, setSyncState] = useState<CloudSyncState>(() =>
     getCloudSyncState()
   );
 
-  // Inicia a música tema ao entrar no Menu Principal e sincroniza perfil Firebase
   useEffect(() => {
     soundEngine.playMenuMusic();
     const unsub = subscribePlayerProfile((next) => setSyncState(next));
+    const unsubSocial = subscribeSocialInbox((inbox) => {
+      const reqCount = Object.keys(inbox.requests || {}).length;
+      const invCount = Object.keys(inbox.invites || {}).length;
+      setSocialBadgeCount(reqCount + invCount);
+    });
     return () => {
       unsub();
+      unsubSocial();
       soundEngine.stopMenuMusic();
     };
   }, []);
 
-  // Live Warface Progression & Tactical Cash Balance (sincronizado com Firebase)
   const playerXp = Math.max(loadSavedPlayerXp(), syncState.profile.playerXp);
   const currentRank = getRankForXp(playerXp);
   const nextRank = getNextRank(currentRank.level);
@@ -99,7 +114,6 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     )
   );
   const savedCash = Math.max(loadSavedPlayerCash(), syncState.profile.playerCash);
-  const playerCashBalance = 15000 + playerXp * 2 + savedCash;
 
   const handleHover = () => {
     soundEngine.playMenuHover();
@@ -134,27 +148,33 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         soundEngine.playMenuMusic();
         void mobileHardware.enterFullscreenLandscape();
       }}
-      className="fixed inset-0 z-40 bg-[#06080c] select-none text-white flex flex-col justify-between overflow-hidden font-sans"
+      className="fixed inset-0 z-40 h-[100dvh] max-h-[100dvh] bg-[#06080c] select-none text-white flex flex-col justify-between overflow-hidden font-sans"
     >
-      {/* 1. BACKGROUND (Soldado + Fumaça Volumétrica + Fagulhas) */}
-      <MenuBackground />
+      {/* 1. BACKGROUND (Soldado 3D .glb centralizado + Bandeira 3D Blackthorn atrás) */}
+      <MenuBackground
+        showHero={activeTab === 'PLAY' && !showRankedScreen}
+        activeWeapon={activeWeapon}
+      />
 
-      {/* 2. TOP NAVIGATION BAR (Modularizado com Saldo + Patente + Foto de Perfil Firebase) */}
+      {/* 2. TOP HEADER BAR (Único local de Perfil, Amigos, Correio e Configurações) */}
       <MainMenuTopNav
         activeTab={activeTab}
         onSelectTab={(tab) => setActiveTab(tab)}
         onHover={handleHover}
-        playerCashBalance={playerCashBalance}
+        playerCashBalance={savedCash}
         currentRank={currentRank}
         xpLevelProgress={xpLevelProgress}
         syncState={syncState}
         onOpenProfile={() => setShowProfileModal(true)}
+        onOpenFriends={() => setShowFriendsModal(true)}
+        onToggleNews={() => setShowNewsModal((prev) => !prev)}
+        socialBadgeCount={socialBadgeCount}
       />
 
-      {/* 3. DYNAMIC CONTENT (Alinhado à esquerda na aba JOGAR sem cobrir o Soldado no centro) */}
+      {/* 3. CORPO PRINCIPAL LIMPO (Rail Esquerdo + Centro Livre sobre o Soldado 3D + Direita) */}
       <main
-        className={`relative z-10 flex-1 flex items-center px-3 sm:px-6 py-2 pointer-events-none overflow-hidden ${
-          activeTab === 'PLAY' ? 'justify-start' : 'justify-center'
+        className={`relative z-10 flex-1 min-h-0 flex items-center px-3 sm:px-6 py-2 pointer-events-none overflow-hidden ${
+          activeTab === 'PLAY' ? 'justify-between' : 'justify-center'
         }`}
       >
         {activeTab === 'PLAY' && (
@@ -163,18 +183,26 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             weaponName={activeWeaponMeta.name}
             weaponCategory={activeWeaponMeta.category}
             weaponCaliber={activeWeaponMeta.caliber}
-            onOpenWeaponSelect={() => {
-              soundEngine.playMenuSelect();
-              setActiveTab('WEAPON');
-            }}
+            playerMmr={syncState.profile.mmr || 2450}
+            onOpenWeaponSelect={() => setActiveTab('WEAPON')}
             onStartTraining={handleLaunchTraining}
             onStartDrill={handleLaunchDrill}
             onStartMatchmaking={handleLaunchMatchmaking}
+            onOpenRankedScreen={(targetMode) => {
+              setOnlineLobbyArena(targetMode);
+              setShowRankedScreen(true);
+            }}
+            onOpenOnlineLobby={(targetMode) => {
+              setOnlineLobbyArena(targetMode);
+              setShowOnlineLobby(true);
+            }}
+            onOpenRanksTab={() => setActiveTab('RANKS')}
+            onOpenBattlePassTab={() => setActiveTab('BATTLE_PASS')}
+            onOpenEventsModal={() => setShowEventsModal(true)}
             onHover={handleHover}
           />
         )}
 
-        {/* WEAPON INSPECTION MODAL */}
         {activeTab === 'WEAPON' && (
           <WeaponInspectionModal
             activeWeapon={activeWeapon}
@@ -188,7 +216,6 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           />
         )}
 
-        {/* RANKS MODAL */}
         {activeTab === 'RANKS' && (
           <MainMenuRanksModal
             currentRank={currentRank}
@@ -197,7 +224,6 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           />
         )}
 
-        {/* PREMIUM OPTIONS MODAL */}
         {activeTab === 'SETTINGS' && gameSettings && onUpdateGameSettings && (
           <GraphicsSettingsPanel
             settings={gameSettings}
@@ -210,12 +236,11 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           />
         )}
 
-        {/* BATTLE PASS */}
         {activeTab === 'BATTLE_PASS' && (
-          <div className="max-w-md w-full bg-[#0c0e14]/95 border border-white/20 rounded-xl p-4 sm:p-5 shadow-2xl backdrop-blur-md pointer-events-auto">
+          <div className="max-w-md w-full bg-[#0c0e14]/95 border border-red-500/40 rounded-xl p-4 sm:p-5 shadow-2xl backdrop-blur-md pointer-events-auto">
             <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
               <h3 className="font-display font-black text-base text-amber-400 uppercase tracking-wider">
-                PASSE DE BATALHA · TEMPORADA WARFACE
+                PASSE DE BATALHA · MISSÕES TÁTICAS
               </h3>
               <button
                 type="button"
@@ -226,57 +251,25 @@ export const MainMenu: React.FC<MainMenuProps> = ({
               </button>
             </div>
             <p className="font-mono text-xs text-slate-300 leading-relaxed">
-              Acumule pontos de XP no estande de tiro e nas incursões táticas
-              para subir sua patente militar de <b>Trainee (Nív. 1)</b> até{' '}
-              <b>Warface Supremo (Nív. 70)</b> e liberar todo o arsenal.
+              Acumule XP no Estande de Tiro, Killhouse e Ranked 5v5 para subir de{' '}
+              <b>Trainee (Nív. 1)</b> até <b>Warface Supremo (Nív. 70)</b> e liberar todo o arsenal L49.
             </p>
           </div>
         )}
       </main>
 
-      {/* 4. NEWS TAB */}
-      <div
-        onClick={(e) => {
-          e.stopPropagation();
-          soundEngine.playMenuSelect();
-          setShowNewsModal((prev) => !prev);
+      <MainMenuOverlays
+        showEventsModal={showEventsModal}
+        onCloseEvents={() => setShowEventsModal(false)}
+        showNewsModal={showNewsModal}
+        onCloseNews={() => setShowNewsModal(false)}
+        onLaunchDrill={(mode) => void handleLaunchDrill(mode)}
+        onLaunchTraining={() => void handleLaunchTraining()}
+        onOpenPrivateLobby={() => {
+          setOnlineLobbyArena('DUST2_BOMB_5V5');
+          setShowOnlineLobby(true);
         }}
-        className="absolute top-1/2 -translate-y-1/2 right-0 z-30 bg-[#12161f]/90 hover:bg-[#1c222f] border-l border-y border-white/20 hover:border-amber-500/60 rounded-l-xl px-1.5 py-3 flex flex-col items-center gap-1.5 cursor-pointer shadow-xl transition-colors group"
-      >
-        <div className="w-3 h-3 border border-amber-400 rounded-xs flex items-center justify-center text-[8px] text-amber-400 font-bold">
-          ★
-        </div>
-        <span
-          className="font-display font-bold text-[9px] tracking-[0.2em] text-slate-200 group-hover:text-amber-300 uppercase"
-          style={{ writingMode: 'vertical-lr' }}
-        >
-          NEWS
-        </span>
-      </div>
-
-      {showNewsModal && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="absolute top-1/2 -translate-y-1/2 right-10 z-40 max-w-xs bg-[#0c0e14]/98 border border-amber-500/40 rounded-xl p-4 shadow-2xl backdrop-blur-xl"
-        >
-          <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-white/15">
-            <span className="font-black text-xs text-amber-400 tracking-wider">
-              ATUALIZAÇÃO TÁTICA
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowNewsModal(false)}
-              className="text-xs text-slate-400 hover:text-white cursor-pointer"
-            >
-              ✕
-            </button>
-          </div>
-          <p className="font-mono text-[11px] text-slate-300 leading-relaxed">
-            • <b>Opções de Hardware</b>: Ajuste resolução, sombras dinâmicas, texturas, áudio e limite de FPS.
-            <br />• <b>Insígnias Vetoriais SVG</b>: 70 patentes Warface nítidas.
-          </p>
-        </div>
-      )}
+      />
 
       {showProfileModal && (
         <PlayerProfileModal
@@ -285,14 +278,40 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         />
       )}
 
-      {/* 5. FOOTER */}
-      <footer className="relative z-20 w-full px-4 sm:px-6 py-1.5 flex items-center justify-between pointer-events-none text-[9px] font-mono tracking-wider text-slate-400/90 uppercase">
-        <span>
-          MOTOR 3D MOBILE OTIMIZADO ·{' '}
-          {gameSettings?.fpsLimit ? `${gameSettings.fpsLimit} FPS` : '60 FPS'}
-        </span>
-        <span>FIREBASE CLOUD SYNC · V0.0.8</span>
-      </footer>
+      <OnlineLobbyModal
+        isOpen={showOnlineLobby}
+        onClose={() => setShowOnlineLobby(false)}
+        selectedMapMode={onlineLobbyArena}
+        onSelectMapMode={(mode) => setOnlineLobbyArena(mode)}
+        onLaunchOnlineArena={(mode) => {
+          setShowOnlineLobby(false);
+          void handleLaunchDrill(mode);
+        }}
+      />
+
+      <FriendsSocialModal
+        isOpen={showFriendsModal}
+        onClose={() => setShowFriendsModal(false)}
+        myCallsign={syncState.profile.callsign}
+        onOpenOnlineLobbyWithRoom={(mode) => {
+          setShowFriendsModal(false);
+          setOnlineLobbyArena(mode);
+          setShowOnlineLobby(true);
+        }}
+      />
+
+      {showRankedScreen && (
+        <CompetitiveRankedScreen
+          playerMmr={syncState.profile.mmr || 2450}
+          activeWeapon={activeWeapon}
+          initialArena={onlineLobbyArena}
+          onBackToMainMenu={() => setShowRankedScreen(false)}
+          onRankedMatchReady={(mode) => {
+            setShowRankedScreen(false);
+            void handleLaunchDrill(mode);
+          }}
+        />
+      )}
     </div>
   );
 };

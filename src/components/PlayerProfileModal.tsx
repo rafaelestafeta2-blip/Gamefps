@@ -4,6 +4,7 @@ import {
   CloudSyncState,
   compressAvatarFileToDataUrl,
   resetPlayerAccountEntirely,
+  signOutGoogleAccount,
   updatePlayerCallsignAndAvatar,
 } from '../firebase/playerCloudSync';
 import { PlayerProfileAchievementsRow } from './PlayerProfileAchievementsRow';
@@ -93,8 +94,8 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
               PERFIL DO JOGADOR
             </span>
           </button>
-          <span className="hidden sm:inline-block font-mono text-[10px] text-slate-400">
-            {isGoogleLinked ? 'CLOUD PROFILE SINCRONIZADO' : 'OFFLINE GUEST'}
+          <span className="hidden sm:inline-block font-mono text-[10px] text-emerald-400">
+            {isGoogleLinked ? 'CLOUD PROFILE SINCRONIZADO' : 'CONTA GOOGLE REQUERIDA'}
           </span>
         </div>
 
@@ -150,14 +151,27 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
       {/* 3. Rodapé Tático */}
       <footer className="relative z-20 w-full px-4 sm:px-8 py-1.5 flex items-center justify-between font-mono text-[9px] text-slate-400 border-t border-white/10 bg-black/60 shrink-0">
         <span>KINETIC TACTICAL DOSSIER · FIREBASE FIRESTORE</span>
-        <button
-          type="button"
-          onClick={handleResetEntireAccount}
-          disabled={resettingAccount}
-          className="text-red-400 hover:text-red-300 underline uppercase tracking-wider cursor-pointer"
-        >
-          {resettingAccount ? 'ZERANDO...' : 'ZERAR CONTA ($3.000 INICIAL)'}
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => {
+              soundEngine.playMenuSelect();
+              onClose();
+              void signOutGoogleAccount();
+            }}
+            className="text-amber-400 hover:text-amber-300 underline uppercase tracking-wider cursor-pointer"
+          >
+            TROCAR CONTA / SAIR
+          </button>
+          <button
+            type="button"
+            onClick={handleResetEntireAccount}
+            disabled={resettingAccount}
+            className="text-red-400 hover:text-red-300 underline uppercase tracking-wider cursor-pointer"
+          >
+            {resettingAccount ? 'ZERANDO...' : 'ZERAR CONTA ($3.000 INICIAL)'}
+          </button>
+        </div>
       </footer>
 
       {/* Modal Secundário de Customização de Foto e Nome Único */}

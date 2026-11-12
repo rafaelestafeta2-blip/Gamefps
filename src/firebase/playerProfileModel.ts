@@ -30,6 +30,7 @@ export interface PlayerCloudProfile {
   bombsPlanted: number;
   unlockedAchievements: string[];
   economyVersion?: number;
+  mmr?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -144,6 +145,8 @@ export function loadLocalProfileFallback(): PlayerCloudProfile {
         matchesWon,
         bombsPlanted,
         unlockedAchievements,
+        economyVersion: CURRENT_ECONOMY_VERSION,
+        mmr: isOutdatedEconomy || !parsed.mmr || parsed.mmr === 1000 ? 2450 : Math.max(100, Number(parsed.mmr)),
         createdAt: parsed.createdAt || nowIso,
         updatedAt: nowIso,
       };
@@ -173,6 +176,8 @@ export function loadLocalProfileFallback(): PlayerCloudProfile {
     matchesWon: 0,
     bombsPlanted: 0,
     unlockedAchievements: [],
+    economyVersion: CURRENT_ECONOMY_VERSION,
+    mmr: 2450,
     createdAt: nowIso,
     updatedAt: nowIso,
   };
@@ -293,6 +298,13 @@ export function mergeLocalAndCloudProfiles(
     bombsPlanted,
     unlockedAchievements,
     economyVersion: CURRENT_ECONOMY_VERSION,
+    mmr: isCloudOutdated
+      ? 2450
+      : Number(cloud?.mmr) > 0 && Number(cloud?.mmr) !== 1000
+      ? Number(cloud?.mmr)
+      : Number(local.mmr) > 0 && Number(local.mmr) !== 1000
+      ? Number(local.mmr)
+      : 2450,
     createdAt: cloud?.createdAt || local.createdAt || nowIso,
     updatedAt: nowIso,
   };
