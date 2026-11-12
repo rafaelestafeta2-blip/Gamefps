@@ -1,0 +1,158 @@
+{
+  "entities": {
+    "PlayerProfile": {
+      "title": "PlayerProfile",
+      "description": "Cloud-saved player profile, progression, unlocked arsenal, combat telemetry, custom avatar, and achievements.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the player."
+        },
+        "callsign": {
+          "type": "string",
+          "description": "In-game username / operator callsign (unique across all players)."
+        },
+        "callsignLocked": {
+          "type": "boolean",
+          "description": "True once unique callsign has been claimed, preventing any future changes."
+        },
+        "email": {
+          "type": "string",
+          "description": "Google account email address."
+        },
+        "avatarDataUrl": {
+          "type": "string",
+          "description": "Custom uploaded compressed avatar DataURL or profile photo URL."
+        },
+        "playerXp": {
+          "type": "number",
+          "description": "Accumulated Warface progression XP."
+        },
+        "rankLevel": {
+          "type": "number",
+          "description": "Current military rank level (1 to 70)."
+        },
+        "rankTitle": {
+          "type": "string",
+          "description": "Current military rank title."
+        },
+        "playerCash": {
+          "type": "number",
+          "description": "Accumulated tactical cash bonus."
+        },
+        "activeWeapon": {
+          "type": "string",
+          "description": "Currently equipped primary weapon ID."
+        },
+        "unlockedWeapons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Array of unlocked WeaponId strings."
+        },
+        "totalKills": {
+          "type": "number",
+          "description": "Lifetime enemy eliminations."
+        },
+        "totalDeaths": {
+          "type": "number",
+          "description": "Lifetime deaths in combat."
+        },
+        "totalAssists": {
+          "type": "number",
+          "description": "Lifetime combat assists."
+        },
+        "totalHeadshots": {
+          "type": "number",
+          "description": "Lifetime critical headshot eliminations."
+        },
+        "matchesPlayed": {
+          "type": "number",
+          "description": "Total completed 5v5 bomb matches."
+        },
+        "matchesWon": {
+          "type": "number",
+          "description": "Total 5v5 bomb match victories."
+        },
+        "bombsPlanted": {
+          "type": "number",
+          "description": "Total C4 charges armed and planted."
+        },
+        "unlockedAchievements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Array of unlocked tactical achievement IDs."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when profile was first created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when profile was last synced."
+        }
+      },
+      "required": [
+        "uid",
+        "callsign",
+        "playerXp",
+        "rankLevel",
+        "rankTitle",
+        "playerCash",
+        "activeWeapon",
+        "unlockedWeapons",
+        "totalKills",
+        "totalDeaths",
+        "totalAssists",
+        "totalHeadshots",
+        "matchesPlayed",
+        "matchesWon",
+        "bombsPlanted",
+        "unlockedAchievements",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UsernameRegistry": {
+      "title": "UsernameRegistry",
+      "description": "Ensures unique operator callsigns globally across all players.",
+      "type": "object",
+      "properties": {
+        "callsign": {
+          "type": "string",
+          "description": "The exact uppercase callsign claimed."
+        },
+        "uid": {
+          "type": "string",
+          "description": "The UID of the player who owns this callsign."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when the callsign was claimed."
+        }
+      },
+      "required": ["callsign", "uid", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/players/{userId}": {
+      "schema": {
+        "$ref": "#/entities/PlayerProfile"
+      },
+      "description": "Stores each authenticated player's persistent profile, progression, unlocked weapons, avatar, and achievements."
+    },
+    "/usernames/{usernameLower}": {
+      "schema": {
+        "$ref": "#/entities/UsernameRegistry"
+      },
+      "description": "Global unique registry mapping lowercase callsign to owning player UID."
+    }
+  }
+}

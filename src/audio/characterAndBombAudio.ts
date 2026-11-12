@@ -41,14 +41,20 @@ let activePantingGain: GainNode | null = null;
 
 async function fetchSoundArrayBuffer(urls: SoundSourceUrls): Promise<ArrayBuffer | null> {
   try {
-    const res = await fetch(urls.local);
-    if (res.ok) return await res.arrayBuffer();
+    const res = await fetch(urls.local).catch(() => null);
+    if (res && res.ok) {
+      const buf = await res.arrayBuffer().catch(() => null);
+      if (buf) return buf;
+    }
   } catch {
-    // Fallback para URL raw do GitHub
+    // Fallback silencioso
   }
   try {
-    const resGh = await fetch(urls.github);
-    if (resGh.ok) return await resGh.arrayBuffer();
+    const resGh = await fetch(urls.github).catch(() => null);
+    if (resGh && resGh.ok) {
+      const bufGh = await resGh.arrayBuffer().catch(() => null);
+      if (bufGh) return bufGh;
+    }
   } catch {
     // Ignorar falha de rede
   }

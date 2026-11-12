@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { applyAudioSettings, initAudioSystem } from './audio/audioSettings';
+import { AuthLoginScreen } from './components/AuthLoginScreen';
 import { GameShellModals } from './components/GameShellModals';
 import { IntroScreen } from './components/IntroScreen';
 import { LoadingScreen } from './components/LoadingScreen';
@@ -11,40 +12,14 @@ import { VideoIntroScreen } from './components/VideoIntroScreen';
 import { WarfaceMatchmakingWidget } from './components/WarfaceMatchmakingWidget';
 import { WarfaceRankUpModal } from './components/WarfaceRankUpModal';
 import { YardMatchLoadingModal } from './components/YardMatchLoadingModal';
+import { subscribePlayerProfile } from './firebase/playerCloudSync';
 import { ControlSettings, loadControlSettings, saveControlSettings } from './controls/hudLayoutSettings';
 import { applyGraphicsToEngine } from './graphics/applyGraphicsToEngine';
 import { FpsLimit, GameSettings, getDefaultSettings, loadGameSettings, saveGameSettings } from './graphics/graphicsSettings';
 import { mobileHardware } from './mobile/nativeHardware';
 import { TacticalFPSEngine } from './three/fpsEngine';
 import { DrillMode, GyroMode, HudState, OpticType, WeaponId } from './types/game';
-
-const INITIAL_HUD_STATE: HudState = {
-  screen: 'INTRO', pointerLocked: false, activeWeapon: 'M4_CARBINE',
-  primaryWeapon: 'M4_CARBINE', secondaryWeapon: 'P50_PISTOL',
-  nearWallStand: false, focusedWallWeapon: null, chambered: 1,
-  currentMagRounds: 30, magCapacity: 30, magazines: [30, 30, 30, 30],
-  fragGrenades: 3, smokeGrenades: 3, equippedGrenade: null,
-  isThrowingGrenade: false, boltLockedBack: false, fireMode: 'AUTO',
-  optic: 'iron', lpvoZoom: 2.0, cantedActive: false, suppressorAttached: false,
-  muzzleDevice: 'NONE', weaponCharm: 'NONE', laserActive: false,
-  reloadPhase: 'IDLE', reloadProgress: 0, reloadTypeLabel: '',
-  magCheckVisible: false, wallTuckAmount: 0, health: 100, maxHealth: 100,
-  stamina: 100, isHoldingBreath: false, isAds: false, adsAlpha: 0,
-  stance: 'STAND', leanDirection: 0, playerPos: { x: -6.8, z: 3.2 },
-  playerYaw: 0, radarTargets: [], drillMode: 'FREE_RANGE', score: 0, hits: 0,
-  shotsFired: 0, headshots: 0, targetsRemaining: 6, totalTargetsInDrill: 6,
-  courseTimerSec: 0, bestCourseTimeSec: null, lastHitZone: null,
-  lastShotTelemetry: null, shotHistory: [], hitMarkerAlpha: 0,
-  hitMarkerIsCrit: false, damageFlashAlpha: 0, killfeed: [], playerXp: 0, rankLevel: 1,
-  rankTitle: 'Recruta I', rankBadge: '★', rankBadgeColor: '#94a3b8',
-  nextRankXp: 250, lastXpGained: 0, rankUpNotification: null, muted: false,
-  dockCollapsed: true, touchControlsVisible: true, isCrouchingToggled: false,
-  isProneToggled: false, qualityPreset: 'BALANCED_60',
-  dynamicResolutionEnabled: true, liveFps: 60, renderScalePercent: 100,
-  gyroMode: 'OFF', gyroSensitivity: 1.0, lookSensitivity: 1.0,
-  adsSensitivity: 1.0, hapticsEnabled: true, isFullscreen: false,
-  graphicQuality: 'HIGH', fpsLimit: 60,
-};
+import { INITIAL_HUD_STATE } from './types/initialHudState';
 
 export default function App() {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
@@ -68,6 +43,17 @@ export default function App() {
   useEffect(() => {
     initAudioSystem(gameSettingsRef.current);
     applyAudioSettings(gameSettingsRef.current);
+    const unsub = subscribePlayerProfile((state) => {
+      if (engineRef.current) {
+        engineRef.current.syncProgressionFromCloud(
+          state.profile.playerXp,
+          state.profile.activeWeapon
+        );
+      }
+    });
+    return () => {
+      unsub();
+    };
   }, []);
 
   const applyControlsToEngine = (
@@ -233,6 +219,15 @@ export default function App() {
           progress={preloadProgress}
           statusLabel={preloadStatus}
           onComplete={() => {
+            engineRef.current?.setScreenState('AUTH_LOGIN');
+            setHud((prev) => ({ ...prev, screen: 'AUTH_LOGIN' }));
+          }}
+        />
+      )}
+
+      {hud.screen === 'AUTH_LOGIN' && (
+        <AuthLoginScreen
+          onContinueToMenu={() => {
             engineRef.current?.setScreenState('MAIN_MENU');
             setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
           }}
@@ -354,30 +349,35 @@ export default function App() {
         </>
       )}
 
-      <GameShellModals
-        hud={hud}
-        fpsLimit={gameSettings.fpsLimit}
-        vibration={gameSettings.vibration}
-        controlSettings={controlSettings}
-        onUpdateControlSettings={handleUpdateControlSettings}
-        onStartGame={(mode?: DrillMode) => handleStartMatch(mode)}
-        onResumeGame={() => engineRef.current?.resumeGame()}
-        onRestartDrill={() => handleStartMatch(hud.drillMode)}
-        onReturnToTitle={() => {
-          setMatchmakingTargetMode(null);
-          engineRef.current?.returnToMainMenu();
-          setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
-        }}
-        onSelectDrillMode={(mode: DrillMode) => engineRef.current?.setDrillMode(mode)}
-        onSetGyroMode={(m: GyroMode) => handleUpdateControlSettings({ ...controlSettingsRef.current, gyroMode: m })}
-        onSetGyroSensitivity={(s: number) => handleUpdateControlSettings({ ...controlSettingsRef.current, gyroSensitivity: s })}
-        onSetLookSensitivity={(s: number) => handleUpdateControlSettings({ ...controlSettingsRef.current, lookSensitivity: s })}
-        onSetAdsSensitivity={(s: number) => handleUpdateControlSettings({ ...controlSettingsRef.current, adsSensitivity: s })}
-        onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
-        onToggleHaptics={() => handleUpdateSettings({ ...gameSettingsRef.current, vibration: !gameSettingsRef.current.vibration })}
-        onToggleFullscreen={() => { void engineRef.current?.toggleFullscreenLandscape(); }}
-        onSetFpsLimit={(fps: number) => handleUpdateSettings({ ...gameSettingsRef.current, fpsLimit: fps as FpsLimit, preset: 'CUSTOM' })}
-      />
+      {(hud.screen === 'PAUSED' ||
+        hud.screen === 'TITLE' ||
+        hud.screen === 'VICTORY' ||
+        hud.screen === 'GAME_OVER') && (
+        <GameShellModals
+          hud={hud}
+          fpsLimit={gameSettings.fpsLimit}
+          vibration={gameSettings.vibration}
+          controlSettings={controlSettings}
+          onUpdateControlSettings={handleUpdateControlSettings}
+          onStartGame={(mode?: DrillMode) => handleStartMatch(mode)}
+          onResumeGame={() => engineRef.current?.resumeGame()}
+          onRestartDrill={() => handleStartMatch(hud.drillMode)}
+          onReturnToTitle={() => {
+            setMatchmakingTargetMode(null);
+            engineRef.current?.returnToMainMenu();
+            setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
+          }}
+          onSelectDrillMode={(mode: DrillMode) => engineRef.current?.setDrillMode(mode)}
+          onSetGyroMode={(m: GyroMode) => handleUpdateControlSettings({ ...controlSettingsRef.current, gyroMode: m })}
+          onSetGyroSensitivity={(s: number) => handleUpdateControlSettings({ ...controlSettingsRef.current, gyroSensitivity: s })}
+          onSetLookSensitivity={(s: number) => handleUpdateControlSettings({ ...controlSettingsRef.current, lookSensitivity: s })}
+          onSetAdsSensitivity={(s: number) => handleUpdateControlSettings({ ...controlSettingsRef.current, adsSensitivity: s })}
+          onRecalibrateGyro={() => engineRef.current?.recalibrateGyro()}
+          onToggleHaptics={() => handleUpdateSettings({ ...gameSettingsRef.current, vibration: !gameSettingsRef.current.vibration })}
+          onToggleFullscreen={() => { void engineRef.current?.toggleFullscreenLandscape(); }}
+          onSetFpsLimit={(fps: number) => handleUpdateSettings({ ...gameSettingsRef.current, fpsLimit: fps as FpsLimit, preset: 'CUSTOM' })}
+        />
+      )}
     </main>
   );
 }

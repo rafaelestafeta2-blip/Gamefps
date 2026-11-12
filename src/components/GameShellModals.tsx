@@ -70,11 +70,10 @@ export const GameShellModals: React.FC<GameShellModalsProps> = ({
   };
 
   if (
-    hud.screen === 'PLAYING' ||
-    hud.screen === 'INTRO' ||
-    hud.screen === 'VIDEO_INTRO' ||
-    hud.screen === 'LOADING' ||
-    hud.screen === 'MAIN_MENU'
+    hud.screen !== 'PAUSED' &&
+    hud.screen !== 'TITLE' &&
+    hud.screen !== 'VICTORY' &&
+    hud.screen !== 'GAME_OVER'
   ) {
     return null;
   }

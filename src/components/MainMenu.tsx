@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
 import { ControlSettings } from '../controls/hudLayoutSettings';
+import {
+  CloudSyncState,
+  getCloudSyncState,
+  subscribePlayerProfile,
+  syncProgressionFromLocal,
+} from '../firebase/playerCloudSync';
 import { GameSettings } from '../graphics/graphicsSettings';
 import { mobileHardware } from '../mobile/nativeHardware';
 import {
@@ -13,8 +19,9 @@ import { DrillMode, WeaponId } from '../types/game';
 import { GraphicsSettingsPanel } from './GraphicsSettingsPanel';
 import { MainMenuPlayPanel } from './MainMenuPlayPanel';
 import { MainMenuRanksModal } from './MainMenuRanksModal';
+import { MainMenuTopNav } from './MainMenuTopNav';
 import { MenuBackground } from './MenuBackground';
-import { WarfaceRankIcon } from './WarfaceRankIcon';
+import { PlayerProfileModal } from './PlayerProfileModal';
 import { WeaponInspectionModal } from './WeaponInspectionModal';
 
 interface MainMenuProps {
@@ -63,17 +70,23 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     'PLAY' | 'WEAPON' | 'RANKS' | 'BATTLE_PASS' | 'SETTINGS'
   >('PLAY');
   const [showNewsModal, setShowNewsModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [syncState, setSyncState] = useState<CloudSyncState>(() =>
+    getCloudSyncState()
+  );
 
-  // Inicia a música tema ao entrar no Menu Principal e para ao sair para a partida
+  // Inicia a música tema ao entrar no Menu Principal e sincroniza perfil Firebase
   useEffect(() => {
     soundEngine.playMenuMusic();
+    const unsub = subscribePlayerProfile((next) => setSyncState(next));
     return () => {
+      unsub();
       soundEngine.stopMenuMusic();
     };
   }, []);
 
-  // Live Warface Progression & Tactical Cash Balance
-  const playerXp = loadSavedPlayerXp();
+  // Live Warface Progression & Tactical Cash Balance (sincronizado com Firebase)
+  const playerXp = Math.max(loadSavedPlayerXp(), syncState.profile.playerXp);
   const currentRank = getRankForXp(playerXp);
   const nextRank = getNextRank(currentRank.level);
   const xpCurrentLevelBase = currentRank.requiredXp;
@@ -85,7 +98,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       ((playerXp - xpCurrentLevelBase) / (xpForNextLevel - xpCurrentLevelBase)) * 100
     )
   );
-  const playerCashBalance = 15000 + playerXp * 2 + loadSavedPlayerCash();
+  const savedCash = Math.max(loadSavedPlayerCash(), syncState.profile.playerCash);
+  const playerCashBalance = 15000 + playerXp * 2 + savedCash;
 
   const handleHover = () => {
     soundEngine.playMenuHover();
@@ -125,107 +139,17 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       {/* 1. BACKGROUND (Soldado + Fumaça Volumétrica + Fagulhas) */}
       <MenuBackground />
 
-      {/* 2. TOP NAVIGATION BAR (Minimalista com Saldo de Dinheiro + Patente Compacta) */}
-      <header className="relative z-20 w-full h-10 sm:h-11 px-3 sm:px-5 bg-[#0a0d13]/90 border-b border-white/10 flex items-center justify-between gap-2 shrink-0 backdrop-blur-md">
-        <div className="flex items-center gap-2.5 sm:gap-4 min-w-0 overflow-x-auto no-scrollbar">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              soundEngine.playMenuSelect();
-              soundEngine.playMenuMusic();
-              setActiveTab('PLAY');
-            }}
-            className="flex items-center gap-1.5 cursor-pointer shrink-0 pr-2.5 border-r border-white/15"
-          >
-            <span className="w-2 h-4 bg-amber-500 rounded-xs shadow-[0_0_10px_rgba(245,158,11,0.95)]" />
-            <span className="text-sm sm:text-base font-display font-black tracking-[0.12em] uppercase text-white">
-              KINETIC
-            </span>
-          </button>
-
-          <nav className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-            {[
-              { id: 'PLAY', label: 'JOGAR' },
-              { id: 'WEAPON', label: 'ARSENAL 3D' },
-              { id: 'RANKS', label: 'PATENTES' },
-              { id: 'BATTLE_PASS', label: 'PASSE' },
-              { id: 'SETTINGS', label: 'OPÇÕES' },
-            ].map((tab) => {
-              const isSelected = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onMouseEnter={handleHover}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    soundEngine.playMenuSelect();
-                    soundEngine.playMenuMusic();
-                    setActiveTab(tab.id as typeof activeTab);
-                  }}
-                  className={`relative px-2 sm:px-3 py-1 font-display font-bold text-[10px] sm:text-xs tracking-wider uppercase whitespace-nowrap transition-all cursor-pointer rounded-lg ${
-                    isSelected
-                      ? 'text-amber-400 bg-amber-500/15'
-                      : 'text-slate-400 hover:text-slate-100 hover:bg-white/5'
-                  }`}
-                >
-                  <span>{tab.label}</span>
-                  {isSelected && (
-                    <div className="absolute -bottom-[1px] left-2 right-2 h-[2px] rounded-full bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,1)]" />
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Right: Minimalist Cash Balance + Compact Rank Pill */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Saldo de Dinheiro Tático */}
-          <div
-            title="Saldo de Créditos Táticos"
-            className="flex items-center gap-1.5 bg-white/[0.04] border border-emerald-500/30 rounded-full px-2.5 py-0.5"
-          >
-            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500/20 border border-emerald-400/60 flex items-center justify-center text-[9px] font-mono font-black text-emerald-400">
-              $
-            </span>
-            <span className="text-[10px] sm:text-[11px] font-mono font-bold text-emerald-300 tabular-nums whitespace-nowrap">
-              {playerCashBalance.toLocaleString('pt-BR')}
-            </span>
-          </div>
-
-          {/* Barra de Patente Minimalista */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              soundEngine.playMenuSelect();
-              setActiveTab('RANKS');
-            }}
-            title={`Patente: Nív. ${currentRank.level} · ${currentRank.title} (${Math.round(xpLevelProgress)}%)`}
-            className="flex items-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-amber-500/35 hover:border-amber-400 rounded-full pl-1.5 pr-2.5 py-0.5 cursor-pointer transition-all"
-          >
-            <WarfaceRankIcon level={currentRank.level} className="w-5 h-5 shrink-0" />
-            <div className="flex flex-col text-left">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono font-bold text-amber-300 whitespace-nowrap tabular-nums">
-                  NÍV. {currentRank.level}
-                </span>
-                <span className="text-[8px] font-mono text-slate-400 tabular-nums">
-                  {Math.round(xpLevelProgress)}%
-                </span>
-              </div>
-              <div className="w-12 sm:w-14 bg-slate-800 h-1 rounded-full overflow-hidden mt-0.5">
-                <div
-                  className="bg-gradient-to-r from-amber-500 to-yellow-300 h-full rounded-full transition-all duration-300"
-                  style={{ width: `${Math.max(6, xpLevelProgress)}%` }}
-                />
-              </div>
-            </div>
-          </button>
-        </div>
-      </header>
+      {/* 2. TOP NAVIGATION BAR (Modularizado com Saldo + Patente + Foto de Perfil Firebase) */}
+      <MainMenuTopNav
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        onHover={handleHover}
+        playerCashBalance={playerCashBalance}
+        currentRank={currentRank}
+        xpLevelProgress={xpLevelProgress}
+        syncState={syncState}
+        onOpenProfile={() => setShowProfileModal(true)}
+      />
 
       {/* 3. DYNAMIC CONTENT (Alinhado à esquerda na aba JOGAR sem cobrir o Soldado no centro) */}
       <main
@@ -255,7 +179,10 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           <WeaponInspectionModal
             activeWeapon={activeWeapon}
             playerXp={playerXp}
-            onSelectWeapon={(wId) => onSelectStartingWeapon(wId)}
+            onSelectWeapon={(wId) => {
+              onSelectStartingWeapon(wId);
+              syncProgressionFromLocal(playerXp, savedCash, wId);
+            }}
             onClose={() => setActiveTab('PLAY')}
             onStartTraining={handleLaunchTraining}
           />
@@ -351,13 +278,20 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         </div>
       )}
 
+      {showProfileModal && (
+        <PlayerProfileModal
+          syncState={syncState}
+          onClose={() => setShowProfileModal(false)}
+        />
+      )}
+
       {/* 5. FOOTER */}
       <footer className="relative z-20 w-full px-4 sm:px-6 py-1.5 flex items-center justify-between pointer-events-none text-[9px] font-mono tracking-wider text-slate-400/90 uppercase">
         <span>
           MOTOR 3D MOBILE OTIMIZADO ·{' '}
           {gameSettings?.fpsLimit ? `${gameSettings.fpsLimit} FPS` : '60 FPS'}
         </span>
-        <span>SISTEMA DE PATENTES ATIVO · V0.0.7</span>
+        <span>FIREBASE CLOUD SYNC · V0.0.8</span>
       </footer>
     </div>
   );

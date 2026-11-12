@@ -369,19 +369,11 @@ export function updateSmartBotNavigation(
             if (visibleEnemyBot.health <= 0) {
               visibleEnemyBot.isDown = true;
               visibleEnemyBot.downTimer = 9999;
-              onRegisterKill?.(
-                bot.callsign || (bot.isAlly ? 'RECON-02' : 'KRAKEN-BT'),
-                bot.isAlly ? 'VANGUARD' : 'BLACKTHORN',
-                visibleEnemyBot.callsign || (visibleEnemyBot.isAlly ? 'RECON-02' : 'KRAKEN-BT'),
-                visibleEnemyBot.isAlly ? 'VANGUARD' : 'BLACKTHORN',
-                weapon,
-                isHeadshot
-              );
+              onRegisterKill?.(bot.callsign || (bot.isAlly ? 'RECON-02' : 'KRAKEN-BT'), bot.isAlly ? 'VANGUARD' : 'BLACKTHORN', visibleEnemyBot.callsign || (visibleEnemyBot.isAlly ? 'RECON-02' : 'KRAKEN-BT'), visibleEnemyBot.isAlly ? 'VANGUARD' : 'BLACKTHORN', weapon, isHeadshot);
             }
           }
         }
       }
-
       const distToEnemy = bPos.distanceTo(visibleEnemyPos);
       if (nav.grenadesLeft > 0 && nav.grenadeCooldown <= 0 && globalBotGrenadeCooldown <= 0 && distToEnemy >= 9.0 && distToEnemy <= 24.0 && Math.random() < 0.14) {
         nav.grenadesLeft -= 1;

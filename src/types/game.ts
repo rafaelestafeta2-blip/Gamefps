@@ -2,6 +2,7 @@ export type GameScreenState =
   | 'INTRO'
   | 'VIDEO_INTRO'
   | 'LOADING'
+  | 'AUTH_LOGIN'
   | 'MAIN_MENU'
   | 'TITLE'
   | 'PLAYING'

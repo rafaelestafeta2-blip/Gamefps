@@ -107,6 +107,30 @@ export const SNIPER_BOLT_WAV_LOCAL_URL = '/sounds/sniper_bolt.wav';
 export const SNIPER_BOLT_WAV_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/daeab41ffa080f475b5f4359eebeb34f02ea5a44/Sound/Sniper/Sharp%2C_dry_mechanica_%231-1794123918265.wav';
 
+async function safeFetchAudioBuffer(localUrl: string, githubRawUrl?: string): Promise<ArrayBuffer | null> {
+  try {
+    const res = await fetch(localUrl).catch(() => null);
+    if (res && res.ok) {
+      const buf = await res.arrayBuffer().catch(() => null);
+      if (buf) return buf;
+    }
+  } catch {
+    // Ignorar falha local
+  }
+  if (githubRawUrl) {
+    try {
+      const ghRes = await fetch(githubRawUrl).catch(() => null);
+      if (ghRes && ghRes.ok) {
+        const ghBuf = await ghRes.arrayBuffer().catch(() => null);
+        if (ghBuf) return ghBuf;
+      }
+    } catch {
+      // Ignorar falha externa
+    }
+  }
+  return null;
+}
+
 class TacticalSoundEngine {
   private ctx: AudioContext | null = null;
   private noiseBuffer: AudioBuffer | null = null;
@@ -320,21 +344,12 @@ class TacticalSoundEngine {
       this.m4a1ShotAudioPool.push(audio);
     }
 
-    fetch(M4A1_SHOT_WAV_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local M4A1 shot WAV fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(M4A1_SHOT_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(M4A1_SHOT_WAV_LOCAL_URL, M4A1_SHOT_WAV_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.m4a1ShotRawData = buf;
-        if (this.ctx) {
-          this.tryDecodeM4a1Shot(this.ctx);
-        }
-      })
-      .catch(() => {});
+        if (this.ctx) this.tryDecodeM4a1Shot(this.ctx);
+      }
+    });
   }
 
   private tryDecodeM4a1Shot(ctx: AudioContext): void {
@@ -368,21 +383,12 @@ class TacticalSoundEngine {
       this.dryFireAudioPool.push(audio);
     }
 
-    fetch(DRY_FIRE_WAV_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local dry fire WAV fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(DRY_FIRE_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(DRY_FIRE_WAV_LOCAL_URL, DRY_FIRE_WAV_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.dryFireRawData = buf;
-        if (this.ctx) {
-          this.tryDecodeDryFire(this.ctx);
-        }
-      })
-      .catch(() => {});
+        if (this.ctx) this.tryDecodeDryFire(this.ctx);
+      }
+    });
   }
 
   private tryDecodeDryFire(ctx: AudioContext): void {
@@ -416,21 +422,12 @@ class TacticalSoundEngine {
       this.m4a1ReloadAudioPool.push(audio);
     }
 
-    fetch(M4A1_RELOAD_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local M4A1 reload MP3 fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(M4A1_RELOAD_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(M4A1_RELOAD_LOCAL_URL, M4A1_RELOAD_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.m4a1ReloadRawData = buf;
-        if (this.ctx) {
-          this.tryDecodeM4a1Reload(this.ctx);
-        }
-      })
-      .catch(() => {});
+        if (this.ctx) this.tryDecodeM4a1Reload(this.ctx);
+      }
+    });
   }
 
   private tryDecodeM4a1Reload(ctx: AudioContext): void {
@@ -464,21 +461,12 @@ class TacticalSoundEngine {
       this.pistolReloadAudioPool.push(audio);
     }
 
-    fetch(PISTOL_RELOAD_WAV_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local pistol reload WAV fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(PISTOL_RELOAD_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(PISTOL_RELOAD_WAV_LOCAL_URL, PISTOL_RELOAD_WAV_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.pistolReloadRawData = buf;
-        if (this.ctx) {
-          this.tryDecodePistolReload(this.ctx);
-        }
-      })
-      .catch(() => {});
+        if (this.ctx) this.tryDecodePistolReload(this.ctx);
+      }
+    });
   }
 
   private tryDecodePistolReload(ctx: AudioContext): void {
@@ -514,21 +502,12 @@ class TacticalSoundEngine {
     }
 
     // Fetch raw WAV bytes for Web Audio API AudioBuffer decoding
-    fetch(DESERT_EAGLE_WAV_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local WAV fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(DESERT_EAGLE_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(DESERT_EAGLE_WAV_LOCAL_URL, DESERT_EAGLE_WAV_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.desertEagleRawData = buf;
-        if (this.ctx) {
-          this.tryDecodeDesertEagle(this.ctx);
-        }
-      })
-      .catch(() => {});
+        if (this.ctx) this.tryDecodeDesertEagle(this.ctx);
+      }
+    });
   }
 
   private tryDecodeDesertEagle(ctx: AudioContext): void {
@@ -605,19 +584,12 @@ class TacticalSoundEngine {
       };
       this.ak47ShotAudioPool.push(audio);
     }
-    fetch(AK47_SHOT_WAV_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local AK47 shot WAV fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(AK47_SHOT_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(AK47_SHOT_WAV_LOCAL_URL, AK47_SHOT_WAV_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.ak47ShotRawData = buf;
         if (this.ctx) this.tryDecodeAk47Samples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 2. AK-47 Mag Reload WAV (Unload and reload)
     for (let i = 0; i < 3; i++) {
@@ -628,19 +600,12 @@ class TacticalSoundEngine {
       };
       this.ak47ReloadAudioPool.push(audio);
     }
-    fetch(AK47_RELOAD_WAV_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local AK47 reload WAV fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(AK47_RELOAD_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(AK47_RELOAD_WAV_LOCAL_URL, AK47_RELOAD_WAV_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.ak47ReloadRawData = buf;
         if (this.ctx) this.tryDecodeAk47Samples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 3. AK-47 Action Bolt Rack WAV (Metallic charging handle rack)
     for (let i = 0; i < 3; i++) {
@@ -651,19 +616,12 @@ class TacticalSoundEngine {
       };
       this.ak47BoltRackAudioPool.push(audio);
     }
-    fetch(AK47_BOLT_RACK_WAV_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local AK47 bolt rack WAV fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(AK47_BOLT_RACK_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(AK47_BOLT_RACK_WAV_LOCAL_URL, AK47_BOLT_RACK_WAV_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.ak47BoltRackRawData = buf;
         if (this.ctx) this.tryDecodeAk47Samples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
   }
 
   private tryDecodeAk47Samples(ctx: AudioContext): void {
@@ -725,19 +683,12 @@ class TacticalSoundEngine {
       };
       this.sniperShotAudioPool.push(audio);
     }
-    fetch(SNIPER_SHOT_WAV_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local sniper shot WAV fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(SNIPER_SHOT_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(SNIPER_SHOT_WAV_LOCAL_URL, SNIPER_SHOT_WAV_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.sniperShotRawData = buf;
         if (this.ctx) this.tryDecodeSniperSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 2. Sniper Bolt-Action Mechanical Cycle WAV (Sharp,_dry_mechanica_#1-1794123918265.wav)
     for (let i = 0; i < 3; i++) {
@@ -748,19 +699,12 @@ class TacticalSoundEngine {
       };
       this.sniperBoltAudioPool.push(audio);
     }
-    fetch(SNIPER_BOLT_WAV_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local sniper bolt WAV fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(SNIPER_BOLT_WAV_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(SNIPER_BOLT_WAV_LOCAL_URL, SNIPER_BOLT_WAV_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.sniperBoltRawData = buf;
         if (this.ctx) this.tryDecodeSniperSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
   }
 
   private tryDecodeSniperSamples(ctx: AudioContext): void {
@@ -809,19 +753,12 @@ class TacticalSoundEngine {
       };
       this.grenadePinPool.push(audio);
     }
-    fetch(GRENADE_PIN_PULL_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local grenade pin fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(GRENADE_PIN_PULL_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(GRENADE_PIN_PULL_LOCAL_URL, GRENADE_PIN_PULL_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.grenadePinRawData = buf;
         if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 2. Throw audio pool + raw buffer
     for (let i = 0; i < 3; i++) {
@@ -832,19 +769,12 @@ class TacticalSoundEngine {
       };
       this.grenadeThrowPool.push(audio);
     }
-    fetch(GRENADE_THROW_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local grenade throw fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(GRENADE_THROW_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(GRENADE_THROW_LOCAL_URL, GRENADE_THROW_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.grenadeThrowRawData = buf;
         if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 3. Explosion audio pool + raw buffer
     for (let i = 0; i < 3; i++) {
@@ -855,19 +785,12 @@ class TacticalSoundEngine {
       };
       this.grenadeExplosionPool.push(audio);
     }
-    fetch(GRENADE_EXPLOSION_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local grenade explosion fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(GRENADE_EXPLOSION_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(GRENADE_EXPLOSION_LOCAL_URL, GRENADE_EXPLOSION_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.grenadeExplosionRawData = buf;
         if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 4. Smoke gas hiss audio pool + raw buffer
     for (let i = 0; i < 3; i++) {
@@ -878,19 +801,12 @@ class TacticalSoundEngine {
       };
       this.smokeGasPool.push(audio);
     }
-    fetch(SMOKE_GRENADE_GAS_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local smoke gas fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(SMOKE_GRENADE_GAS_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(SMOKE_GRENADE_GAS_LOCAL_URL, SMOKE_GRENADE_GAS_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.smokeGasRawData = buf;
         if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 5. Smoke grenade character battle chatter voice audio pool + raw buffer
     for (let i = 0; i < 3; i++) {
@@ -901,19 +817,12 @@ class TacticalSoundEngine {
       };
       this.smokeVoicePool.push(audio);
     }
-    fetch(SMOKE_GRENADE_VOICE_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local smoke voice fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(SMOKE_GRENADE_VOICE_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(SMOKE_GRENADE_VOICE_LOCAL_URL, SMOKE_GRENADE_VOICE_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.smokeVoiceRawData = buf;
         if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 6. Frag grenade character battle chatter voice audio pool + raw buffer
     for (let i = 0; i < 3; i++) {
@@ -924,19 +833,12 @@ class TacticalSoundEngine {
       };
       this.fragVoicePool.push(audio);
     }
-    fetch(FRAG_GRENADE_VOICE_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local frag voice fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(FRAG_GRENADE_VOICE_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(FRAG_GRENADE_VOICE_LOCAL_URL, FRAG_GRENADE_VOICE_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.fragVoiceRawData = buf;
         if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 7. Headshot death sound effect audio pool + raw buffer
     for (let i = 0; i < 3; i++) {
@@ -947,19 +849,12 @@ class TacticalSoundEngine {
       };
       this.headshotDeathPool.push(audio);
     }
-    fetch(HEADSHOT_DEATH_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local headshot death fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(HEADSHOT_DEATH_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(HEADSHOT_DEATH_LOCAL_URL, HEADSHOT_DEATH_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.headshotDeathRawData = buf;
         if (this.ctx) this.tryDecodeGrenadeSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
   }
 
   private tryDecodeGrenadeSamples(ctx: AudioContext): void {
@@ -1122,11 +1017,9 @@ class TacticalSoundEngine {
         label: 'ÁUDIO DE HEADSHOT & FEEDBACK DE COMBATE',
         run: async () => {
           if (!this.headshotDeathRawData) {
-            const res = await fetch(HEADSHOT_DEATH_LOCAL_URL).catch(() =>
-              fetch(HEADSHOT_DEATH_GITHUB_RAW_URL)
-            );
-            if (res.ok) {
-              this.headshotDeathRawData = await res.arrayBuffer();
+            const buf = await safeFetchAudioBuffer(HEADSHOT_DEATH_LOCAL_URL, HEADSHOT_DEATH_GITHUB_RAW_URL);
+            if (buf) {
+              this.headshotDeathRawData = buf;
             }
           }
           if (ctx) this.tryDecodeGrenadeSamples(ctx);
@@ -1136,11 +1029,9 @@ class TacticalSoundEngine {
         label: 'ÁUDIOS DE MOVIMENTAÇÃO, PULO, SLIDE & TROCA DE ARMA',
         run: async () => {
           if (!this.weaponSwapRawData) {
-            const res = await fetch(WEAPON_SWAP_LOCAL_URL).catch(() =>
-              fetch(WEAPON_SWAP_GITHUB_RAW_URL)
-            );
-            if (res.ok) {
-              this.weaponSwapRawData = await res.arrayBuffer();
+            const buf = await safeFetchAudioBuffer(WEAPON_SWAP_LOCAL_URL, WEAPON_SWAP_GITHUB_RAW_URL);
+            if (buf) {
+              this.weaponSwapRawData = buf;
             }
           }
           if (ctx) this.tryDecodeMovementAndSwapSamples(ctx);
@@ -2432,19 +2323,12 @@ class TacticalSoundEngine {
       };
       this.weaponSwapPool.push(audio);
     }
-    fetch(WEAPON_SWAP_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local weapon swap fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(WEAPON_SWAP_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(WEAPON_SWAP_LOCAL_URL, WEAPON_SWAP_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.weaponSwapRawData = buf;
         if (this.ctx) this.tryDecodeMovementAndSwapSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 2. Player Jump WAV
     for (let i = 0; i < 3; i++) {
@@ -2455,19 +2339,12 @@ class TacticalSoundEngine {
       };
       this.playerJumpPool.push(audio);
     }
-    fetch(PLAYER_JUMP_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local player jump fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(PLAYER_JUMP_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(PLAYER_JUMP_LOCAL_URL, PLAYER_JUMP_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.playerJumpRawData = buf;
         if (this.ctx) this.tryDecodeMovementAndSwapSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 3. Player Slide WAV
     for (let i = 0; i < 3; i++) {
@@ -2478,19 +2355,12 @@ class TacticalSoundEngine {
       };
       this.playerSlidePool.push(audio);
     }
-    fetch(PLAYER_SLIDE_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local player slide fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(PLAYER_SLIDE_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(PLAYER_SLIDE_LOCAL_URL, PLAYER_SLIDE_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.playerSlideRawData = buf;
         if (this.ctx) this.tryDecodeMovementAndSwapSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
 
     // 4. Footstep Run WAV
     for (let i = 0; i < 5; i++) {
@@ -2501,19 +2371,12 @@ class TacticalSoundEngine {
       };
       this.footstepRunPool.push(audio);
     }
-    fetch(FOOTSTEP_RUN_LOCAL_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error('Local footstep fetch failed');
-        return res.arrayBuffer();
-      })
-      .catch(() =>
-        fetch(FOOTSTEP_RUN_GITHUB_RAW_URL).then((res) => res.arrayBuffer())
-      )
-      .then((buf) => {
+    void safeFetchAudioBuffer(FOOTSTEP_RUN_LOCAL_URL, FOOTSTEP_RUN_GITHUB_RAW_URL).then((buf) => {
+      if (buf) {
         this.footstepRunRawData = buf;
         if (this.ctx) this.tryDecodeMovementAndSwapSamples(this.ctx);
-      })
-      .catch(() => {});
+      }
+    });
   }
 
   private tryDecodeMovementAndSwapSamples(ctx: AudioContext): void {

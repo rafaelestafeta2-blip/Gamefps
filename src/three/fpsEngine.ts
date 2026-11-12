@@ -673,7 +673,7 @@ export class TacticalFPSEngine {
 
   public setScreenState(screen: GameScreenState): void {
     this.state.screen = screen;
-    if (screen === 'INTRO' || screen === 'LOADING') {
+    if (screen === 'INTRO' || screen === 'LOADING' || screen === 'AUTH_LOGIN') {
       this.stopLoop();
     } else {
       this.startLoop();
@@ -811,7 +811,8 @@ export class TacticalFPSEngine {
   }
 
   public addPlayerXp(amount: number): void {
-    if (amount <= 0) return;
+    // Regra estrita: O stand de tiro NÃO pode conceder XP (apenas partidas oficiais)
+    if (this.state.drillMode === 'FREE_RANGE' || amount <= 0) return;
     const oldLevel = this.state.rankLevel;
     this.state.playerXp += amount;
     this.state.lastXpGained = amount;
@@ -838,6 +839,23 @@ export class TacticalFPSEngine {
       this.state.rankUpNotification = null;
       this.emitHud();
     }
+  }
+
+  public syncProgressionFromCloud(xp: number, activeWeapon?: WeaponId): void {
+    if (xp > this.state.playerXp) {
+      this.state.playerXp = xp;
+      const rankInfo = getRankForXp(xp);
+      const nextRank = getNextRank(rankInfo.level);
+      this.state.rankLevel = rankInfo.level;
+      this.state.rankTitle = rankInfo.title;
+      this.state.rankBadge = rankInfo.badge;
+      this.state.rankBadgeColor = rankInfo.badgeColor;
+      this.state.nextRankXp = nextRank ? nextRank.requiredXp : rankInfo.requiredXp;
+    }
+    if (activeWeapon && activeWeapon !== this.state.activeWeapon) {
+      this.selectWeapon(activeWeapon);
+    }
+    this.emitHud();
   }
 
   public setOptic(optic: OpticType): void {
@@ -1225,7 +1243,6 @@ export class TacticalFPSEngine {
         soundEngine.playImpact('STEEL_GONG');
         t.hitTiltVelocity = -18.0;
         this.state.score += 100;
-        this.addPlayerXp(35);
         continue;
       }
 
@@ -1248,7 +1265,6 @@ export class TacticalFPSEngine {
         t.isTelegraphing = false;
         if (t.laserLine) t.laserLine.visible = false;
         this.state.score += 150;
-        this.addPlayerXp(120);
         this.state.lastHitZone = 'KILL';
         const bot = t as YardBotEntity;
         this.registerKill(
@@ -1261,7 +1277,6 @@ export class TacticalFPSEngine {
         );
       } else {
         this.state.score += 55;
-        this.addPlayerXp(30);
         this.state.lastHitZone = 'TORSO';
       }
     }
@@ -2739,7 +2754,6 @@ export class TacticalFPSEngine {
       this.fxPool.spawnImpactFX(hitPoint, hitNormal, true, false);
       target.hitTiltVelocity = -12.5;
       this.state.score += 75;
-      this.addPlayerXp(25);
       this.state.hitMarkerAlpha = 1.0;
       this.state.hitMarkerIsCrit = false;
       this.state.lastHitZone = 'TORSO';
@@ -2765,7 +2779,6 @@ export class TacticalFPSEngine {
         this.state.hitMarkerAlpha = 1.0;
         this.state.hitMarkerIsCrit = false;
         this.state.lastHitZone = 'ARMOR';
-        this.addPlayerXp(20);
 
         if (target.armorHealth <= 0 && target.armorMesh) {
           target.armorMesh.visible = false;
@@ -2794,12 +2807,10 @@ export class TacticalFPSEngine {
 
     if (isHead || isSniper) {
       if (isHead) this.state.headshots += 1;
-      this.addPlayerXp(isHead ? 50 : 40);
       soundEngine.playImpact(isHead ? 'HEADSHOT' : 'TORSO');
       mobileHardware.vibrateHitConfirm(true);
       this.hitstopTimer = isSniper ? 0.052 : 0.042; // Heavy tactile hitstop on lethal sniper shot
     } else {
-      this.addPlayerXp(15);
       soundEngine.playImpact('TORSO');
       mobileHardware.vibrateHitConfirm(false);
     }
@@ -2820,7 +2831,6 @@ export class TacticalFPSEngine {
         soundEngine.playHeadshotDeath();
       }
       this.state.score += isHead ? 150 : 100;
-      this.addPlayerXp(100);
       this.state.lastHitZone = 'KILL';
 
       const bot = target as YardBotEntity;

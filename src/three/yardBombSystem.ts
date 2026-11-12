@@ -9,6 +9,7 @@ import {
 } from '../audio/characterAndBombAudio';
 import { soundEngine } from '../audio/soundEngine';
 import { playSpatialBotGunshot } from '../audio/spatialCombatAudio';
+import { getPlayerCallsign, recordCombatTelemetryDelta } from '../firebase/playerCloudSync';
 import { mobileHardware } from '../mobile/nativeHardware';
 import { DrillMode, SquadOperatorStats, WeaponId, YardBombHudInfo } from '../types/game';
 import { BallisticsFXPool } from './ballisticsPool';
@@ -24,7 +25,7 @@ const _enemyPos = new THREE.Vector3();
 
 function createInitialSquadStats(): SquadOperatorStats[] {
   return [
-    { callsign: 'VOCÊ', roleTitle: 'LÍDER DE ESQUADRÃO', weaponId: 'M4_CARBINE', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: true },
+    { callsign: getPlayerCallsign(), roleTitle: 'LÍDER DE ESQUADRÃO', weaponId: 'M4_CARBINE', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: true },
     { callsign: 'RECON-02', roleTitle: 'ATIRADOR DE ELITE', weaponId: 'SNIPER_BOLT', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: false },
     { callsign: 'STRIKER-03', roleTitle: 'ASSALTO PESADO', weaponId: 'AK47_RIFLE', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: false },
     { callsign: 'LIFELINE-04', roleTitle: 'PARAMÉDICO TÁTICO', weaponId: 'M4_CARBINE', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: false },
@@ -116,25 +117,30 @@ export class YardBombSystem {
     }
 
     if (killerTeam === 'VANGUARD') {
-      const killerOp = stats.find((s) => s.callsign === killerName) || stats[0];
+      const killerOp =
+        stats.find((s) => s.callsign === killerName || (killerName === 'VOCÊ' && s.isPlayer)) || stats[0];
       if (killerOp) {
         killerOp.kills += 1;
         if (isHeadshot) killerOp.headshots += 1;
         killerOp.score += isHeadshot ? 150 : 100;
+        if (killerOp.isPlayer) {
+          recordCombatTelemetryDelta({ kills: 1, headshots: isHeadshot ? 1 : 0 });
+        }
       }
-      // Concede assistência tática a um companheiro de equipe Vanguard
       const others = stats.filter((s) => s.callsign !== killerOp?.callsign);
       if (others.length > 0 && Math.random() < 0.65) {
         const assister = others[Math.floor(Math.random() * others.length)];
         assister.assists += 1;
         assister.score += 50;
+        if (assister.isPlayer) recordCombatTelemetryDelta({ assists: 1 });
       }
     }
 
     if (victimTeam === 'VANGUARD') {
-      const victimOp = stats.find((s) => s.callsign === victimName);
+      const victimOp = stats.find((s) => s.callsign === victimName || (victimName === 'VOCÊ' && s.isPlayer));
       if (victimOp) {
         victimOp.deaths += 1;
+        if (victimOp.isPlayer) recordCombatTelemetryDelta({ deaths: 1 });
       }
     }
 
@@ -185,6 +191,7 @@ export class YardBombSystem {
       this.info.totalMatchXp += roundXp;
       this.info.totalMatchCash += roundCash;
 
+      recordCombatTelemetryDelta({ matchesPlayed: 1, matchesWon: matchWinner === 'VANGUARD' ? 1 : 0 });
       playMatchEndFanfare(matchWinner === 'VANGUARD');
       onReward(roundXp, roundCash, true);
     } else {
@@ -308,7 +315,7 @@ export class YardBombSystem {
         if (this.info.squadStats && this.info.squadStats[0]) {
           this.info.squadStats[0].score += 100;
         }
-
+        recordCombatTelemetryDelta({ bombsPlanted: 1 });
         const sitePos = this.info.plantedSite === 'A' ? siteA : siteB;
         this.c4MeshGroup.position.set(sitePos.x, isDust2 || isAssault ? sitePos.y + 0.12 : 1.02, sitePos.z);
         this.c4MeshGroup.visible = true;

@@ -27,8 +27,25 @@ export const WARFACE_RANKS: RankDefinition[] = [
   ...RANKS_PART_2,
 ];
 
-const LOCAL_STORAGE_XP_KEY = 'kinetic_fps_warface_xp_v1';
-const LOCAL_STORAGE_CASH_KEY = 'kinetic_fps_warface_cash_v1';
+const LOCAL_STORAGE_XP_KEY = 'kinetic_fps_warface_xp_v2';
+const LOCAL_STORAGE_CASH_KEY = 'kinetic_fps_warface_cash_v2';
+export const INITIAL_PLAYER_CASH = 3000;
+
+let cloudProgressionHook: ((xp: number, cash: number) => void) | null = null;
+
+export function registerCloudProgressionHook(
+  hook: (xp: number, cash: number) => void
+): void {
+  cloudProgressionHook = hook;
+}
+
+export function resetLocalProgression(): void {
+  savePlayerXpDirect(0);
+  savePlayerCashDirect(INITIAL_PLAYER_CASH);
+  if (cloudProgressionHook) {
+    cloudProgressionHook(0, INITIAL_PLAYER_CASH);
+  }
+}
 
 export function loadSavedPlayerXp(): number {
   try {
@@ -41,7 +58,7 @@ export function loadSavedPlayerXp(): number {
   }
 }
 
-export function savePlayerXp(xp: number): void {
+export function savePlayerXpDirect(xp: number): void {
   try {
     localStorage.setItem(LOCAL_STORAGE_XP_KEY, Math.max(0, xp).toString());
   } catch {
@@ -49,23 +66,41 @@ export function savePlayerXp(xp: number): void {
   }
 }
 
+export function savePlayerXp(xp: number): void {
+  const clamped = Math.max(0, xp);
+  savePlayerXpDirect(clamped);
+  if (cloudProgressionHook) {
+    cloudProgressionHook(clamped, loadSavedPlayerCash());
+  }
+}
+
 export function loadSavedPlayerCash(): number {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_CASH_KEY);
-    if (!raw) return 0;
+    if (!raw) {
+      savePlayerCashDirect(INITIAL_PLAYER_CASH);
+      return INITIAL_PLAYER_CASH;
+    }
     const parsed = parseInt(raw, 10);
-    return isNaN(parsed) ? 0 : Math.max(0, parsed);
+    return isNaN(parsed) ? INITIAL_PLAYER_CASH : Math.max(0, parsed);
   } catch {
-    return 0;
+    return INITIAL_PLAYER_CASH;
+  }
+}
+
+export function savePlayerCashDirect(cash: number): void {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_CASH_KEY, Math.max(0, cash).toString());
+  } catch {
+    // Ignore quota errors
   }
 }
 
 export function addPlayerCash(delta: number): number {
   const next = Math.max(0, loadSavedPlayerCash() + Math.round(delta));
-  try {
-    localStorage.setItem(LOCAL_STORAGE_CASH_KEY, next.toString());
-  } catch {
-    // Ignore quota errors
+  savePlayerCashDirect(next);
+  if (cloudProgressionHook) {
+    cloudProgressionHook(loadSavedPlayerXp(), next);
   }
   return next;
 }

@@ -1,0 +1,124 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: /players/{userId}
+    // Document ID: {userId} (matches request.auth.uid)
+    // Fields:
+    //   - uid: string (required, immutable)
+    //   - callsign: string (required, 1..32 chars)
+    //   - callsignLocked: bool (optional, once true callsign cannot change)
+    //   - email: string (optional, <= 160 chars)
+    //   - avatarDataUrl: string (optional, <= 60000 chars)
+    //   - playerXp: number (required, >= 0)
+    //   - rankLevel: number (required, 1..70)
+    //   - rankTitle: string (required, <= 64 chars)
+    //   - playerCash: number (required, >= 0)
+    //   - activeWeapon: string (required, <= 40 chars)
+    //   - unlockedWeapons: list of strings (required, <= 25 items)
+    //   - totalKills: number (required, >= 0)
+    //   - totalDeaths: number (required, >= 0)
+    //   - totalAssists: number (required, >= 0)
+    //   - totalHeadshots: number (required, >= 0)
+    //   - matchesPlayed: number (required, >= 0)
+    //   - matchesWon: number (required, >= 0)
+    //   - bombsPlanted: number (required, >= 0)
+    //   - unlockedAchievements: list of strings (required, <= 50 items)
+    //   - createdAt: string (required, immutable, <= 40 chars)
+    //   - updatedAt: string (required, <= 40 chars)
+    //
+    // Collection: /usernames/{usernameLower}
+    // Document ID: lowercase unique username
+    // Fields:
+    //   - callsign: string
+    //   - uid: string
+    //   - createdAt: string
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidOptionalString(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isNonNegativeNumber(val) {
+      return val is number && val >= 0 && val <= 999999999;
+    }
+
+    function isValidPlayerProfile(data) {
+      return data.keys().hasAll([
+          'uid', 'callsign', 'playerXp', 'rankLevel', 'rankTitle',
+          'playerCash', 'activeWeapon', 'unlockedWeapons',
+          'totalKills', 'totalDeaths', 'totalAssists', 'totalHeadshots',
+          'matchesPlayed', 'matchesWon', 'bombsPlanted',
+          'unlockedAchievements', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'callsign', 'callsignLocked', 'email', 'avatarDataUrl',
+          'playerXp', 'rankLevel', 'rankTitle', 'playerCash',
+          'activeWeapon', 'unlockedWeapons',
+          'totalKills', 'totalDeaths', 'totalAssists', 'totalHeadshots',
+          'matchesPlayed', 'matchesWon', 'bombsPlanted',
+          'unlockedAchievements', 'createdAt', 'updatedAt'
+        ])
+        && data.uid is string && data.uid == request.auth.uid
+        && data.callsign is string && data.callsign.size() >= 1 && data.callsign.size() <= 32
+        && (!('callsignLocked' in data) || data.callsignLocked is bool)
+        && isValidOptionalString(data, 'email', 160)
+        && isValidOptionalString(data, 'avatarDataUrl', 60000)
+        && isNonNegativeNumber(data.playerXp)
+        && data.rankLevel is number && data.rankLevel >= 1 && data.rankLevel <= 70
+        && data.rankTitle is string && data.rankTitle.size() >= 1 && data.rankTitle.size() <= 64
+        && isNonNegativeNumber(data.playerCash)
+        && data.activeWeapon is string && data.activeWeapon.size() >= 1 && data.activeWeapon.size() <= 40
+        && data.unlockedWeapons is list && data.unlockedWeapons.size() <= 25
+        && isNonNegativeNumber(data.totalKills)
+        && isNonNegativeNumber(data.totalDeaths)
+        && isNonNegativeNumber(data.totalAssists)
+        && isNonNegativeNumber(data.totalHeadshots)
+        && isNonNegativeNumber(data.matchesPlayed)
+        && isNonNegativeNumber(data.matchesWon)
+        && isNonNegativeNumber(data.bombsPlanted)
+        && data.unlockedAchievements is list && data.unlockedAchievements.size() <= 50
+        && data.createdAt is string && data.createdAt.size() <= 40
+        && data.updatedAt is string && data.updatedAt.size() <= 40;
+    }
+
+    match /players/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidPlayerProfile(request.resource.data);
+      allow update: if isOwner(userId)
+        && isValidPlayerProfile(request.resource.data)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && (!('callsignLocked' in resource.data) || !resource.data.callsignLocked || request.resource.data.callsign == resource.data.callsign);
+      allow delete: if isOwner(userId);
+    }
+
+    match /usernames/{usernameLower} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasAll(['callsign', 'uid', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['callsign', 'uid', 'createdAt'])
+        && request.resource.data.callsign is string
+        && request.resource.data.callsign.size() >= 2
+        && request.resource.data.callsign.size() <= 24
+        && request.resource.data.uid is string
+        && request.resource.data.createdAt is string;
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
