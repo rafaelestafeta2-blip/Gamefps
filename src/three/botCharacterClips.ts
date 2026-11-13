@@ -183,9 +183,9 @@ export function buildProRiflePackClips(
   const deathRight = byName.get('RIFLE_DEATH_RIGHT') || death;
   const deathCrouch = byName.get('RIFLE_DEATH_CROUCH') || deathHeadshot;
 
-  const fire = buildDerivedImpulseClip(aim, 'RIFLE_FIRE', 0.2, 0.08, false);
-  const hit = buildDerivedImpulseClip(aim, 'RIFLE_HIT', 0.28, 0.16, false);
-  const throwClip = buildDerivedImpulseClip(aim, 'RIFLE_THROW', 0.58, 0.1, true);
+  const fire = byName.get('RIFLE_FIRE') || buildDerivedImpulseClip(aim, 'RIFLE_FIRE', 0.2, 0.08, false);
+  const hit = byName.get('RIFLE_HIT') || buildDerivedImpulseClip(aim, 'RIFLE_HIT', 0.28, 0.16, false);
+  const throwClip = byName.get('RIFLE_THROW') || buildDerivedImpulseClip(aim, 'RIFLE_THROW', 0.58, 0.1, true);
 
   return {
     RIFLE_IDLE: idle,

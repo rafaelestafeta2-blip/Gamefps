@@ -29,7 +29,7 @@ function createInitialSquadStats(): SquadOperatorStats[] {
     { callsign: 'RECON-02', roleTitle: 'ATIRADOR DE ELITE', weaponId: 'SNIPER_BOLT', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: false },
     { callsign: 'STRIKER-03', roleTitle: 'ASSALTO PESADO', weaponId: 'AK47_RIFLE', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: false },
     { callsign: 'LIFELINE-04', roleTitle: 'PARAMÉDICO TÁTICO', weaponId: 'M4_CARBINE', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: false },
-    { callsign: 'WARDEN-05', roleTitle: 'BREACHER CQB', weaponId: 'AK47_RIFLE', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: false },
+    { callsign: 'WARDEN-05', roleTitle: 'ENGENHEIRO TÁTICO', weaponId: 'SMG_MP5', kills: 0, deaths: 0, assists: 0, headshots: 0, score: 0, isPlayer: false },
   ];
 }
 

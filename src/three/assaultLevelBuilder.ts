@@ -370,6 +370,6 @@ function spawnAssaultSquads(
   spawnBot({ id: 'assault_vg_1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -24.2, y: 0.0, z: 36.2, isAlly: true, patrolAxis: 'X', patrolRange: 2.2, hasArmor: true });
   spawnBot({ id: 'assault_vg_2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: -29.2, y: 0.0, z: 36.2, isAlly: true, patrolAxis: 'Z', patrolRange: 3.2, hasArmor: true });
   spawnBot({ id: 'assault_vg_3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -25.0, y: 0.0, z: 39.0, isAlly: true, patrolAxis: 'X', patrolRange: 2.8 });
-  spawnBot({ id: 'assault_vg_4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: -28.4, y: 0.0, z: 39.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.0 });
+  spawnBot({ id: 'assault_vg_4', callsign: 'WARDEN-05', weaponId: 'SMG_MP5', x: -28.4, y: 0.0, z: 39.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.0 });
 }
 

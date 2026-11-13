@@ -17,6 +17,7 @@ import { ControlSettings, loadControlSettings, saveControlSettings } from './con
 import { applyGraphicsToEngine } from './graphics/applyGraphicsToEngine';
 import { FpsLimit, GameSettings, getDefaultSettings, loadGameSettings, saveGameSettings } from './graphics/graphicsSettings';
 import { mobileHardware } from './mobile/nativeHardware';
+import { getClassCombatModifiers } from './progression/loadoutSystem';
 import { TacticalFPSEngine } from './three/fpsEngine';
 import { DrillMode, GyroMode, HudState, OpticType, WeaponId } from './types/game';
 import { INITIAL_HUD_STATE } from './types/initialHudState';
@@ -115,16 +116,16 @@ export default function App() {
   const handleStartMatch = (mode?: DrillMode) => {
     if (!engineRef.current) return;
     setMatchmakingTargetMode(null);
-    if (
-      (mode === 'YARD_BOMB_5V5' ||
-        mode === 'DUST2_BOMB_5V5' ||
-        mode === 'ASSAULT_BOMB_5V5') &&
-      hud.screen !== 'PLAYING'
-    ) {
-      setLoadingBombMode(mode);
+    const targetMode: DrillMode = mode || hud.drillMode || 'DUST2_BOMB_5V5';
+    if (targetMode === 'FREE_RANGE') {
+      launchMatchNow(targetMode);
       return;
     }
-    launchMatchNow(mode);
+    if (hud.screen === 'MAIN_MENU' || targetMode !== hud.drillMode) {
+      setLoadingBombMode(targetMode);
+      return;
+    }
+    launchMatchNow(targetMode);
   };
 
   const handleStartWarfaceMatchmaking = (targetMode: DrillMode) => {
@@ -143,6 +144,10 @@ export default function App() {
 
     const engine = new TacticalFPSEngine(container, (nextHud) => setHud(nextHud));
     engineRef.current = engine;
+    const initialLoadout = getClassCombatModifiers();
+    if (initialLoadout.primaryWeapon) {
+      engine.selectWeapon(initialLoadout.primaryWeapon);
+    }
 
     applyGraphicsToEngine(engine, gameSettingsRef.current);
     applyControlsToEngine(engine, controlSettingsRef.current);

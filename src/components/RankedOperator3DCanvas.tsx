@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
+  CharacterAvatarKind,
   cloneVanguardCharacterAvatar,
   preloadProRifleBotCharacter,
+  resolveCharacterAvatarKind,
 } from '../three/botCharacterSystem';
 import {
   alignWeaponPropToMixamoHands,
@@ -11,28 +13,44 @@ import {
   preloadRealBotWeaponGlbs,
 } from '../three/botWeaponProps';
 import { WeaponId } from '../types/game';
+import { WarfaceClassId } from './WarfaceClassIcons';
 
 interface RankedOperator3DCanvasProps {
   activeWeapon: WeaponId;
+  operatorClass?: WarfaceClassId;
   team?: 'VANGUARD' | 'BLACKTHORN';
+  externalRotateSignal?: { nonce: number; delta: number };
 }
 
 export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
   activeWeapon,
+  operatorClass,
   team = 'VANGUARD',
+  externalRotateSignal,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const weaponRef = useRef<WeaponId>(activeWeapon);
-  const swapWeaponRef = useRef<((w: WeaponId) => void) | null>(null);
+  const classRef = useRef<WarfaceClassId | undefined>(operatorClass);
+  const swapSelectionRef = useRef<
+    ((w: WeaponId, c?: WarfaceClassId) => void) | null
+  >(null);
+  const nudgeYawRef = useRef<((delta: number) => void) | null>(null);
   const isBlackthorn = team === 'BLACKTHORN';
 
   useEffect(() => {
     weaponRef.current = activeWeapon;
-    if (swapWeaponRef.current) {
-      swapWeaponRef.current(activeWeapon);
+    classRef.current = operatorClass;
+    if (swapSelectionRef.current) {
+      swapSelectionRef.current(activeWeapon, operatorClass);
     }
-  }, [activeWeapon]);
+  }, [activeWeapon, operatorClass]);
+
+  useEffect(() => {
+    if (externalRotateSignal && externalRotateSignal.nonce > 0 && nudgeYawRef.current) {
+      nudgeYawRef.current(externalRotateSignal.delta);
+    }
+  }, [externalRotateSignal]);
 
   useEffect(() => {
     const container = mountRef.current;
@@ -56,8 +74,8 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(34, width / height, 0.1, 30);
-    camera.position.set(0, 1.01, isBlackthorn ? 2.88 : 2.98);
-    camera.lookAt(0, 0.93, 0);
+    camera.position.set(0, 0.98, isBlackthorn ? 3.12 : 3.18);
+    camera.lookAt(0, 0.90, 0);
 
     const renderer = new THREE.WebGLRenderer({
       antialias: !isSoftwareGl,
@@ -81,41 +99,44 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
 
     // Iluminação de estúdio temática (BLACKTHORN Carmesim ou VANGUARD Azul)
     const hemiLight = new THREE.HemisphereLight(
-      isBlackthorn ? 0xfecdd3 : 0xbae6fd,
-      isBlackthorn ? 0x1a0508 : 0x0f172a,
-      1.3
+      isBlackthorn ? 0xffe4e6 : 0xbae6fd,
+      isBlackthorn ? 0x280609 : 0x0f172a,
+      isBlackthorn ? 1.55 : 1.3
     );
     scene.add(hemiLight);
 
-    const keyLight = new THREE.DirectionalLight(isBlackthorn ? 0xfff1f2 : 0xf0f9ff, 2.7);
-    keyLight.position.set(2.0, 3.1, 2.9);
+    const keyLight = new THREE.DirectionalLight(
+      isBlackthorn ? 0xfff5f5 : 0xf0f9ff,
+      isBlackthorn ? 3.2 : 2.7
+    );
+    keyLight.position.set(1.8, 3.1, 3.2);
     scene.add(keyLight);
 
     const primaryRimLight = new THREE.PointLight(
-      isBlackthorn ? 0xef4444 : 0x38bdf8,
-      5.4,
-      7.0
+      isBlackthorn ? 0xff1e2d : 0x38bdf8,
+      isBlackthorn ? 6.8 : 5.4,
+      7.5
     );
-    primaryRimLight.position.set(-1.35, 1.48, -1.05);
+    primaryRimLight.position.set(-1.4, 1.5, -1.0);
     scene.add(primaryRimLight);
 
     const secondaryRimLight = new THREE.PointLight(
-      isBlackthorn ? 0xf97316 : 0x6366f1,
-      4.2,
-      7.0
+      isBlackthorn ? 0xef4444 : 0x6366f1,
+      isBlackthorn ? 5.6 : 4.2,
+      7.5
     );
-    secondaryRimLight.position.set(1.35, 1.18, -1.15);
+    secondaryRimLight.position.set(1.4, 1.25, -1.1);
     scene.add(secondaryRimLight);
 
     const frontBottomFill = new THREE.PointLight(
-      isBlackthorn ? 0xdc2626 : 0x0ea5e9,
-      1.7,
-      5.0
+      isBlackthorn ? 0xef4444 : 0x0ea5e9,
+      isBlackthorn ? 2.4 : 1.7,
+      5.5
     );
-    frontBottomFill.position.set(0, 0.3, 1.8);
+    frontBottomFill.position.set(0, 0.25, 2.0);
     scene.add(frontBottomFill);
 
-    // Pedestal holográfico translúcido sob os pés do Operador 3D
+    // Pedestal / Reflexo no asfalto molhado sob as botas do Operador 3D
     const pedestalGroup = new THREE.Group();
     pedestalGroup.position.set(0, 0.01, 0);
     scene.add(pedestalGroup);
@@ -125,18 +146,18 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
     const ringMat = new THREE.MeshBasicMaterial({
       color: isBlackthorn ? 0xef4444 : 0x38bdf8,
       transparent: true,
-      opacity: 0.7,
+      opacity: isBlackthorn ? 0.18 : 0.7,
       side: THREE.DoubleSide,
     });
     const ringMesh = new THREE.Mesh(ringGeo, ringMat);
     pedestalGroup.add(ringMesh);
 
-    const innerDiscGeo = new THREE.CircleGeometry(0.45, 48);
+    const innerDiscGeo = new THREE.CircleGeometry(isBlackthorn ? 0.58 : 0.45, 48);
     innerDiscGeo.rotateX(-Math.PI / 2);
     const innerDiscMat = new THREE.MeshBasicMaterial({
-      color: isBlackthorn ? 0x991b1b : 0x0284c7,
+      color: isBlackthorn ? 0xdc2626 : 0x0284c7,
       transparent: true,
-      opacity: 0.22,
+      opacity: isBlackthorn ? 0.28 : 0.22,
     });
     const innerDisc = new THREE.Mesh(innerDiscGeo, innerDiscMat);
     innerDisc.position.y = -0.005;
@@ -149,6 +170,8 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
     operatorPivot.rotation.y = BASE_YAW;
     scene.add(operatorPivot);
 
+    let currentModelRoot: THREE.Object3D | null = null;
+    let currentAvatarKind: CharacterAvatarKind | null = null;
     let mixer: THREE.AnimationMixer | null = null;
     let rHandBone: THREE.Object3D | null = null;
     let lHandBone: THREE.Object3D | null = null;
@@ -160,23 +183,29 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
 
     preloadRealBotWeaponGlbs();
 
-    swapWeaponRef.current = (nextWeapon: WeaponId) => {
-      if (disposed || !rHandBone) return;
-      if (weaponProp) {
-        operatorPivot.remove(weaponProp);
-      }
-      weaponProp = createBotThirdPersonWeaponMesh(nextWeapon, true);
-      operatorPivot.add(weaponProp);
-      operatorPivot.updateMatrixWorld(true);
-      alignWeaponPropToMixamoHands(weaponProp, operatorPivot, rHandBone, lHandBone);
-    };
-
-    void preloadProRifleBotCharacter().then(() => {
+    const mountCharacterForSelection = (
+      targetWeapon: WeaponId,
+      targetClass?: WarfaceClassId
+    ) => {
       if (disposed) return;
-      const cloned = cloneVanguardCharacterAvatar(isSoftwareGl);
+      const cloned = cloneVanguardCharacterAvatar(
+        isSoftwareGl,
+        targetWeapon,
+        targetClass
+      );
       if (!cloned) return;
 
-      const { modelRoot, clips } = cloned;
+      if (currentModelRoot) {
+        mixer?.stopAllAction();
+        operatorPivot.remove(currentModelRoot);
+      }
+
+      const { modelRoot, clips, avatarKind } = cloned;
+      currentModelRoot = modelRoot;
+      currentAvatarKind = avatarKind;
+      rHandBone = null;
+      lHandBone = null;
+
       modelRoot.scale.setScalar(1.02);
       modelRoot.position.set(0, 0, 0);
 
@@ -187,7 +216,7 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
         if ((child as THREE.Mesh).isMesh) {
           const m = child as THREE.Mesh;
           const std = m.material as THREE.MeshStandardMaterial;
-          if (std && std.clone) {
+          if (avatarKind === 'DEFAULT' && std && std.clone) {
             const customMat = std.clone();
             customMat.color.setHex(isBlackthorn ? 0xccb8b8 : 0x9fb8d8);
             customMat.roughness = isBlackthorn ? 0.46 : 0.48;
@@ -199,7 +228,10 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
 
       operatorPivot.add(modelRoot);
 
-      weaponProp = createBotThirdPersonWeaponMesh(weaponRef.current, true);
+      if (weaponProp) {
+        operatorPivot.remove(weaponProp);
+      }
+      weaponProp = createBotThirdPersonWeaponMesh(targetWeapon, true);
       operatorPivot.add(weaponProp);
 
       mixer = new THREE.AnimationMixer(modelRoot);
@@ -214,7 +246,40 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       operatorPivot.updateMatrixWorld(true);
       alignWeaponPropToMixamoHands(weaponProp, operatorPivot, rHandBone, lHandBone);
       setIsLoaded(true);
+    };
+
+    swapSelectionRef.current = (
+      nextWeapon: WeaponId,
+      nextClass?: WarfaceClassId
+    ) => {
+      if (disposed) return;
+      const wantKind = resolveCharacterAvatarKind(nextWeapon, nextClass, true);
+      if (currentModelRoot === null || currentAvatarKind !== wantKind) {
+        mountCharacterForSelection(nextWeapon, nextClass);
+        return;
+      }
+      if (!rHandBone) return;
+      if (weaponProp) {
+        operatorPivot.remove(weaponProp);
+      }
+      weaponProp = createBotThirdPersonWeaponMesh(nextWeapon, true);
+      operatorPivot.add(weaponProp);
+      operatorPivot.updateMatrixWorld(true);
+      alignWeaponPropToMixamoHands(weaponProp, operatorPivot, rHandBone, lHandBone);
+    };
+
+    void Promise.all([
+      preloadProRifleBotCharacter(),
+      preloadRealBotWeaponGlbs(),
+    ]).then(() => {
+      if (disposed) return;
+      mountCharacterForSelection(weaponRef.current, classRef.current);
     });
+
+    let manualYawOffset = 0;
+    nudgeYawRef.current = (delta: number) => {
+      manualYawOffset += delta;
+    };
 
     const onPointerDown = (e: PointerEvent) => {
       isDragging = true;
@@ -224,7 +289,8 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       if (!isDragging) return;
       const dx = e.clientX - prevPointerX;
       prevPointerX = e.clientX;
-      targetYaw += dx * 0.012;
+      manualYawOffset += dx * 0.012;
+      targetYaw = BASE_YAW + manualYawOffset;
     };
     const onPointerUp = () => {
       isDragging = false;
@@ -257,9 +323,9 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       const elapsed = clock.getElapsedTime();
 
       if (!isDragging) {
-        targetYaw = BASE_YAW + Math.sin(elapsed * 0.65) * 0.1;
+        targetYaw = BASE_YAW + manualYawOffset + Math.sin(elapsed * 0.65) * 0.08;
       }
-      currentYaw = THREE.MathUtils.damp(currentYaw, targetYaw, 6, dt);
+      currentYaw = THREE.MathUtils.damp(currentYaw, targetYaw, 7, dt);
       operatorPivot.rotation.y = currentYaw;
 
       if (mixer) {
@@ -276,7 +342,9 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       }
 
       ringMesh.rotation.z = elapsed * 0.4;
-      ringMat.opacity = 0.5 + 0.2 * Math.sin(elapsed * 2.2);
+      ringMat.opacity = isBlackthorn
+        ? 0.14 + 0.06 * Math.sin(elapsed * 2.2)
+        : 0.5 + 0.2 * Math.sin(elapsed * 2.2);
 
       renderer.render(scene, camera);
     };
@@ -285,7 +353,8 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
 
     return () => {
       disposed = true;
-      swapWeaponRef.current = null;
+      swapSelectionRef.current = null;
+      nudgeYawRef.current = null;
       cancelAnimationFrame(frameId);
       domElem.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);

@@ -78,9 +78,9 @@ export function createFactionBannerTexture(team: FactionBannerTeam = 'BLACKTHORN
   ctx.lineWidth = 4;
   ctx.strokeRect(54, 48, w - 138, h - 96);
 
-  // 4. EMBLEMA OFICIAL DO TIME NO JOGO
+  // 4. EMBLEMA OFICIAL DO TIME NO JOGO (posicionado na metade direita para aparecer ao lado do Soldado 3D)
   ctx.save();
-  ctx.translate(w * 0.49, h * 0.5);
+  ctx.translate(isVanguard ? w * 0.54 : w * 0.64, h * 0.51);
   const s = 5.4;
   ctx.scale(s, s);
 
@@ -255,97 +255,9 @@ export function createFactionBannerAlphaMap(): HTMLCanvasElement {
   return canvas;
 }
 
-function drawHelicopter(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, tilt: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(tilt);
-  ctx.scale(scale, scale);
-  ctx.fillStyle = 'rgba(12, 16, 24, 0.88)';
-  ctx.beginPath();
-  ctx.ellipse(0, 0, 26, 9, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(-18, -2); ctx.lineTo(-62, -10); ctx.lineTo(-66, -22);
-  ctx.lineTo(-58, -22); ctx.lineTo(-54, -4); ctx.lineTo(-18, 4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(20, 26, 36, 0.6)';
-  ctx.lineWidth = 2.2;
-  ctx.beginPath();
-  ctx.moveTo(-58, -12); ctx.lineTo(58, -10);
-  ctx.stroke();
-  ctx.restore();
-}
+export {
+  createWarzoneBackdropCanvas,
+  drawAnimatedWarzoneSkyLayer,
+} from './WarzoneSkyRenderer';
 
-export function createWarzoneBackdropCanvas(
-  rawWidth: number,
-  rawHeight: number,
-  team: FactionBannerTeam = 'BLACKTHORN'
-): HTMLCanvasElement {
-  const width = Math.max(1, Math.floor(rawWidth || 0));
-  const height = Math.max(1, Math.floor(rawHeight || 0));
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return canvas;
 
-  const isVanguard = team === 'VANGUARD';
-
-  const skyGrad = ctx.createLinearGradient(0, 0, 0, height);
-  skyGrad.addColorStop(0.0, '#04060b');
-  skyGrad.addColorStop(0.45, isVanguard ? '#08101e' : '#0b0d14');
-  skyGrad.addColorStop(0.78, isVanguard ? '#091a34' : '#1b090c');
-  skyGrad.addColorStop(1.0, isVanguard ? '#030812' : '#060304');
-  ctx.fillStyle = skyGrad;
-  ctx.fillRect(0, 0, width, height);
-
-  const glowX = isVanguard ? width * 0.5 : width * 0.62;
-  const glowY = isVanguard ? height * 0.52 : height * 0.58;
-  const backlight = ctx.createRadialGradient(glowX, glowY, 25, glowX, glowY, Math.max(width, height) * 0.58);
-  if (isVanguard) {
-    backlight.addColorStop(0.0, 'rgba(14, 165, 233, 0.45)');
-    backlight.addColorStop(0.42, 'rgba(29, 78, 216, 0.24)');
-    backlight.addColorStop(0.75, 'rgba(15, 23, 42, 0.12)');
-    backlight.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
-  } else {
-    backlight.addColorStop(0.0, 'rgba(230, 26, 36, 0.55)');
-    backlight.addColorStop(0.42, 'rgba(155, 16, 24, 0.28)');
-    backlight.addColorStop(0.75, 'rgba(65, 8, 12, 0.1)');
-    backlight.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
-  }
-  ctx.fillStyle = backlight;
-  ctx.fillRect(0, 0, width, height);
-
-  // Silhuetas de arranha-céus destruídos no horizonte
-  ctx.fillStyle = '#060910';
-  const buildings = [
-    [0.02, 0.36, 0.09, 0.52], [0.12, 0.44, 0.08, 0.44],
-    [0.22, 0.39, 0.11, 0.49], [0.34, 0.42, 0.09, 0.46],
-    [0.61, 0.46, 0.08, 0.42], [0.73, 0.49, 0.09, 0.39],
-    [0.84, 0.40, 0.09, 0.48], [0.93, 0.33, 0.08, 0.55],
-  ];
-  for (const [bx, by, bw, bh] of buildings) {
-    ctx.fillRect(width * bx, height * by, width * bw, height * bh);
-    ctx.fillStyle = isVanguard ? 'rgba(56, 189, 248, 0.16)' : 'rgba(239, 68, 68, 0.18)';
-    ctx.fillRect(width * (bx + 0.015), height * (by + 0.06), width * 0.012, height * 0.018);
-    ctx.fillStyle = '#060910';
-  }
-
-  const heliScale = Math.max(0.65, Math.min(1.25, width / 1280));
-  if (isVanguard) {
-    drawHelicopter(ctx, width * 0.34, height * 0.56, heliScale * 0.85, 0.07);
-    drawHelicopter(ctx, width * 0.67, height * 0.46, -heliScale * 0.88, -0.06);
-  } else {
-    drawHelicopter(ctx, width * 0.445, height * 0.195, heliScale, 0.08);
-  }
-
-  const groundGrad = ctx.createLinearGradient(0, height * 0.76, 0, height);
-  groundGrad.addColorStop(0.0, 'rgba(0, 0, 0, 0)');
-  groundGrad.addColorStop(0.55, isVanguard ? 'rgba(14, 165, 233, 0.28)' : 'rgba(200, 26, 30, 0.34)');
-  groundGrad.addColorStop(1.0, isVanguard ? 'rgba(3, 8, 18, 0.98)' : 'rgba(10, 4, 5, 0.98)');
-  ctx.fillStyle = groundGrad;
-  ctx.fillRect(0, height * 0.76, width, height * 0.24);
-
-  return canvas;
-}

@@ -13,9 +13,13 @@ export type GameScreenState =
 export type WeaponId =
   | 'P50_PISTOL'
   | 'SMG_45'
+  | 'SMG_MP5'
+  | 'SHOTGUN_12'
+  | 'SHOTGUN_SPAS'
   | 'M4_CARBINE'
   | 'CARBINE_AR'
   | 'AK47_RIFLE'
+  | 'AK12_RIFLE'
   | 'L49_LMG'
   | 'SNIPER_BOLT'
   | 'SNIPER_TACTICAL'

@@ -1,5 +1,6 @@
 import React from 'react';
 import { getRequiredXpForWeapon } from '../progression/ranks';
+import { useWeaponThumbnail3D } from '../three/weaponThumbnail3D';
 import { WeaponId } from '../types/game';
 
 interface WeaponVisualCardProps {
@@ -34,13 +35,37 @@ export const WEAPON_REAL_META: Record<
     name: 'VECTOR .45 SUB',
     caliber: '.45 ACP',
     category: 'Submetralhadora',
-    unlockLevel: 3,
+    unlockLevel: 1,
+  },
+  SMG_MP5: {
+    name: 'MP5A3 TÁTICA',
+    caliber: '9x19mm Parabellum',
+    category: 'Submetralhadora',
+    unlockLevel: 4,
+  },
+  SHOTGUN_12: {
+    name: 'M870 BREACHER 12GA',
+    caliber: 'Calibre 12 Buckshot',
+    category: 'Escopeta Pump 12GA',
+    unlockLevel: 1,
+  },
+  SHOTGUN_SPAS: {
+    name: 'SPAS-12 TÁTICA',
+    caliber: 'Calibre 12 Magnum',
+    category: 'Escopeta Semiautomática',
+    unlockLevel: 6,
   },
   AK47_RIFLE: {
     name: 'AK-47 COMANDO',
     caliber: '7.62x39mm',
     category: 'Fuzil de Assalto',
     unlockLevel: 6,
+  },
+  AK12_RIFLE: {
+    name: 'AK-12 SPETSNAZ',
+    caliber: '5.45x39mm',
+    category: 'Fuzil de Assalto',
+    unlockLevel: 1,
   },
   CARBINE_AR: {
     name: 'HK416 CQB',
@@ -105,7 +130,7 @@ export const WeaponIllustration2D: React.FC<{
     );
   }
 
-  if (weaponId === 'AK47_RIFLE') {
+  if (weaponId === 'AK47_RIFLE' || weaponId === 'AK12_RIFLE') {
     return (
       <svg viewBox="0 0 120 40" fill="none" className={className}>
         <path d="M8 18 L26 16 L28 26 L8 28 Z" fill={locked ? '#334155' : '#78350f'} stroke={color} strokeWidth="1.2" />
@@ -134,6 +159,116 @@ export const WeaponIllustration2D: React.FC<{
     );
   }
 
+  if (weaponId === 'SHOTGUN_12' || weaponId === 'SHOTGUN_SPAS') {
+    const isSpas = weaponId === 'SHOTGUN_SPAS';
+    return (
+      <svg viewBox="0 0 130 40" fill="none" className={className}>
+        {/* Coronha & Punho */}
+        <path
+          d="M8 21 L26 17 L30 24 L24 34 L17 34 L21 25 L8 29 Z"
+          fill={locked ? '#1e293b' : '#262b34'}
+          stroke={color}
+          strokeWidth="1.2"
+        />
+        {/* Receptor + 4 cartuchos vermelhos 12GA na lateral */}
+        <rect
+          x="26"
+          y="15"
+          width="32"
+          height="10"
+          rx="1"
+          fill={locked ? '#1e293b' : '#334155'}
+          stroke={color}
+          strokeWidth="1.2"
+        />
+        {[34, 39, 44, 49].map((sx) => (
+          <g key={sx}>
+            <rect
+              x={sx}
+              y="17"
+              width="3.2"
+              height="6"
+              rx="0.5"
+              fill={locked ? '#334155' : '#dc2626'}
+            />
+            <rect
+              x={sx}
+              y="21.5"
+              width="3.2"
+              height="1.8"
+              fill={locked ? '#475569' : '#f59e0b'}
+            />
+          </g>
+        ))}
+        {/* Cano longo 12GA + heatshield se SPAS-12 */}
+        <rect
+          x="58"
+          y="15.5"
+          width="62"
+          height="4.2"
+          fill={locked ? '#334155' : '#64748b'}
+          stroke={color}
+          strokeWidth="1"
+        />
+        {isSpas && (
+          <rect
+            x="58"
+            y="14.5"
+            width="48"
+            height="5.5"
+            fill={locked ? '#1e293b' : '#475569'}
+            stroke={color}
+            strokeWidth="0.9"
+          />
+        )}
+        {/* Tubo carregador inferior + Guarda-mão Pump */}
+        <rect
+          x="58"
+          y="20.5"
+          width="52"
+          height="3.5"
+          fill={locked ? '#1e293b' : '#475569'}
+          stroke={color}
+          strokeWidth="0.9"
+        />
+        <rect
+          x="64"
+          y="20"
+          width="26"
+          height="6"
+          rx="1.2"
+          fill={locked ? '#0f172a' : '#1e293b'}
+          stroke={color}
+          strokeWidth="1.1"
+        />
+        {/* Alça Ghost Ring + Massa fibra ótica laranja */}
+        <rect x="28" y="12.5" width="5" height="2.5" fill={color} />
+        <rect x="115" y="13" width="3" height="2.5" fill={locked ? '#475569' : '#f97316'} />
+      </svg>
+    );
+  }
+
+  if (weaponId === 'SMG_MP5') {
+    return (
+      <svg viewBox="0 0 120 40" fill="none" className={className}>
+        {/* Coronha retrátil A3 */}
+        <rect x="10" y="17" width="18" height="3.5" fill={color} />
+        <rect x="8" y="14" width="5" height="14" rx="1" fill={locked ? '#1e293b' : '#262b34'} stroke={color} strokeWidth="1.1" />
+        {/* Receptor MP5 */}
+        <rect x="28" y="14" width="38" height="10" rx="1.5" fill={locked ? '#1e293b' : '#334155'} stroke={color} strokeWidth="1.2" />
+        {/* Handguard tropical + cano */}
+        <rect x="66" y="16" width="24" height="8" rx="1.5" fill={locked ? '#1e293b' : '#1e293b'} stroke={color} strokeWidth="1.1" />
+        <rect x="90" y="16.5" width="16" height="4" fill={locked ? '#334155' : '#64748b'} stroke={color} strokeWidth="1" />
+        {/* Punho + Carregador curvo 9mm característico */}
+        <path d="M35 24 L39 36 L32 36 L29 24 Z" fill={locked ? '#0f172a' : '#1e293b'} stroke={color} strokeWidth="1" />
+        <path d="M51 24 C53 31, 56 35, 61 38 L55 39 C51 35, 48 30, 46 24 Z" fill={locked ? '#0f172a' : '#475569'} stroke={color} strokeWidth="1" />
+        {/* Mira tambor H&K */}
+        <circle cx="33" cy="12" r="2.2" fill={color} />
+        <circle cx="88" cy="14" r="2.2" stroke={color} strokeWidth="1.2" />
+      </svg>
+    );
+  }
+
   if (weaponId === 'L49_LMG') {
     return (
       <svg viewBox="0 0 125 40" fill="none" className={className}>
@@ -158,6 +293,37 @@ export const WeaponIllustration2D: React.FC<{
       <path d="M36 26 L40 37 L34 37 L32 26 Z" fill={locked ? '#0f172a' : '#1e293b'} stroke={color} strokeWidth="1" />
       <rect x="44" y="11" width="16" height="4.5" rx="1" fill={locked ? '#1e293b' : '#0284c7'} stroke={color} strokeWidth="0.8" />
     </svg>
+  );
+};
+
+export const WeaponPreview3D: React.FC<{
+  weaponId: WeaponId;
+  className?: string;
+  locked?: boolean;
+  alt?: string;
+}> = ({ weaponId, className = 'w-full h-12', locked = false, alt }) => {
+  const thumbUrl = useWeaponThumbnail3D(weaponId);
+
+  if (!thumbUrl) {
+    return (
+      <WeaponIllustration2D
+        weaponId={weaponId}
+        className={className}
+        locked={locked}
+      />
+    );
+  }
+
+  return (
+    <img
+      src={thumbUrl}
+      alt={alt || weaponId}
+      referrerPolicy="no-referrer"
+      draggable={false}
+      className={`object-contain select-none transition-opacity duration-150 ${
+        locked ? 'grayscale opacity-50' : 'drop-shadow-[0_3px_8px_rgba(0,0,0,0.7)]'
+      } ${className}`}
+    />
   );
 };
 
@@ -215,9 +381,14 @@ export const WeaponVisualCard: React.FC<WeaponVisualCardProps> = ({
         )}
       </div>
 
-      {/* Ilustração 2D Fiel das Armas Reais dos Arquivos GLB */}
-      <div className="relative py-2 flex items-center justify-center min-h-[52px]">
-        <WeaponIllustration2D weaponId={weaponId} locked={!unlocked} />
+      {/* Renderização 3D Real da Arma (.GLB / PBR Sculpted) */}
+      <div className="relative py-2 flex items-center justify-center min-h-[56px]">
+        <WeaponPreview3D
+          weaponId={weaponId}
+          locked={!unlocked}
+          alt={meta.name}
+          className="w-full h-14"
+        />
         {!unlocked && (
           <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px] rounded-lg flex flex-col items-center justify-center gap-1 border border-dashed border-white/15">
             <span className="text-xl">🔒</span>

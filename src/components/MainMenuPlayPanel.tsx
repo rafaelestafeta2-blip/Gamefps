@@ -7,13 +7,16 @@ import {
   MainMenuRightWidgets,
   PLAY_MODE_OPTIONS,
 } from './MainMenuRightWidgets';
+import { WarfaceClassId } from './WarfaceClassIcons';
 
 interface MainMenuPlayPanelProps {
   activeWeapon: WeaponId;
+  selectedClass: WarfaceClassId;
   weaponName: string;
   weaponCategory: string;
   weaponCaliber: string;
   playerMmr?: number;
+  onOpenInventory: () => void;
   onOpenWeaponSelect: () => void;
   onStartTraining: () => void;
   onStartDrill: (mode: DrillMode) => void;
@@ -27,8 +30,10 @@ interface MainMenuPlayPanelProps {
 }
 
 export const MainMenuPlayPanel: React.FC<MainMenuPlayPanelProps> = ({
+  selectedClass,
   weaponName,
   playerMmr = 2450,
+  onOpenInventory,
   onOpenWeaponSelect,
   onStartTraining,
   onStartDrill,
@@ -55,6 +60,9 @@ export const MainMenuPlayPanel: React.FC<MainMenuPlayPanelProps> = ({
         break;
       case 'RANKED':
         onOpenRankedScreen('DUST2_BOMB_5V5');
+        break;
+      case 'INVENTARIO':
+        onOpenInventory();
         break;
       case 'ARSENAL':
         onOpenWeaponSelect();
@@ -121,7 +129,8 @@ export const MainMenuPlayPanel: React.FC<MainMenuPlayPanelProps> = ({
         onLaunchSelectedMode={handleLaunchSelectedMode}
         onOpenRankedScreen={() => onOpenRankedScreen('DUST2_BOMB_5V5')}
         onOpenRanksModal={onOpenRanksTab}
-        onOpenWeaponSelect={onOpenWeaponSelect}
+        onOpenInventory={onOpenInventory}
+        selectedClass={selectedClass}
         weaponName={weaponName}
         onHover={onHover}
       />

@@ -41,6 +41,7 @@ import {
   loadSavedPlayerXp,
   savePlayerXp,
 } from '../progression/ranks';
+import { getClassCombatModifiers } from '../progression/loadoutSystem';
 import { BallisticsFXPool } from './ballisticsPool';
 import { TacticalGrenadeSystem } from './grenadeSystem';
 import {
@@ -64,12 +65,14 @@ import {
   ASSAULT_ATTACKER_SPAWN,
   ASSAULT_SPAWN_YAW,
   buildAssaultLevel,
+  loadAssaultMapGeometry,
 } from './assaultLevelBuilder';
 import {
   buildDust2Level,
   Dust2LevelBundle,
   DUST2_T_SPAWN,
   DUST2_T_SPAWN_YAW,
+  loadDust2MapGeometry,
 } from './dust2LevelBuilder';
 import {
   cleanupMatchArenaAssets,
@@ -616,6 +619,7 @@ export class TacticalFPSEngine {
     this.wallStandPositions = this.standerTiroLevelData.wallStandPositions;
     this.cachedRadarTargets = [];
 
+    this.unsubOnlineHits?.();
     this.unsubOnlineHits = subscribeOnlineHitEvents((hit) => {
       if (!isOnlineMatchActive()) return;
       const localOp = getLocalOnlinePlayerState();
@@ -1092,6 +1096,30 @@ export class TacticalFPSEngine {
         this.setOptic('iron');
         this.state.reloadTypeLabel = 'EQUIPADO: SMG .45 TÁTICA (.45 ACP)';
         break;
+      case 'SMG_MP5':
+        this.state.magCapacity = 30;
+        this.state.currentMagRounds = 30;
+        this.state.magazines = [30, 30, 30, 30];
+        this.state.fireMode = 'AUTO';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: MP5A3 TÁTICA (9x19MM)';
+        break;
+      case 'SHOTGUN_12':
+        this.state.magCapacity = 6;
+        this.state.currentMagRounds = 6;
+        this.state.magazines = [6, 6, 6, 6];
+        this.state.fireMode = 'SEMI';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: M870 BREACHER (CALIBRE 12GA)';
+        break;
+      case 'SHOTGUN_SPAS':
+        this.state.magCapacity = 8;
+        this.state.currentMagRounds = 8;
+        this.state.magazines = [8, 8, 8, 8];
+        this.state.fireMode = 'SEMI';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: SPAS-12 TÁTICA (CALIBRE 12GA)';
+        break;
       case 'M4_CARBINE':
         this.state.magCapacity = 30;
         this.state.currentMagRounds = 30;
@@ -1115,6 +1143,14 @@ export class TacticalFPSEngine {
         this.state.fireMode = 'AUTO';
         this.setOptic('iron');
         this.state.reloadTypeLabel = 'EQUIPADO: AK-47 COMANDO (7.62MM)';
+        break;
+      case 'AK12_RIFLE':
+        this.state.magCapacity = 30;
+        this.state.currentMagRounds = 30;
+        this.state.magazines = [30, 30, 30, 30];
+        this.state.fireMode = 'AUTO';
+        this.setOptic('iron');
+        this.state.reloadTypeLabel = 'EQUIPADO: AK-12 SPETSNAZ (5.45MM)';
         break;
       case 'L49_LMG':
         this.state.magCapacity = 100;
@@ -1152,6 +1188,19 @@ export class TacticalFPSEngine {
 
     this.magCheckTimer = 1.8;
     soundEngine.playWeaponSwap();
+    if (
+      (weaponId === 'AK47_RIFLE' || weaponId === 'AK12_RIFLE') &&
+      this.state.screen === 'PLAYING'
+    ) {
+      setTimeout(() => {
+        if (
+          this.state.screen === 'PLAYING' &&
+          this.state.activeWeapon === weaponId
+        ) {
+          soundEngine.playAk47BoltRack();
+        }
+      }, 280);
+    }
     this.emitHud();
   }
 
@@ -1172,9 +1221,13 @@ export class TacticalFPSEngine {
     const names: Record<WeaponId, string> = {
       P50_PISTOL: 'INSPECIONANDO MARK 23 PISTOL (.45 ACP)',
       SMG_45: 'INSPECIONANDO SMG .45 TÁTICA (.45 ACP)',
+      SMG_MP5: 'INSPECIONANDO MP5A3 TÁTICA (9x19MM)',
+      SHOTGUN_12: 'INSPECIONANDO M870 BREACHER (CALIBRE 12GA)',
+      SHOTGUN_SPAS: 'INSPECIONANDO SPAS-12 TÁTICA (CALIBRE 12GA)',
       M4_CARBINE: 'INSPECIONANDO M4A1 SOPMOD (5.56MM)',
       CARBINE_AR: 'INSPECIONANDO CARABINA TÁTICA (5.56MM)',
       AK47_RIFLE: 'INSPECIONANDO AK-47 COMANDO (7.62MM)',
+      AK12_RIFLE: 'INSPECIONANDO AK-12 SPETSNAZ (5.45MM)',
       L49_LMG: 'INSPECIONANDO LMG PESADA (5.56MM)',
       SNIPER_BOLT: 'INSPECIONANDO SNIPER BOLT-ACTION (.338 LAPUA)',
       SNIPER_TACTICAL: 'INSPECIONANDO SNIPER TÁTICA (.308 WIN)',
@@ -1182,7 +1235,14 @@ export class TacticalFPSEngine {
     };
     this.state.reloadTypeLabel = names[this.state.activeWeapon];
     this.magCheckTimer = 2.4;
-    soundEngine.playMechanicalSwitch(0.95);
+    if (
+      this.state.activeWeapon === 'AK47_RIFLE' ||
+      this.state.activeWeapon === 'AK12_RIFLE'
+    ) {
+      soundEngine.playAk47BoltRack();
+    } else {
+      soundEngine.playMechanicalSwitch(0.95);
+    }
     this.emitHud();
   }
 
@@ -1732,8 +1792,10 @@ export class TacticalFPSEngine {
   }
 
   public resetScenario(mode: DrillMode, keepMatchScore = false): void {
+    const loadoutMod = getClassCombatModifiers();
     this.state.drillMode = mode;
-    this.state.health = 100;
+    this.state.maxHealth = loadoutMod.totalMaxHealth;
+    this.state.health = loadoutMod.totalMaxHealth;
     this.state.stamina = 100;
     this.isPlayerDying = false;
     this.deathAnimElapsed = 0;
@@ -1759,10 +1821,12 @@ export class TacticalFPSEngine {
       this.state.killfeed = [];
     }
     this.state.damageFlashAlpha = 0;
-    const startingWeapon = this.state.activeWeapon || this.primaryWeapon || 'M4_CARBINE';
+    const startingWeapon = !keepMatchScore
+      ? loadoutMod.primaryWeapon
+      : this.primaryWeapon || loadoutMod.primaryWeapon || 'M4_CARBINE';
     this.selectWeapon(startingWeapon);
-    this.state.fragGrenades = 3;
-    this.state.smokeGrenades = 3;
+    this.state.fragGrenades = loadoutMod.fragCount;
+    this.state.smokeGrenades = loadoutMod.smokeCount;
     this.state.equippedGrenade = null;
     this.state.isThrowingGrenade = false;
     this.grenadeSystem?.clearAll();
@@ -1813,6 +1877,23 @@ export class TacticalFPSEngine {
 
     // Position player according to drill sector
     if (isDust2) {
+      if (!this.dust2LevelData.isLoaded) {
+        void loadDust2MapGeometry(
+          this.dust2LevelData,
+          this.isSoftwareGl,
+          new THREE.LoadingManager()
+        ).then(() => {
+          if (this.state.drillMode === 'DUST2_BOMB_5V5') {
+            this.playerPos.y = this.dust2LevelData.collider.getGroundHeight(
+              this.playerPos.x,
+              this.playerPos.y,
+              this.playerPos.z
+            );
+            this.playerVel.y = 0;
+            this.isGrounded = true;
+          }
+        });
+      }
       const startY = this.dust2LevelData.collider.ready
         ? this.dust2LevelData.collider.getGroundHeight(
             DUST2_T_SPAWN.x,
@@ -1826,6 +1907,23 @@ export class TacticalFPSEngine {
       this.yardBombSystem.resetRound('DUST2_BOMB_5V5', keepMatchScore);
       this.state.yardBomb = { ...this.yardBombSystem.info };
     } else if (isAssault) {
+      if (!this.assaultLevelData.isLoaded) {
+        void loadAssaultMapGeometry(
+          this.assaultLevelData,
+          this.isSoftwareGl,
+          new THREE.LoadingManager()
+        ).then(() => {
+          if (this.state.drillMode === 'ASSAULT_BOMB_5V5') {
+            this.playerPos.y = this.assaultLevelData.collider.getGroundHeight(
+              this.playerPos.x,
+              this.playerPos.y,
+              this.playerPos.z
+            );
+            this.playerVel.y = 0;
+            this.isGrounded = true;
+          }
+        });
+      }
       const startY = this.assaultLevelData.collider.ready
         ? this.assaultLevelData.collider.getGroundHeight(
             ASSAULT_ATTACKER_SPAWN.x,
@@ -2365,9 +2463,18 @@ export class TacticalFPSEngine {
     ) {
       this.reloadDuration = 2.75;
       soundEngine.playM4a1FullReload();
-    } else if (this.state.activeWeapon === 'AK47_RIFLE') {
+    } else if (
+      this.state.activeWeapon === 'AK47_RIFLE' ||
+      this.state.activeWeapon === 'AK12_RIFLE'
+    ) {
       this.reloadDuration = dryReload ? 2.5 : 2.0;
       soundEngine.playAk47FullReload(dryReload);
+    } else if (
+      this.state.activeWeapon === 'SHOTGUN_12' ||
+      this.state.activeWeapon === 'SHOTGUN_SPAS'
+    ) {
+      this.reloadDuration = dryReload ? 2.15 : 1.75;
+      soundEngine.playMechanicalSwitch(0.75);
     } else if (
       this.state.activeWeapon === 'SNIPER_BOLT' ||
       this.state.activeWeapon === 'SNIPER_TACTICAL'
@@ -2382,6 +2489,8 @@ export class TacticalFPSEngine {
     this.state.reloadPhase = 'MAG_OUT';
     this.state.reloadProgress = 0;
     this.stageSoundFlags = { magOut: false, magIn: false, boltSlap: false };
+    const reloadMult = Math.max(1, getClassCombatModifiers().reloadSpeedMult);
+    this.reloadDuration = Math.max(0.45, this.reloadDuration / reloadMult);
     this.weaponRig.triggerReloadAnimation(this.reloadDuration);
     this.emitHud();
   }
@@ -2415,7 +2524,10 @@ export class TacticalFPSEngine {
     this.state.reloadTypeLabel = this.state.boltLockedBack
       ? 'LIBERANDO FERROLHO [G]'
       : 'MANOBRANDO ALAVANCA DE MANEJO [G]';
-    if (this.state.activeWeapon === 'AK47_RIFLE') {
+    if (
+      this.state.activeWeapon === 'AK47_RIFLE' ||
+      this.state.activeWeapon === 'AK12_RIFLE'
+    ) {
       soundEngine.playAk47BoltRack();
     } else if (
       this.state.activeWeapon === 'SNIPER_BOLT' ||
@@ -2614,6 +2726,10 @@ export class TacticalFPSEngine {
       this.state.activeWeapon === 'SNIPER_TACTICAL';
     const wasScopedAtShot = this.state.isAds;
 
+    const isShotgun =
+      this.state.activeWeapon === 'SHOTGUN_12' ||
+      this.state.activeWeapon === 'SHOTGUN_SPAS';
+
     if (isSniper) {
       const boltDur =
         this.state.activeWeapon === 'SNIPER_BOLT' ? 1.32 : 1.08;
@@ -2631,13 +2747,20 @@ export class TacticalFPSEngine {
         this.sniperReturnToScopeAfterBolt = false;
         this.state.boltLockedBack = true;
       }
+    } else if (isShotgun) {
+      this.fireCooldown =
+        this.state.activeWeapon === 'SHOTGUN_12' ? 0.68 : 0.32;
     } else {
       this.fireCooldown =
         this.state.activeWeapon === 'SMG_45'
           ? 0.066
-          : this.state.activeWeapon === 'AK47_RIFLE'
-            ? 0.095
-            : 0.078;
+          : this.state.activeWeapon === 'SMG_MP5'
+            ? 0.072
+            : this.state.activeWeapon === 'AK47_RIFLE'
+              ? 0.095
+              : this.state.activeWeapon === 'AK12_RIFLE'
+                ? 0.086
+                : 0.078;
     }
     this.state.shotsFired += 1;
 
@@ -2714,28 +2837,38 @@ export class TacticalFPSEngine {
       _rayDir.normalize();
     }
 
+    this.weaponRig.muzzleWorldPos.getWorldPosition(_worldPos2);
+
+    const pelletCount = isShotgun ? 8 : 1;
+    const baseDir = _rayDir.clone();
+    const pelletSpread =
+      this.state.activeWeapon === 'SHOTGUN_12'
+        ? wasScopedAtShot
+          ? 0.036
+          : 0.052
+        : this.state.activeWeapon === 'SHOTGUN_SPAS'
+          ? wasScopedAtShot
+            ? 0.04
+            : 0.058
+          : 0;
+
     // For bolt-action Snipers: immediately exit the scope zoom AFTER the shot raycast so the player sees the 3D bolt-action animation!
     if (isSniper && wasScopedAtShot) {
       this.state.isAds = false;
       this.touchHoldBreath = false;
     }
 
-    this.raycaster.set(_rayOrigin, _rayDir);
-    this.raycaster.far = 140;
-
-    const hits = this.raycaster.intersectObjects(this.shootableMeshes, false);
-    this.weaponRig.muzzleWorldPos.getWorldPosition(_worldPos2);
-
     // Physical Recoil Impulse applied AFTER raycast (so shot lands where player aimed)
     const stanceMult = this.state.stance === 'CROUCH' ? 0.72 : 1.0;
     const suppMult = this.state.suppressorAttached ? 0.82 : 1.0;
     const adsMult = wasScopedAtShot ? 0.55 : 1.0;
-    const totalMult = stanceMult * suppMult * adsMult;
+    const shotgunKickMult = isShotgun ? 2.15 : 1.0;
+    const totalMult = stanceMult * suppMult * adsMult * shotgunKickMult;
 
-    this.recoilKickZ = Math.min(this.recoilKickZ + 0.032 * totalMult, 0.075);
+    this.recoilKickZ = Math.min(this.recoilKickZ + 0.032 * totalMult, 0.088);
     this.recoilPitch += (0.012 + Math.random() * 0.004) * totalMult;
     this.recoilYaw += (Math.random() - 0.5) * 0.004 * totalMult;
-    this.cameraShake = Math.min(this.cameraShake + 0.004 * totalMult, 0.012);
+    this.cameraShake = Math.min(this.cameraShake + 0.004 * totalMult, 0.016);
 
     this.pitch = THREE.MathUtils.clamp(
       this.pitch + 0.006 * totalMult,
@@ -2743,60 +2876,79 @@ export class TacticalFPSEngine {
       Math.PI * 0.46
     );
 
-    if (hits.length > 0) {
-      const hit = hits[0];
-      const hitMesh = hit.object as THREE.Mesh;
-      const dist = hit.distance;
-
-      // Spawn supersonic tracer streak from muzzle to impact point
-      this.fxPool.spawnTracer(_worldPos2, hit.point);
-
-      if (hit.face) {
-        _hitNormal
-          .copy(hit.face.normal)
-          .transformDirection(hitMesh.matrixWorld)
-          .normalize();
-      } else {
-        _hitNormal.set(0, 1, 0);
-      }
-
-      const wallWeaponId = hitMesh.userData.wallWeaponId as
-        | WeaponId
-        | undefined;
-      if (wallWeaponId) {
-        // Shooting a weapon slot on the 3D Wall Weapon Stand selects & equips that weapon!
-        this.selectWeapon(wallWeaponId);
-        return;
-      }
-
-      const targetId = hitMesh.userData.targetId as string | undefined;
-      const hitZone = hitMesh.userData.hitZone as
-        | 'HEAD'
-        | 'TORSO_A'
-        | 'ARMOR'
-        | 'STEEL_GONG'
-        | undefined;
-
-      if (targetId && hitZone) {
-        this.handleTargetHit(targetId, hitZone, dist, hit.point, _hitNormal);
-      } else {
-        // Environment impact with 3D material acoustic differentiation (METAL / WOOD / CONCRETE)
-        const surfMat = detectSurfaceMaterialFromMesh(hitMesh, hit.point);
-        this.fxPool.spawnImpactFX(
-          hit.point,
-          _hitNormal,
-          surfMat === 'METAL',
-          false
-        );
-        playMaterialImpact3D(hit.point, _rayOrigin, this.yaw, surfMat);
-        if (surfMat === 'CONCRETE') {
-          soundEngine.playImpact('CONCRETE');
+    let wallSelected = false;
+    for (let p = 0; p < pelletCount; p++) {
+      const pDir = _rayDir.copy(baseDir);
+      if (isShotgun) {
+        if (p > 0) {
+          const ang = ((p - 1) / (pelletCount - 1)) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
+          const rad = (0.35 + Math.random() * 0.65) * pelletSpread;
+          pDir.x += Math.cos(ang) * rad;
+          pDir.y += Math.sin(ang) * rad;
+          pDir.z += (Math.random() - 0.5) * rad * 0.35;
+          pDir.normalize();
         }
       }
-    } else {
-      // Tracer into the distance
-      _worldPos.copy(_rayOrigin).addScaledVector(_rayDir, 80);
-      this.fxPool.spawnTracer(_worldPos2, _worldPos);
+      this.raycaster.set(_rayOrigin, pDir);
+      this.raycaster.far = isShotgun ? 34 : 140;
+
+      const hits = this.raycaster.intersectObjects(this.shootableMeshes, false);
+      if (hits.length > 0) {
+        const hit = hits[0];
+        const hitMesh = hit.object as THREE.Mesh;
+        const dist = hit.distance;
+
+        if (p < 3) {
+          this.fxPool.spawnTracer(_worldPos2, hit.point);
+        }
+
+        if (hit.face) {
+          _hitNormal
+            .copy(hit.face.normal)
+            .transformDirection(hitMesh.matrixWorld)
+            .normalize();
+        } else {
+          _hitNormal.set(0, 1, 0);
+        }
+
+        const wallWeaponId = hitMesh.userData.wallWeaponId as
+          | WeaponId
+          | undefined;
+        if (wallWeaponId && !wallSelected) {
+          wallSelected = true;
+          this.selectWeapon(wallWeaponId);
+          return;
+        }
+
+        const targetId = hitMesh.userData.targetId as string | undefined;
+        const hitZone = hitMesh.userData.hitZone as
+          | 'HEAD'
+          | 'TORSO_A'
+          | 'ARMOR'
+          | 'STEEL_GONG'
+          | undefined;
+
+        if (targetId && hitZone) {
+          this.handleTargetHit(targetId, hitZone, dist, hit.point, _hitNormal, isShotgun);
+        } else {
+          const surfMat = detectSurfaceMaterialFromMesh(hitMesh, hit.point);
+          this.fxPool.spawnImpactFX(
+            hit.point,
+            _hitNormal,
+            surfMat === 'METAL',
+            false
+          );
+          if (p === 0) {
+            playMaterialImpact3D(hit.point, _rayOrigin, this.yaw, surfMat);
+            if (surfMat === 'CONCRETE') {
+              soundEngine.playImpact('CONCRETE');
+            }
+          }
+        }
+      } else if (p < 2) {
+        _worldPos.copy(_rayOrigin).addScaledVector(pDir, isShotgun ? 28 : 80);
+        this.fxPool.spawnTracer(_worldPos2, _worldPos);
+      }
     }
 
     if (this.burstRemaining > 0) {
@@ -2811,7 +2963,8 @@ export class TacticalFPSEngine {
     hitZone: 'HEAD' | 'TORSO_A' | 'ARMOR' | 'STEEL_GONG',
     distanceMeters: number,
     hitPoint: THREE.Vector3,
-    hitNormal: THREE.Vector3
+    hitNormal: THREE.Vector3,
+    isShotgunPellet = false
   ): void {
     const target = this.targetMap.get(targetId);
     if (!target || target.isDown || (target as YardBotEntity).isAlly) return;
@@ -2845,7 +2998,7 @@ export class TacticalFPSEngine {
         if (target.armorMesh) target.armorMesh.visible = false;
         soundEngine.playImpact('ARMOR_BREAK');
       } else {
-        target.armorHealth -= 34;
+        target.armorHealth -= isShotgunPellet ? 16 : 34;
         target.hitTiltVelocity = -5.5;
         triggerBotHitAnimation(target);
         this.fxPool.spawnImpactFX(hitPoint, hitNormal, true, false);
@@ -2860,14 +3013,25 @@ export class TacticalFPSEngine {
         } else {
           soundEngine.playImpact('TORSO');
         }
-        this.recordShotTelemetry(distanceMeters, 'ARMOR', 25, velocityMs);
+        this.recordShotTelemetry(distanceMeters, 'ARMOR', isShotgunPellet ? 14 : 25, velocityMs);
         return;
       }
     }
 
     const isHead = hitZone === 'HEAD';
-    // Sniper kills in 1 single shot regardless of body part (250 damage vs 100 HP)
-    const damage = isSniper ? 250 : (isHead ? 110 : 42);
+    let damage = isSniper ? 250 : isHead ? 110 : 42;
+    if (isShotgunPellet) {
+      // Short-range 12ga buckshot: devastating <= 11m, steep falloff beyond 18m
+      const closeFactor =
+        distanceMeters <= 10
+          ? 1.0
+          : distanceMeters >= 24
+            ? 0.2
+            : 1.0 - ((distanceMeters - 10) / 14) * 0.8;
+      const perPelletBase =
+        this.state.activeWeapon === 'SHOTGUN_12' ? 28 : 24;
+      damage = Math.max(4, Math.round(perPelletBase * closeFactor * (isHead ? 1.5 : 1.0)));
+    }
     target.health -= damage;
     if (isOnlineMatchActive() && target.root.userData?.remotePlayerUid) {
       publishCombatHit(
@@ -3944,7 +4108,7 @@ export class TacticalFPSEngine {
     this.state.adsAlpha = THREE.MathUtils.damp(
       this.state.adsAlpha,
       canAds ? 1 : 0,
-      18,
+      14,
       dt
     );
 
@@ -3958,15 +4122,18 @@ export class TacticalFPSEngine {
         targetFov = 14;
       } else if (this.state.activeWeapon === 'SNIPER_TACTICAL') {
         targetFov = 18;
+      } else if (this.state.activeWeapon === 'AK12_RIFLE') {
+        // Moderate 2.1x optical zoom on AK-12's native scope keeping ~48% bezel and upper receiver crisp
+        targetFov = 34;
       } else if (this.state.optic === 'lpvo') {
-        targetFov = 64 / Math.pow(this.state.lpvoZoom, 0.72);
+        targetFov = THREE.MathUtils.clamp(54 - (this.state.lpvoZoom - 1) * 4.5, 36, 54);
       } else {
         targetFov = 58;
       }
     }
 
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
-      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 16, dt);
+      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 14, dt);
       this.camera.updateProjectionMatrix();
     }
 
@@ -4185,7 +4352,9 @@ export class TacticalFPSEngine {
       12,
       dt
     );
-    const isAk47 = this.state.activeWeapon === 'AK47_RIFLE';
+    const isAk47 =
+      this.state.activeWeapon === 'AK47_RIFLE' ||
+      this.state.activeWeapon === 'AK12_RIFLE';
     const sprintRotX = (isAk47 ? -0.14 : -0.26) * this.sprintPoseAlpha;
     const sprintRotY = (isAk47 ? 0.08 : 0.48) * this.sprintPoseAlpha;
     const sprintRotZ = (isAk47 ? -0.08 : -0.24) * this.sprintPoseAlpha;
@@ -4241,11 +4410,10 @@ export class TacticalFPSEngine {
       targetRotZ + boltTiltRotZ - magCheckAlpha * 0.42
     );
 
-    // Hide 3D weapon viewmodel when looking through high-magnification sniper scope OR when holding a grenade in hand
+    // Hide 3D weapon viewmodel ONLY when looking through full-screen sniper scopes or holding a grenade
     const isSniperScoped =
       (this.state.activeWeapon === 'SNIPER_BOLT' ||
-        this.state.activeWeapon === 'SNIPER_TACTICAL' ||
-        this.state.optic === 'lpvo') &&
+        this.state.activeWeapon === 'SNIPER_TACTICAL') &&
       !this.state.cantedActive &&
       this.state.adsAlpha > 0.82;
     this.weaponRig.root.visible =
@@ -4311,9 +4479,9 @@ export class TacticalFPSEngine {
     }
     this.state.nearWallStand = nearStand;
 
-    // LPVO Throw Lever Angle & Reticle Scale
+    // LPVO Throw Lever Angle & Reticle Scale (~2 o'clock right side, matching Firefield reference)
     this.weaponRig.lpvoThrowLever.rotation.z =
-      0.8 - ((this.state.lpvoZoom - 1) / 3) * 1.2;
+      -1.05 - ((this.state.lpvoZoom - 1) / 3) * 0.45;
 
     // Optical Parallax Projection on Holographic & Red Dot Reticles
     const parallaxX = THREE.MathUtils.clamp(-this.swayPos.x * 0.18, -0.006, 0.006);

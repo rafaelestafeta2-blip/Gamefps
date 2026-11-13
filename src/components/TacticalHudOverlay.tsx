@@ -60,8 +60,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
     !isSpectating &&
     !isMatchOver &&
     (hud.activeWeapon === 'SNIPER_BOLT' ||
-      hud.activeWeapon === 'SNIPER_TACTICAL' ||
-      hud.optic === 'lpvo') &&
+      hud.activeWeapon === 'SNIPER_TACTICAL') &&
     !hud.cantedActive &&
     hud.adsAlpha > 0.35;
 

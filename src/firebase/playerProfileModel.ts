@@ -49,9 +49,13 @@ const LOCAL_PROFILE_STORAGE_KEY = 'kinetic_fps_cloud_profile_v1';
 const ALL_WEAPONS: WeaponId[] = [
   'P50_PISTOL',
   'SMG_45',
+  'SMG_MP5',
+  'SHOTGUN_12',
+  'SHOTGUN_SPAS',
   'M4_CARBINE',
   'CARBINE_AR',
   'AK47_RIFLE',
+  'AK12_RIFLE',
   'L49_LMG',
   'SNIPER_BOLT',
   'SNIPER_TACTICAL',
@@ -65,6 +69,10 @@ export function computeUnlockedWeaponsForXp(
   const rank = getRankForXp(xp);
   const set = new Set<WeaponId>([
     'M4_CARBINE',
+    'AK12_RIFLE',
+    'SHOTGUN_12',
+    'SMG_45',
+    'SNIPER_TACTICAL',
     'P50_PISTOL',
     'KNIFE_TACTICAL',
     ...rank.unlockedWeapons,

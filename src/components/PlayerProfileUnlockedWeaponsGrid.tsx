@@ -2,7 +2,7 @@ import React from 'react';
 import { PlayerCloudProfile } from '../firebase/playerProfileModel';
 import { getRequiredXpForWeapon } from '../progression/ranks';
 import { WeaponId } from '../types/game';
-import { WeaponIllustration2D } from './WeaponVisualCard';
+import { WeaponPreview3D } from './WeaponVisualCard';
 
 interface PlayerProfileUnlockedWeaponsGridProps {
   profile: PlayerCloudProfile;
@@ -18,10 +18,16 @@ interface WeaponProfileDisplayItem {
 
 const WEAPON_ITEMS: WeaponProfileDisplayItem[] = [
   { id: 'M4_CARBINE', name: 'M4A1 SOPMOD', stars: 5, masteryCur: 8, masteryMax: 10 },
+  { id: 'AK12_RIFLE', name: 'AK-12 SPETSNAZ', stars: 5, masteryCur: 10, masteryMax: 10 },
   { id: 'AK47_RIFLE', name: 'AK-47 KALASHNIKOV', stars: 5, masteryCur: 10, masteryMax: 10 },
-  { id: 'CARBINE_AR', name: 'CARBINA TÁTICA', stars: 4, masteryCur: 7, masteryMax: 10 },
+  { id: 'CARBINE_AR', name: 'CARABINA TÁTICA', stars: 4, masteryCur: 7, masteryMax: 10 },
+  { id: 'SHOTGUN_12', name: 'M870 BREACHER 12GA', stars: 5, masteryCur: 7, masteryMax: 10 },
+  { id: 'SHOTGUN_SPAS', name: 'SPAS-12 TÁTICA', stars: 5, masteryCur: 6, masteryMax: 10 },
   { id: 'SMG_45', name: 'SMG .45 TACTICAL', stars: 4, masteryCur: 6, masteryMax: 10 },
+  { id: 'SMG_MP5', name: 'MP5A3 TÁTICA', stars: 4, masteryCur: 7, masteryMax: 10 },
+  { id: 'SNIPER_TACTICAL', name: 'SNIPER S&B .308', stars: 5, masteryCur: 8, masteryMax: 10 },
   { id: 'SNIPER_BOLT', name: 'HEAVY BOLT .338', stars: 5, masteryCur: 9, masteryMax: 10 },
+  { id: 'L49_LMG', name: 'LMG 100R SAW', stars: 4, masteryCur: 5, masteryMax: 10 },
   { id: 'P50_PISTOL', name: 'MARK 23 .45 ACP', stars: 5, masteryCur: 10, masteryMax: 10 },
 ];
 
@@ -34,8 +40,8 @@ export const PlayerProfileUnlockedWeaponsGrid: React.FC<PlayerProfileUnlockedWea
         <h4 className="font-display font-black text-xs sm:text-sm tracking-wider uppercase text-white">
           ARMAS DESBLOQUEADAS
         </h4>
-        <span className="font-mono text-[9px] text-amber-400 font-bold">
-          {profile.unlockedWeapons.length} / 9 NO ARSENAL
+        <span className="font-mono text-[9px] text-amber-400 font-bold tabular-nums">
+          {profile.unlockedWeapons.length} / {WEAPON_ITEMS.length} NO ARSENAL
         </span>
       </div>
 
@@ -68,9 +74,9 @@ export const PlayerProfileUnlockedWeaponsGrid: React.FC<PlayerProfileUnlockedWea
                 )}
               </div>
 
-              {/* Ilustração Visual da Arma */}
+              {/* Renderização 3D Real da Arma */}
               <div className="w-full h-9 flex items-center justify-center my-0.5">
-                <WeaponIllustration2D weaponId={item.id} locked={!isUnlocked} className="w-full h-8 max-w-[100px]" />
+                <WeaponPreview3D weaponId={item.id} locked={!isUnlocked} alt={item.name} className="w-full h-8 max-w-[100px]" />
               </div>
 
               {/* Nome e Maestria */}

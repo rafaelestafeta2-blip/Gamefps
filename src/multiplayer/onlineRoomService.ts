@@ -38,11 +38,30 @@ function generateRoomCode(): string {
   return code;
 }
 
+let sessionFallbackUid = '';
+function getEffectiveLocalUid(): string {
+  if (auth.currentUser?.uid) return auth.currentUser.uid;
+  const syncUid = getCloudSyncState().profile.uid;
+  if (syncUid && syncUid !== 'guest') return syncUid;
+  if (!sessionFallbackUid) {
+    try {
+      sessionFallbackUid = localStorage.getItem('tactical_op_uid') || '';
+      if (!sessionFallbackUid) {
+        sessionFallbackUid = `op_${Math.random().toString(36).slice(2, 10)}`;
+        localStorage.setItem('tactical_op_uid', sessionFallbackUid);
+      }
+    } catch {
+      sessionFallbackUid = `op_${Math.random().toString(36).slice(2, 10)}`;
+    }
+  }
+  return sessionFallbackUid;
+}
+
 function createInitialLocalPlayerState(arenaMode: DrillMode, team: OnlineTeam, slotIndex = 0): OnlinePlayerState {
   const sync = getCloudSyncState();
-  const uid = auth.currentUser?.uid || sync.profile.uid || 'local-op';
+  const uid = getEffectiveLocalUid();
   const spawn = getTeamSpawnForArena(arenaMode, team, slotIndex);
-  const mmr = Number(sync.profile.mmr) > 0 ? Number(sync.profile.mmr) : 1000;
+  const mmr = Number(sync.profile.mmr) > 0 ? Number(sync.profile.mmr) : 2450;
   return {
     uid, callsign: sync.profile.callsign || 'OPERADOR', team,
     rankLevel: sync.profile.rankLevel || 1, mmr,
@@ -80,27 +99,43 @@ function connectWebSocketForRoom(room: OnlineRoomState, player: OnlinePlayerStat
       if (!room.isPrivate) {
         ws.send(JSON.stringify({
           type: 'JOIN_QUEUE', uid: player.uid, idToken, queueType,
-          arenaMode: room.arenaMode, mmr: player.mmr || 1000, player,
+          arenaMode: room.arenaMode, mmr: player.mmr || 2450, player,
         }));
       }
       ws.send(JSON.stringify({
         type: 'JOIN_ROOM', roomId: room.roomId, uid: player.uid, idToken,
         queueType, arenaMode: room.arenaMode, isPrivate: room.isPrivate,
-        mmr: player.mmr || 1000, player,
+        mmr: player.mmr || 2450, player,
       }));
     };
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(String(ev.data)) as {
-          type?: string; player?: OnlinePlayerState; hit?: OnlineHitEvent; serverConfirmed?: boolean;
+          type?: string;
+          roomId?: string;
+          arenaMode?: DrillMode;
+          status?: 'WAITING' | 'PLAYING' | 'FINISHED';
+          player?: OnlinePlayerState;
+          players?: Record<string, OnlinePlayerState>;
+          hit?: OnlineHitEvent;
+          serverConfirmed?: boolean;
         };
         if (!activeRoom) return;
         if (msg.type === 'PLAYER_STATE' && msg.player?.uid) {
           activeRoom.players[msg.player.uid] = msg.player;
           emitRoomState();
+        } else if (msg.type === 'ROOM_SYNC_META' && msg.players) {
+          activeRoom.players = { ...activeRoom.players, ...msg.players };
+          if (msg.status) activeRoom.status = msg.status;
+          emitRoomState();
         } else if (msg.type === 'COMBAT_HIT' && msg.hit) {
           dispatchHitOnce(msg.hit);
         } else if (msg.type === 'SERVER_MATCH_READY' && msg.serverConfirmed) {
+          if (msg.roomId) activeRoom.roomId = msg.roomId;
+          if (msg.arenaMode) activeRoom.arenaMode = msg.arenaMode;
+          if (msg.players) activeRoom.players = msg.players;
+          activeRoom.status = 'PLAYING';
+          emitRoomState();
           void startMatchInActiveRoom(true);
         }
       } catch {}
@@ -113,6 +148,7 @@ function attachRoomSnapshotListener(roomId: string): void {
     roomUnsub();
     roomUnsub = null;
   }
+  if (!auth.currentUser) return;
   const roomRef = doc(db, 'rooms', roomId);
   roomUnsub = onSnapshot(
     roomRef,
@@ -143,32 +179,32 @@ export async function createMultiplayerRoom(
   isPrivate: boolean,
   queueType: MatchQueueType = 'CASUAL'
 ): Promise<OnlineRoomState | null> {
-  const user = auth.currentUser;
-  if (!user) return null;
   await leaveActiveRoom();
-
+  const uid = getEffectiveLocalUid();
   const roomId = generateRoomCode();
   const localPlayer = createInitialLocalPlayerState(arenaMode, 'VANGUARD', 0);
   const newRoom: OnlineRoomState = {
-    roomId, hostUid: user.uid, arenaMode, isPrivate, queueType,
-    averageMmr: localPlayer.mmr || 1000, status: 'WAITING',
+    roomId, hostUid: uid, arenaMode, isPrivate, queueType,
+    averageMmr: localPlayer.mmr || 2450, status: 'WAITING',
     currentRound: 1, vanguardScore: 0, blackthornScore: 0,
     bombStatus: 'CARRIED', plantedSite: 'NONE',
-    players: { [user.uid]: localPlayer },
+    players: { [uid]: localPlayer },
     updatedAtMs: Date.now(), createdAt: new Date().toISOString(),
   };
 
-  try {
-    await setDoc(doc(db, 'rooms', roomId), newRoom);
-    activeRoom = newRoom;
-    attachRoomSnapshotListener(roomId);
-    connectWebSocketForRoom(newRoom, localPlayer);
-    emitRoomState();
-    return newRoom;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, `rooms/${roomId}`);
-    return null;
+  activeRoom = newRoom;
+  connectWebSocketForRoom(newRoom, localPlayer);
+  emitRoomState();
+
+  if (auth.currentUser) {
+    try {
+      await setDoc(doc(db, 'rooms', roomId), newRoom);
+      attachRoomSnapshotListener(roomId);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `rooms/${roomId}`);
+    }
   }
+  return newRoom;
 }
 
 export async function joinRoomByCode(rawCode: string): Promise<{ ok: boolean; error?: string; room?: OnlineRoomState }> {
@@ -214,46 +250,49 @@ export async function quickMatchOrCreateRoom(
   queueType: MatchQueueType = 'CASUAL'
 ): Promise<OnlineRoomState | null> {
   const user = auth.currentUser;
-  if (!user) return null;
-  const localMmr = Number(getCloudSyncState().profile.mmr) || 1000;
+  const localMmr = Number(getCloudSyncState().profile.mmr) || 2450;
 
-  try {
-    const q = query(collection(db, 'rooms'), where('isPrivate', '==', false), limit(15));
-    const snap = await getDocs(q);
-    const nowMs = Date.now();
-    for (const docSnap of snap.docs) {
-      const r = docSnap.data() as OnlineRoomState;
-      const roomQueue: MatchQueueType = r.queueType === 'RANKED' ? 'RANKED' : 'CASUAL';
-      const count = Object.keys(r.players || {}).length;
-      const isFresh = nowMs - (r.updatedAtMs || 0) < 1000 * 60 * 15;
-      const roomAvgMmr = Number(r.averageMmr) || 1000;
-      const mmrOk = queueType === 'CASUAL' || Math.abs(localMmr - roomAvgMmr) <= 250;
+  if (user) {
+    try {
+      const q = query(collection(db, 'rooms'), where('isPrivate', '==', false), limit(15));
+      const snap = await getDocs(q);
+      const nowMs = Date.now();
+      for (const docSnap of snap.docs) {
+        const r = docSnap.data() as OnlineRoomState;
+        const roomQueue: MatchQueueType = r.queueType === 'RANKED' ? 'RANKED' : 'CASUAL';
+        const count = Object.keys(r.players || {}).length;
+        const isFresh = nowMs - (r.updatedAtMs || 0) < 1000 * 60 * 15;
+        const roomAvgMmr = Number(r.averageMmr) || 2450;
+        const mmrOk = queueType === 'CASUAL' || Math.abs(localMmr - roomAvgMmr) <= 300;
 
-      if (r.arenaMode === arenaMode && roomQueue === queueType && r.status !== 'FINISHED' && count > 0 && count < 10 && isFresh && mmrOk) {
-        const joined = await joinRoomByCode(r.roomId);
-        if (joined.ok && joined.room) return joined.room;
+        if (r.arenaMode === arenaMode && roomQueue === queueType && r.status !== 'FINISHED' && count > 0 && count < 10 && isFresh && mmrOk) {
+          const joined = await joinRoomByCode(r.roomId);
+          if (joined.ok && joined.room) return joined.room;
+        }
       }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, 'rooms');
     }
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'rooms');
   }
   return createMultiplayerRoom(arenaMode, false, queueType);
 }
 
 export async function switchLocalPlayerTeam(): Promise<void> {
-  const user = auth.currentUser;
-  if (!user || !activeRoom) return;
-  const me = activeRoom.players[user.uid];
+  if (!activeRoom) return;
+  const uid = getEffectiveLocalUid();
+  const me = activeRoom.players[uid];
   if (!me) return;
   const nextTeam: OnlineTeam = me.team === 'VANGUARD' ? 'BLACKTHORN' : 'VANGUARD';
   const spawn = getTeamSpawnForArena(activeRoom.arenaMode, nextTeam, 0);
   const updated: OnlinePlayerState = { ...me, team: nextTeam, x: spawn.x, y: spawn.y, z: spawn.z, yaw: spawn.yaw, updatedAtMs: Date.now() };
-  activeRoom.players[user.uid] = updated;
+  activeRoom.players[uid] = updated;
   emitRoomState();
-  try {
-    await updateDoc(doc(db, 'rooms', activeRoom.roomId), { [`players.${user.uid}`]: updated, updatedAtMs: Date.now() });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `rooms/${activeRoom.roomId}`);
+  if (auth.currentUser) {
+    try {
+      await updateDoc(doc(db, 'rooms', activeRoom.roomId), { [`players.${uid}`]: updated, updatedAtMs: Date.now() });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `rooms/${activeRoom.roomId}`);
+    }
   }
 }
 
@@ -271,13 +310,16 @@ export async function startMatchInActiveRoom(serverConfirmed = false): Promise<b
     resetPlayers[p.uid] = { ...p, loadProgress: 0, isLoaded: false, updatedAtMs: Date.now() };
   });
   activeRoom.players = resetPlayers;
-  try {
-    await updateDoc(doc(db, 'rooms', activeRoom.roomId), { status: 'PLAYING', players: resetPlayers, updatedAtMs: Date.now() });
-    return true;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `rooms/${activeRoom.roomId}`);
-    return false;
+  activeRoom.status = 'PLAYING';
+  emitRoomState();
+  if (auth.currentUser) {
+    try {
+      await updateDoc(doc(db, 'rooms', activeRoom.roomId), { status: 'PLAYING', players: resetPlayers, updatedAtMs: Date.now() });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `rooms/${activeRoom.roomId}`);
+    }
   }
+  return true;
 }
 
 export function publishLocalLoadProgress(progressPct: number, isLoaded: boolean): void {
@@ -329,7 +371,7 @@ export function getActiveOnlineRoom(): OnlineRoomState | null {
 }
 
 export function getLocalOnlinePlayerState(): OnlinePlayerState | null {
-  const uid = auth.currentUser?.uid;
+  const uid = getEffectiveLocalUid();
   if (!uid || !activeRoom) return null;
   return activeRoom.players[uid] || null;
 }

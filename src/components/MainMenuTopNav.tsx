@@ -5,6 +5,7 @@ import { RankDefinition } from '../progression/ranks';
 
 export type MainMenuTab =
   | 'PLAY'
+  | 'INVENTORY'
   | 'WEAPON'
   | 'RANKS'
   | 'BATTLE_PASS'
@@ -44,7 +45,7 @@ export const MainMenuTopNav: React.FC<MainMenuTopNavProps> = ({
   );
 
   return (
-    <header className="relative z-30 w-full h-11 sm:h-12 px-2 sm:px-4 bg-gradient-to-b from-[#0b0d13]/96 via-[#07090e]/95 to-[#05060a]/92 border-b border-red-500/45 flex items-center justify-between gap-2 shrink-0 backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.8)]">
+    <header className="relative z-30 w-full h-9 lg:h-12 px-2 sm:px-4 bg-gradient-to-b from-[#0b0d13]/96 via-[#07090e]/95 to-[#05060a]/92 border-b border-red-500/45 flex items-center justify-between gap-2 shrink-0 backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.8)]">
       {/* Esquerda: Moldura Chamfered do Avatar + Callsign + Lv + Barra XP Vermelha */}
       <button
         type="button"
@@ -55,9 +56,9 @@ export const MainMenuTopNav: React.FC<MainMenuTopNavProps> = ({
           onOpenProfile();
         }}
         title="Abrir Perfil do Operador e Conquistas"
-        className="flex items-center gap-2 bg-gradient-to-r from-[#1a0a0d]/95 via-[#13161f]/95 to-transparent hover:from-[#290e13] border border-red-500/55 hover:border-red-400 rounded-md pr-3 pl-0.5 py-0.5 cursor-pointer transition-all shrink-0 group shadow-[0_0_16px_rgba(220,38,38,0.22)]"
+        className="flex items-center gap-1.5 lg:gap-2 bg-gradient-to-r from-[#1a0a0d]/95 via-[#13161f]/95 to-transparent hover:from-[#290e13] border border-red-500/55 hover:border-red-400 rounded-md pr-2.5 lg:pr-3 pl-0.5 py-0.5 cursor-pointer transition-all shrink-0 group shadow-[0_0_16px_rgba(220,38,38,0.22)]"
       >
-        <div className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-sm overflow-hidden border border-red-400 bg-slate-950 flex items-center justify-center shrink-0">
+        <div className="relative w-7 h-7 lg:w-9 lg:h-9 rounded-sm overflow-hidden border border-red-400 bg-slate-950 flex items-center justify-center shrink-0">
           {syncState.profile.avatarDataUrl ? (
             <img
               src={syncState.profile.avatarDataUrl}

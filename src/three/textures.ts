@@ -215,55 +215,96 @@ export function createProceduralTextures(renderer: THREE.WebGLRenderer): Procedu
   holoReticle.colorSpace = THREE.SRGBColorSpace;
   holoReticle.anisotropy = maxAniso;
 
-  // 7. LPVO 1-4x24 Illuminated FFP Mil-Dot Reticle
+  // 7. LPVO Firefield RapidStrike Mil-Dot / BDC Reticle (Call of Duty / Insurgency style)
+  const lpvoSize = 1024;
+  const lCx = lpvoSize / 2;
+  const lCy = lpvoSize / 2;
   const lpvoCanvas = document.createElement('canvas');
-  lpvoCanvas.width = 512;
-  lpvoCanvas.height = 512;
+  lpvoCanvas.width = lpvoSize;
+  lpvoCanvas.height = lpvoSize;
   const lpCtx = lpvoCanvas.getContext('2d')!;
-  lpCtx.clearRect(0, 0, 512, 512);
+  lpCtx.clearRect(0, 0, lpvoSize, lpvoSize);
 
-  lpCtx.strokeStyle = 'rgba(5, 7, 10, 0.95)';
-  lpCtx.lineWidth = 28;
+  // Subtle realistic optical lens rim shadow / soft focus around outer glass perimeter
+  const lensRimGrad = lpCtx.createRadialGradient(
+    lCx,
+    lCy,
+    lpvoSize * 0.36,
+    lCx,
+    lCy,
+    lpvoSize * 0.5
+  );
+  lensRimGrad.addColorStop(0.0, 'rgba(0, 0, 0, 0.0)');
+  lensRimGrad.addColorStop(0.58, 'rgba(0, 0, 0, 0.05)');
+  lensRimGrad.addColorStop(0.84, 'rgba(4, 6, 10, 0.32)');
+  lensRimGrad.addColorStop(0.95, 'rgba(2, 4, 8, 0.78)');
+  lensRimGrad.addColorStop(1.0, 'rgba(2, 4, 8, 0.96)');
+  lpCtx.fillStyle = lensRimGrad;
   lpCtx.beginPath();
-  lpCtx.arc(cx, cy, 240, 0, Math.PI * 2);
+  lpCtx.arc(lCx, lCy, lpvoSize * 0.5, 0, Math.PI * 2);
+  lpCtx.fill();
+
+  // Clip reticle strokes cleanly inside circular ocular aperture
+  lpCtx.save();
+  lpCtx.beginPath();
+  lpCtx.arc(lCx, lCy, lpvoSize * 0.485, 0, Math.PI * 2);
+  lpCtx.clip();
+
+  // Fine full-span central horizontal & vertical crosshair hairlines (matching reference photo)
+  lpCtx.strokeStyle = 'rgba(8, 10, 14, 0.92)';
+  lpCtx.lineWidth = 2.6;
+  lpCtx.beginPath();
+  lpCtx.moveTo(0, lCy);
+  lpCtx.lineTo(lpvoSize, lCy);
+  lpCtx.moveTo(lCx, 0);
+  lpCtx.lineTo(lCx, lpvoSize);
   lpCtx.stroke();
 
-  lpCtx.strokeStyle = 'rgba(15, 23, 42, 0.9)';
-  lpCtx.lineWidth = 2.5;
+  // Heavy outer duplex stadia posts on Left, Right, and Bottom (no heavy top post)
+  lpCtx.strokeStyle = 'rgba(6, 8, 12, 0.98)';
+  lpCtx.lineWidth = 10;
+  lpCtx.lineCap = 'butt';
   lpCtx.beginPath();
-  lpCtx.moveTo(20, cy);
-  lpCtx.lineTo(cx - 32, cy);
-  lpCtx.moveTo(cx + 32, cy);
-  lpCtx.lineTo(492, cy);
-  lpCtx.moveTo(cx, cy + 32);
-  lpCtx.lineTo(cx, 492);
+  lpCtx.moveTo(0, lCy);
+  lpCtx.lineTo(lCx - 295, lCy);
+  lpCtx.moveTo(lCx + 295, lCy);
+  lpCtx.lineTo(lpvoSize, lCy);
+  lpCtx.moveTo(lCx, lCy + 295);
+  lpCtx.lineTo(lCx, lpvoSize);
   lpCtx.stroke();
 
-  for (let m = 1; m <= 5; m++) {
-    const offset = 32 + m * 32;
-    const halfHash = m % 2 === 0 ? 10 : 6;
+  // Fine Mil-Dot & BDC graduation hash marks along all 4 axes
+  lpCtx.strokeStyle = 'rgba(8, 10, 14, 0.92)';
+  lpCtx.lineWidth = 2.4;
+  for (let m = 1; m <= 9; m++) {
+    const off = m * 29;
+    const tickH = m % 2 === 0 ? 11 : 6;
     lpCtx.beginPath();
-    lpCtx.moveTo(cx - offset, cy - halfHash);
-    lpCtx.lineTo(cx - offset, cy + halfHash);
-    lpCtx.moveTo(cx + offset, cy - halfHash);
-    lpCtx.lineTo(cx + offset, cy + halfHash);
-    lpCtx.moveTo(cx - halfHash * 1.4, cy + offset);
-    lpCtx.lineTo(cx + halfHash * 1.4, cy + offset);
+    // Left & Right windage ticks
+    lpCtx.moveTo(lCx - off, lCy - tickH);
+    lpCtx.lineTo(lCx - off, lCy + tickH);
+    lpCtx.moveTo(lCx + off, lCy - tickH);
+    lpCtx.lineTo(lCx + off, lCy + tickH);
+    // Top & Bottom elevation ticks
+    lpCtx.moveTo(lCx - tickH, lCy - off);
+    lpCtx.lineTo(lCx + tickH, lCy - off);
+    lpCtx.moveTo(lCx - tickH * 1.15, lCy + off);
+    lpCtx.lineTo(lCx + tickH * 1.15, lCy + off);
     lpCtx.stroke();
   }
 
-  lpCtx.shadowColor = '#ef4444';
-  lpCtx.shadowBlur = 10;
-  lpCtx.strokeStyle = '#ef4444';
-  lpCtx.lineWidth = 4.5;
+  // Micro razor-sharp illuminated center dot (1.5px core + subtle glow so center stays precise)
+  lpCtx.fillStyle = 'rgba(239, 68, 68, 0.25)';
   lpCtx.beginPath();
-  lpCtx.arc(cx, cy, 24, Math.PI * 0.72, Math.PI * 0.28, false);
-  lpCtx.stroke();
-
-  lpCtx.fillStyle = '#ff453a';
-  lpCtx.beginPath();
-  lpCtx.arc(cx, cy, 3.8, 0, Math.PI * 2);
+  lpCtx.arc(lCx, lCy, 6.5, 0, Math.PI * 2);
   lpCtx.fill();
+
+  lpCtx.fillStyle = '#ff2e2e';
+  lpCtx.beginPath();
+  lpCtx.arc(lCx, lCy, 2.8, 0, Math.PI * 2);
+  lpCtx.fill();
+
+  lpCtx.restore();
 
   const lpvoReticle = new THREE.CanvasTexture(lpvoCanvas);
   lpvoReticle.colorSpace = THREE.SRGBColorSpace;

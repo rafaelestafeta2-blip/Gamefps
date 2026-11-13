@@ -102,7 +102,7 @@ export function playSpatialBotGunshot(
   outputNode.connect(ctx.destination);
 
   const sampleBuffer =
-    weaponId === 'AK47_RIFLE'
+    weaponId === 'AK47_RIFLE' || weaponId === 'AK12_RIFLE'
       ? state.ak47ShotBuffer || state.m4a1ShotBuffer
       : isSniper
         ? state.sniperShotBuffer || state.ak47ShotBuffer

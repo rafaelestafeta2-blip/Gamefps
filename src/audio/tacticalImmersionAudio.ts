@@ -122,6 +122,7 @@ export function playShellCasingDrop3D(
 
   const isHeavyBrass =
     weaponId === 'AK47_RIFLE' ||
+    weaponId === 'AK12_RIFLE' ||
     weaponId === 'SNIPER_BOLT' ||
     weaponId === 'SNIPER_TACTICAL';
   const firstBounceDelay =

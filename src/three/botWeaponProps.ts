@@ -1,18 +1,30 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WeaponId } from '../types/game';
+import {
+  createSculptedThirdPersonWeaponMesh,
+  isSculptedWeaponId,
+} from './sculptedFirearms';
 
-let sharedRifleBarrelGeo: THREE.BoxGeometry | null = null;
-let sharedRifleReceiverGeo: THREE.BoxGeometry | null = null;
-let sharedRifleGripGeo: THREE.BoxGeometry | null = null;
-let sharedRifleMagGeo: THREE.BoxGeometry | null = null;
-let sharedRifleStockGeo: THREE.BoxGeometry | null = null;
-let sharedGunMetalMat: THREE.MeshStandardMaterial | null = null;
-let sharedWoodAccentMat: THREE.MeshStandardMaterial | null = null;
+interface RealGlbWeaponSpec {
+  id: WeaponId;
+  url: string;
+  githubFallbackUrl?: string;
+  clipName?: string;
+  clipTime?: number;
+  rawLocal?: boolean;
+  filter: (meshName: string, nodeName: string, matNames: string[]) => boolean;
+  offset: [number, number, number];
+  scale: number;
+  rotX: number;
+  rotY: number;
+}
 
 const glbWeaponTemplates = new Map<WeaponId, THREE.Group>();
+const glbLevelPreviewTemplates = new Map<WeaponId, THREE.Group>();
+const glbWeaponPromises = new Map<WeaponId, Promise<THREE.Group | null>>();
 const pendingWeaponMounts: Array<{ group: THREE.Group; weaponId: WeaponId }> = [];
-let preloadStarted = false;
+let preloadAllPromise: Promise<void> | null = null;
 
 const _rGripWorld = new THREE.Vector3();
 const _rThumbWorld = new THREE.Vector3();
@@ -33,72 +45,337 @@ interface HandFingerCache {
   lThumb2: THREE.Object3D;
 }
 
-export function ensureSharedWeaponProps(): void {
-  if (sharedRifleReceiverGeo) return;
-  sharedRifleReceiverGeo = new THREE.BoxGeometry(0.046, 0.068, 0.32);
-  sharedRifleBarrelGeo = new THREE.BoxGeometry(0.022, 0.022, 0.36);
-  sharedRifleGripGeo = new THREE.BoxGeometry(0.034, 0.095, 0.046);
-  sharedRifleMagGeo = new THREE.BoxGeometry(0.036, 0.14, 0.06);
-  sharedRifleStockGeo = new THREE.BoxGeometry(0.042, 0.088, 0.2);
-  sharedGunMetalMat = new THREE.MeshStandardMaterial({
-    color: 0x1e2430,
-    roughness: 0.38,
-    metalness: 0.78,
-  });
-  sharedWoodAccentMat = new THREE.MeshStandardMaterial({
-    color: 0x6b4423,
-    roughness: 0.65,
-    metalness: 0.15,
-  });
+const HIDDEN_ARM_MATS = new Set([
+  'arms',
+  'arms_0',
+  'hand_d',
+  'glove_d',
+  'm_gloves_black',
+  'm_shirt_blackcamo2',
+  'textura',
+  'v_hands_gloves_sf2.tga',
+  'v_hands_sleeves_sf2.tga',
+  'v_hands_watch_sf2_d.tga.001',
+  'dmc5_soldier_gear_mat',
+  'dmc5_soldier_hands_mat',
+  'dmc5_soldier_shirt_mat',
+  'scopereticle',
+]);
+
+const HIDDEN_EXTRA_NODES = new Set([
+  'object_7',
+  'object_8',
+  'object_25',
+  'object_26',
+  'object_51',
+  'object_80',
+  'object_84',
+  'object_102',
+  'object_122',
+  'object_124',
+  'object_126',
+  'object_128',
+  'mag2_j_051',
+  'mag2',
+  'mag2_m4_d_0',
+  'mag.001',
+  'mag.001_0',
+  'mag001_0',
+  'bullets',
+  'bullets_0',
+  'requests_studio_hands',
+  'requests_studio_hands_0',
+  'requests_studio_hands_1',
+  'watch',
+  'watch_0',
+  'ch22_body',
+  'ch22_body_textura_0',
+  'armmesh_arms_0',
+  'arms_arms_0',
+  'hand_mesh_hand_d_0',
+  'hand_mesh_glove_d_0',
+  'skm_comando_m_gloves_black_0',
+  'skm_comando_m_shirt_blackcamo2_0',
+  'scoperender_sniper_0',
+  'reticle_scopereticle_0',
+]);
+
+function isExcludedMesh(
+  meshName: string,
+  nodeName: string,
+  matNames: string[]
+): boolean {
+  const mLow = meshName.toLowerCase();
+  const nLow = nodeName.toLowerCase();
+  if (HIDDEN_EXTRA_NODES.has(mLow) || HIDDEN_EXTRA_NODES.has(nLow)) return true;
+  if (
+    mLow.includes('arm') ||
+    mLow.includes('hand') ||
+    mLow.includes('glove') ||
+    mLow.includes('watch') ||
+    mLow.includes('shirt') ||
+    mLow.includes('ch22')
+  ) {
+    return true;
+  }
+  for (const mn of matNames) {
+    const low = mn.toLowerCase();
+    if (
+      HIDDEN_ARM_MATS.has(low) ||
+      low.includes('glove') ||
+      low.includes('shirt') ||
+      low.includes('hand') ||
+      low === 'arms'
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
-function buildStaticMeshFromGlb(
-  root: THREE.Object3D,
-  includePredicate: (meshName: string, nodeName: string) => boolean,
-  offset: [number, number, number],
-  scale: number,
-  rotX = 0,
-  rotY = 0
-): THREE.Group {
-  const template = new THREE.Group();
+const WEAPON_GLB_SPECS: RealGlbWeaponSpec[] = [
+  {
+    id: 'AK47_RIFLE',
+    url: '/models/fps_ak47.glb',
+    filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
+    offset: [0.129, -1.385, -0.21],
+    scale: 1.02,
+    rotX: 0.24,
+    rotY: 0,
+  },
+  {
+    id: 'AK12_RIFLE',
+    url: '/models/weapons/ak-12animated.glb',
+    filter: (m, n, mats) => {
+      if (isExcludedMesh(m, n, mats)) return false;
+      const mLow = m.toLowerCase();
+      if (mLow.includes('lense')) return false;
+      return true;
+    },
+    offset: [0.354, -3.794, -0.476],
+    scale: 0.45,
+    rotX: 0.2,
+    rotY: 0,
+  },
+  {
+    id: 'M4_CARBINE',
+    url: '/models/m4_fps_pack.glb',
+    filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
+    offset: [0.025, -1.365, -0.04],
+    scale: 0.9,
+    rotX: 0.22,
+    rotY: 0,
+  },
+  {
+    id: 'CARBINE_AR',
+    url: '/models/fps_animated_carbine.glb',
+    clipName: 'allanims',
+    clipTime: 0,
+    filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
+    offset: [0.004, -0.11, -0.02],
+    scale: 0.43,
+    rotX: 0.2,
+    rotY: 0,
+  },
+  {
+    id: 'SMG_45',
+    url: '/models/fps_animated_smg.glb',
+    clipName: 'allanims',
+    clipTime: 0,
+    filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
+    offset: [0, -4.0, -9.5],
+    scale: 0.0095,
+    rotX: 0.19,
+    rotY: 0,
+  },
+  {
+    id: 'SNIPER_BOLT',
+    url: '/models/sniper_animated.glb',
+    clipName: 'allanims',
+    clipTime: 0,
+    filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
+    offset: [0.05, 1.5, 14.0],
+    scale: 0.0072,
+    rotX: 0.18,
+    rotY: 0,
+  },
+  {
+    id: 'SNIPER_TACTICAL',
+    url: '/models/sniper_fps_animation.glb',
+    filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
+    offset: [-0.21, 0.08, 0.35],
+    scale: 0.44,
+    rotX: 0.24,
+    rotY: Math.PI,
+  },
+  {
+    id: 'L49_LMG',
+    url: '/models/lmg_animated.glb',
+    clipName: 'allanims',
+    clipTime: 0,
+    filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
+    offset: [0, 0.01, 0.02],
+    scale: 0.72,
+    rotX: 0.19,
+    rotY: 0,
+  },
+  {
+    id: 'P50_PISTOL',
+    url: '/models/mark_23_animated.glb',
+    rawLocal: true,
+    filter: (m, n, mats) =>
+      !isExcludedMesh(m, n, mats) &&
+      (m.includes('Mark23') ||
+        n.includes('Object_9') ||
+        n.includes('Object_10') ||
+        n.includes('Object_11')),
+    offset: [10.7, -142.5, 2.5],
+    scale: 0.012,
+    rotX: 0.18,
+    rotY: 0,
+  },
+  {
+    id: 'KNIFE_TACTICAL',
+    url: '/models/knife_animated.glb',
+    clipName: 'anims',
+    clipTime: 0,
+    filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
+    offset: [8.0, -8.0, -18.5],
+    scale: 0.011,
+    rotX: 0,
+    rotY: Math.PI / 2,
+  },
+];
 
-  root.traverse((child) => {
+function buildBakedStaticGroup(
+  scene: THREE.Object3D,
+  animations: THREE.AnimationClip[] | undefined,
+  spec: RealGlbWeaponSpec,
+  overrideRotX?: number
+): THREE.Group {
+  if (spec.clipName && animations && animations.length > 0) {
+    const mixer = new THREE.AnimationMixer(scene);
+    const clip =
+      animations.find((c) => c.name === spec.clipName) || animations[0];
+    if (clip) {
+      let minT = Infinity;
+      for (let i = 0; i < clip.tracks.length; i++) {
+        const arr = clip.tracks[i].times;
+        if (arr.length > 0 && arr[0] < minT) minT = arr[0];
+      }
+      const t =
+        (spec.clipTime ?? 0) > 0
+          ? (spec.clipTime ?? 0)
+          : Number.isFinite(minT) && minT > 0.005
+            ? minT + 0.01
+            : 0.01;
+      const action = mixer.clipAction(clip);
+      action.weight = 1.0;
+      action.play();
+      mixer.setTime(t);
+    }
+  }
+
+  scene.updateMatrixWorld(true);
+
+  const template = new THREE.Group();
+  const v = new THREE.Vector3();
+  const nVec = new THREE.Vector3();
+  const offsetVec = new THREE.Vector3(
+    spec.offset[0],
+    spec.offset[1],
+    spec.offset[2]
+  );
+  const useRotX = overrideRotX !== undefined ? overrideRotX : spec.rotX;
+  const rotMat = new THREE.Matrix4()
+    .makeRotationX(useRotX)
+    .multiply(new THREE.Matrix4().makeRotationY(spec.rotY));
+  const rotQuat = new THREE.Quaternion().setFromRotationMatrix(rotMat);
+  const worldNormalMat = new THREE.Matrix3();
+
+  scene.traverse((child) => {
     if (!(child as THREE.Mesh).isMesh) return;
     const srcMesh = child as THREE.Mesh;
     const mName = srcMesh.name || '';
     const nName = srcMesh.parent?.name || '';
-    if (!includePredicate(mName, nName)) return;
+    const matsArr = Array.isArray(srcMesh.material)
+      ? srcMesh.material
+      : srcMesh.material
+        ? [srcMesh.material]
+        : [];
+    const matNames = matsArr.map((m) => m?.name || '');
+
+    if (!spec.filter(mName, nName, matNames)) return;
 
     const geom = srcMesh.geometry.clone();
+    const posAttr = geom.getAttribute('position');
+    if (!posAttr) return;
+    const normAttr = geom.getAttribute('normal');
+    const skinned = (srcMesh as THREE.SkinnedMesh).isSkinnedMesh
+      ? (srcMesh as THREE.SkinnedMesh)
+      : null;
+
+    if (!spec.rawLocal) {
+      worldNormalMat.getNormalMatrix(srcMesh.matrixWorld);
+    }
+
+    for (let i = 0; i < posAttr.count; i++) {
+      v.fromBufferAttribute(posAttr, i);
+      if (!spec.rawLocal) {
+        if (skinned && skinned.skeleton) {
+          skinned.applyBoneTransform(i, v);
+        }
+        v.applyMatrix4(srcMesh.matrixWorld);
+      }
+      v.add(offsetVec);
+      v.multiplyScalar(spec.scale);
+      v.applyMatrix4(rotMat);
+      posAttr.setXYZ(i, v.x, v.y, v.z);
+
+      if (normAttr) {
+        nVec.fromBufferAttribute(normAttr, i);
+        if (!spec.rawLocal) {
+          nVec.applyMatrix3(worldNormalMat);
+        }
+        nVec.applyQuaternion(rotQuat).normalize();
+        normAttr.setXYZ(i, nVec.x, nVec.y, nVec.z);
+      }
+    }
+
+    posAttr.needsUpdate = true;
+    if (normAttr) normAttr.needsUpdate = true;
     geom.deleteAttribute('skinIndex');
     geom.deleteAttribute('skinWeight');
-
-    // Mag1_M4_D_0 possui escala de nó local diferente de Main_M4_D_0 no m4_fps_pack.glb
-    if (mName.includes('Mag1_M4')) {
-      geom.scale(4.25, 4.14, 4.14);
-    }
-
-    geom.translate(offset[0], offset[1], offset[2]);
-    geom.scale(scale, scale, scale);
-    if (rotY !== 0) {
-      geom.rotateY(rotY);
-    }
-    if (rotX !== 0) {
-      geom.rotateX(rotX);
-    }
+    geom.deleteAttribute('tangent');
+    geom.computeBoundingBox();
     geom.computeBoundingSphere();
 
-    const mats = Array.isArray(srcMesh.material)
-      ? srcMesh.material
-      : [srcMesh.material];
-    mats.forEach((m) => {
-      const std = m as THREE.MeshStandardMaterial;
-      if (std && std.map) {
-        std.map.colorSpace = THREE.SRGBColorSpace;
+    const sanitizedMats = matsArr.map((mat) => {
+      const cloned = mat.clone() as THREE.MeshStandardMaterial;
+      if (cloned.map) {
+        cloned.map.colorSpace = THREE.SRGBColorSpace;
+        cloned.map.needsUpdate = true;
+        if (cloned.color) {
+          cloned.color.setHex(0xffffff);
+        }
       }
+      if (
+        (cloned.name || '').toLowerCase().includes('lens') &&
+        !cloned.map
+      ) {
+        cloned.transparent = true;
+        cloned.opacity = 0.72;
+        cloned.roughness = 0.12;
+        cloned.metalness = 0.25;
+      }
+      cloned.needsUpdate = true;
+      return cloned;
     });
 
-    const staticMesh = new THREE.Mesh(geom, srcMesh.material);
+    const finalMaterial =
+      sanitizedMats.length === 1 ? sanitizedMats[0] : sanitizedMats;
+
+    const staticMesh = new THREE.Mesh(geom, finalMaterial);
     staticMesh.castShadow = false;
     staticMesh.receiveShadow = false;
     staticMesh.frustumCulled = false;
@@ -108,10 +385,11 @@ function buildStaticMeshFromGlb(
   return template;
 }
 
-function populateMountWithRealGlb(mount: THREE.Group, weaponId: WeaponId): boolean {
-  const key: WeaponId =
-    weaponId === 'SNIPER_BOLT' ? 'SNIPER_TACTICAL' : weaponId;
-  const tpl = glbWeaponTemplates.get(key) || glbWeaponTemplates.get('AK47_RIFLE');
+function populateMountWithRealGlb(
+  mount: THREE.Group,
+  weaponId: WeaponId
+): boolean {
+  const tpl = glbWeaponTemplates.get(weaponId);
   if (!tpl || tpl.children.length === 0) return false;
 
   while (mount.children.length > 0) {
@@ -122,10 +400,7 @@ function populateMountWithRealGlb(mount: THREE.Group, weaponId: WeaponId): boole
   return true;
 }
 
-export function preloadRealBotWeaponGlbs(): void {
-  if (preloadStarted) return;
-  preloadStarted = true;
-
+function createGlbLoader(): GLTFLoader {
   const loader = new GLTFLoader();
   loader.register((parser) => ({
     name: 'KHR_materials_pbrSpecularGlossiness',
@@ -149,163 +424,105 @@ export function preloadRealBotWeaponGlbs(): void {
       }
     },
   }));
+  return loader;
+}
 
-  // Coordenadas calibradas para que (0,0,0) seja o centro exato do Pistol Grip (mão direita)
-  // e (0,0,+0.29) passe exatamente pelo centro do Guarda-Mão frontal (mão esquerda).
-  const specs: Array<{
-    id: WeaponId;
-    url: string;
-    filter: (mName: string, nName: string) => boolean;
-    offset: [number, number, number];
-    scale: number;
-    rotX: number;
-    rotY?: number;
-  }> = [
-    {
-      id: 'AK47_RIFLE',
-      url: '/models/fps_ak47.glb',
-      filter: (m, n) =>
-        m.includes('AK-47') ||
-        m.includes('CARGADOR') ||
-        n.includes('Object_14') ||
-        n.includes('Object_15') ||
-        n.includes('Object_17') ||
-        n.includes('Object_18'),
-      offset: [12.9, -138.5, -21.0],
-      scale: 0.011,
-      rotX: 0.28,
-      rotY: 0,
-    },
-    {
-      id: 'M4_CARBINE',
-      url: '/models/m4_fps_pack.glb',
-      filter: (m, n) =>
-        m.includes('Main_M4') ||
-        m.includes('Mag1_M4') ||
-        m.includes('Trigger_M4') ||
-        m.includes('BoltCatch_M4') ||
-        m.includes('Safety_M4') ||
-        n.includes('Main_M4'),
-      offset: [5.65, -136.5, -4.5],
-      scale: 0.011,
-      rotX: 0.29,
-      rotY: 0,
-    },
-    {
-      id: 'SNIPER_TACTICAL',
-      url: '/models/sniper_fps_animation.glb',
-      filter: (m, n) =>
-        m.includes('BODY_sniper') ||
-        m.includes('SCOPE_sniper') ||
-        n.includes('Object_64') ||
-        n.includes('Object_66'),
-      offset: [-0.01, 0.015, -0.04],
-      scale: 1.05,
-      rotX: 0.19,
-      rotY: Math.PI,
-    },
-    {
-      id: 'P50_PISTOL',
-      url: '/models/mark_23_animated.glb',
-      filter: (m, n) =>
-        m.includes('Mark23') ||
-        n.includes('Object_9') ||
-        n.includes('Object_10') ||
-        n.includes('Object_11'),
-      offset: [10.7, -142.5, 2.5],
-      scale: 0.012,
-      rotX: 0.18,
-      rotY: 0,
-    },
-  ];
+export function ensureSharedWeaponProps(): void {
+  // No legacy blocky geometries needed; all non-GLB weapons use sculpted PBR geometry.
+}
 
-  specs.forEach((spec) => {
-    loader.load(
-      spec.url,
-      (gltf) => {
-        const tpl = buildStaticMeshFromGlb(
-          gltf.scene,
-          spec.filter,
-          spec.offset,
-          spec.scale,
-          spec.rotX,
-          spec.rotY ?? 0
-        );
-        if (tpl.children.length > 0) {
-          glbWeaponTemplates.set(spec.id, tpl);
-          if (spec.id === 'SNIPER_TACTICAL') {
-            glbWeaponTemplates.set('SNIPER_BOLT', tpl);
-          }
-          for (let i = pendingWeaponMounts.length - 1; i >= 0; i--) {
-            const item = pendingWeaponMounts[i];
-            if (
-              item.weaponId === spec.id ||
-              (spec.id === 'SNIPER_TACTICAL' && item.weaponId === 'SNIPER_BOLT')
-            ) {
-              if (populateMountWithRealGlb(item.group, item.weaponId)) {
-                pendingWeaponMounts.splice(i, 1);
+export function preloadRealBotWeaponGlbs(): Promise<void> {
+  if (preloadAllPromise) return preloadAllPromise;
+
+  const loader = createGlbLoader();
+  const perSpecPromises: Array<Promise<void>> = [];
+
+  for (const spec of WEAPON_GLB_SPECS) {
+    const p = new Promise<THREE.Group | null>((resolve) => {
+      loader.load(
+        spec.url,
+        (gltf) => {
+          const previewTpl = buildBakedStaticGroup(
+            gltf.scene,
+            gltf.animations,
+            spec,
+            0
+          );
+          if (previewTpl.children.length > 0) {
+            const tpl = new THREE.Group();
+            if (spec.rotX !== 0) {
+              const tilted = previewTpl.clone();
+              tilted.rotation.x = spec.rotX;
+              tpl.add(tilted);
+            } else {
+              tpl.add(previewTpl.clone());
+            }
+            glbLevelPreviewTemplates.set(spec.id, previewTpl);
+            glbWeaponTemplates.set(spec.id, tpl);
+            for (let i = pendingWeaponMounts.length - 1; i >= 0; i--) {
+              const item = pendingWeaponMounts[i];
+              if (item.weaponId === spec.id) {
+                if (populateMountWithRealGlb(item.group, item.weaponId)) {
+                  pendingWeaponMounts.splice(i, 1);
+                }
               }
             }
+            resolve(tpl);
+          } else {
+            resolve(null);
           }
-        }
-      },
-      undefined,
-      () => {}
-    );
-  });
+        },
+        undefined,
+        () => resolve(null)
+      );
+    });
+    glbWeaponPromises.set(spec.id, p);
+    perSpecPromises.push(p.then(() => undefined));
+  }
+
+  preloadAllPromise = Promise.all(perSpecPromises).then(() => undefined);
+  return preloadAllPromise;
+}
+
+/**
+ * Returns a fresh horizontally-leveled 3D model instance of ANY WeaponId
+ * (real GLB or sculpted PBR firearm) suitable for thumbnail/showcase rendering.
+ */
+export async function buildLevel3DWeaponPreviewGroup(
+  weaponId: WeaponId
+): Promise<THREE.Group | null> {
+  if (isSculptedWeaponId(weaponId)) {
+    return createSculptedThirdPersonWeaponMesh(weaponId, true).group;
+  }
+  await preloadRealBotWeaponGlbs();
+  const p = glbWeaponPromises.get(weaponId);
+  if (p) await p;
+  const tpl = glbLevelPreviewTemplates.get(weaponId);
+  if (!tpl || tpl.children.length === 0) return null;
+  return tpl.clone();
 }
 
 export function createBotThirdPersonWeaponMesh(
   weaponId: WeaponId | undefined,
   _isAlly: boolean
 ): THREE.Group {
-  ensureSharedWeaponProps();
   preloadRealBotWeaponGlbs();
 
   const chosen: WeaponId = weaponId || 'AK47_RIFLE';
   const group = new THREE.Group();
   group.name = 'BotWorldWeapon';
 
+  if (isSculptedWeaponId(chosen)) {
+    const sculpted = createSculptedThirdPersonWeaponMesh(chosen, false);
+    group.add(sculpted.group);
+    return group;
+  }
+
   if (populateMountWithRealGlb(group, chosen)) {
     return group;
   }
 
-  // Fallback imediato (alinhado com origem 0,0,0 no Pistol Grip e +0.29m no Guarda-Mão)
-  const isAk = chosen === 'AK47_RIFLE';
-  const isSniper = chosen === 'SNIPER_BOLT' || chosen === 'SNIPER_TACTICAL';
-
-  const grip = new THREE.Mesh(sharedRifleGripGeo!, sharedGunMetalMat!);
-  grip.position.set(0, 0, 0);
-  grip.rotation.x = -0.22;
-  group.add(grip);
-
-  const receiver = new THREE.Mesh(sharedRifleReceiverGeo!, sharedGunMetalMat!);
-  receiver.position.set(0, 0.045, 0.14);
-  receiver.rotation.x = 0.16;
-  group.add(receiver);
-
-  const barrel = new THREE.Mesh(sharedRifleBarrelGeo!, sharedGunMetalMat!);
-  barrel.position.set(0, 0.015, isSniper ? 0.42 : 0.36);
-  barrel.rotation.x = 0.16;
-  if (isSniper) barrel.scale.set(1, 1, 1.35);
-  group.add(barrel);
-
-  const mag = new THREE.Mesh(
-    sharedRifleMagGeo!,
-    isAk ? sharedWoodAccentMat! : sharedGunMetalMat!
-  );
-  mag.position.set(0, -0.055, 0.16);
-  mag.rotation.x = isAk ? 0.38 : 0.22;
-  group.add(mag);
-
-  const stock = new THREE.Mesh(
-    sharedRifleStockGeo!,
-    isAk ? sharedWoodAccentMat! : sharedGunMetalMat!
-  );
-  stock.position.set(0, 0.075, -0.12);
-  stock.rotation.x = 0.16;
-  group.add(stock);
-
+  // Enquanto o .glb termina o carregamento assíncrono (~20-60ms locais), registra para substituição imediata sem exibir cubos provisórios.
   pendingWeaponMounts.push({ group, weaponId: chosen });
   return group;
 }
@@ -314,11 +531,15 @@ function getOrResolveFingerBones(
   rHandBone: THREE.Object3D,
   lHandBone: THREE.Object3D
 ): HandFingerCache {
-  const existing = rHandBone.userData?.fingerGripCache as HandFingerCache | undefined;
+  const existing = rHandBone.userData?.fingerGripCache as
+    | HandFingerCache
+    | undefined;
   if (existing) return existing;
 
-  const rMiddle1 = rHandBone.getObjectByName('mixamorigRightHandMiddle1') || rHandBone;
-  const rThumb2 = rHandBone.getObjectByName('mixamorigRightHandThumb2') || rMiddle1;
+  const rMiddle1 =
+    rHandBone.getObjectByName('mixamorigRightHandMiddle1') || rHandBone;
+  const rThumb2 =
+    rHandBone.getObjectByName('mixamorigRightHandThumb2') || rMiddle1;
   const lIndex2 =
     lHandBone.getObjectByName('mixamorigLeftHandIndex2') ||
     lHandBone.getObjectByName('mixamorigLeftHandIndex1') ||
@@ -327,9 +548,16 @@ function getOrResolveFingerBones(
     lHandBone.getObjectByName('mixamorigLeftHandMiddle2') ||
     lHandBone.getObjectByName('mixamorigLeftHandMiddle1') ||
     lHandBone;
-  const lThumb2 = lHandBone.getObjectByName('mixamorigLeftHandThumb2') || lMiddle2;
+  const lThumb2 =
+    lHandBone.getObjectByName('mixamorigLeftHandThumb2') || lMiddle2;
 
-  const cache: HandFingerCache = { rMiddle1, rThumb2, lIndex2, lMiddle2, lThumb2 };
+  const cache: HandFingerCache = {
+    rMiddle1,
+    rThumb2,
+    lIndex2,
+    lMiddle2,
+    lThumb2,
+  };
   rHandBone.userData = rHandBone.userData || {};
   rHandBone.userData.fingerGripCache = cache;
   return cache;

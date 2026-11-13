@@ -7,6 +7,7 @@ import {
   subscribeOnlineRoom,
 } from '../multiplayer/onlineRoomService';
 import { OnlineRoomState } from '../multiplayer/onlineTypes';
+import { getPlayerInventoryState } from '../progression/loadoutSystem';
 import { DrillMode } from '../types/game';
 import {
   BlackthornTeamEmblem,
@@ -54,7 +55,18 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
 
   const isDust2 = mode === 'DUST2_BOMB_5V5';
   const isAssault = mode === 'ASSAULT_BOMB_5V5';
-  const mapCodeLabel = isDust2 ? 'DE_DUST2' : isAssault ? 'CS_ASSAULT' : 'YARD';
+  const mapCodeLabel =
+    mode === 'DUST2_BOMB_5V5'
+      ? 'DE_DUST2'
+      : mode === 'ASSAULT_BOMB_5V5'
+        ? 'CS_ASSAULT'
+        : mode === 'FREE_RANGE'
+          ? 'ESTANDE DE TIRO'
+          : mode === 'KILLHOUSE_BLITZ'
+            ? 'KILLHOUSE CQB'
+            : mode === 'TACTICAL_WAVE'
+              ? 'CONTRA IA'
+              : 'YARD';
   const bgScreenshot = isDust2 ? DUST2_BG_SCREENSHOT : isAssault ? ASSAULT_BG_SCREENSHOT : YARD_BG_SCREENSHOT;
   const isOnline = isOnlineMatchActive();
 
@@ -174,13 +186,19 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   const onlinePlayers = onlineRoom ? Object.values(onlineRoom.players || {}) : [];
   const onlineReadyCount = onlinePlayers.filter((p) => p.isLoaded || (p.loadProgress ?? 0) >= 100).length;
 
+  const playerSelectedClass = getPlayerInventoryState().selectedClass;
   const vanguardDisplay = isOnline
     ? onlinePlayers.filter((p) => p.team === 'VANGUARD').map((p) => ({
         callsign: p.callsign,
         title: p.isLoaded || (p.loadProgress ?? 0) >= 100 ? '✓ 100% PRONTO' : `CARREGANDO ${p.loadProgress ?? 0}%`,
-        classId: 'FUZILEIRO' as WarfaceClassId, isPlayer: true, isReady: Boolean(p.isLoaded || (p.loadProgress ?? 0) >= 100),
+        classId: playerSelectedClass, isPlayer: true, isReady: Boolean(p.isLoaded || (p.loadProgress ?? 0) >= 100),
       }))
-    : VANGUARD_ROSTER.map((op) => ({ ...op, isReady: isArenaReady }));
+    : VANGUARD_ROSTER.map((op) => ({
+        ...op,
+        classId: op.isPlayer ? playerSelectedClass : op.classId,
+        title: op.isPlayer ? WARFACE_CLASS_META[playerSelectedClass].label : op.title,
+        isReady: isArenaReady,
+      }));
 
   const blackthornDisplay = isOnline
     ? onlinePlayers.filter((p) => p.team === 'BLACKTHORN').map((p) => ({

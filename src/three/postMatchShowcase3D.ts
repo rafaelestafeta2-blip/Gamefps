@@ -1,9 +1,13 @@
 import * as THREE from 'three';
+import { WarfaceClassId } from '../components/WarfaceClassIcons';
+import { getPlayerInventoryState } from '../progression/loadoutSystem';
 import { SquadOperatorStats, WeaponId } from '../types/game';
 import { BotAnimState } from './botCharacterClips';
 import {
+  CharacterAvatarKind,
   cloneVanguardCharacterAvatar,
   preloadProRifleBotCharacter,
+  resolveCharacterAvatarKind,
 } from './botCharacterSystem';
 import {
   alignWeaponPropToMixamoHands,
@@ -19,6 +23,7 @@ interface PodiumOperatorSlot {
   weaponProp: THREE.Group | null;
   weaponId: WeaponId;
   poseState: BotAnimState;
+  avatarKind?: CharacterAvatarKind;
 }
 
 // Coordenadas da formação Winner's Circle (alinhadas aos 5 cards inferiores da esquerda para a direita)
@@ -219,19 +224,41 @@ export class PostMatchShowcase3D {
     this.stageRoot.add(frontFillLight);
   }
 
+  private resolveClassForSquadOp(op?: SquadOperatorStats): WarfaceClassId | undefined {
+    if (!op) return undefined;
+    if (op.isPlayer) return getPlayerInventoryState().selectedClass;
+    if (op.callsign === 'RECON-02') return 'FRANCO_ATIRADOR';
+    if (op.callsign === 'LIFELINE-04') return 'MEDICO';
+    if (op.callsign === 'WARDEN-05') return 'ENGENHEIRO';
+    if (op.callsign === 'STRIKER-03') return 'FUZILEIRO';
+    return undefined;
+  }
+
   private populateAvatarsIfNeeded(sortedSquad: SquadOperatorStats[]): void {
     for (let i = 0; i < this.slots.length; i++) {
       const slot = this.slots[i];
       const op = sortedSquad[i];
       const desiredWep: WeaponId = op?.weaponId || 'M4_CARBINE';
+      const opClass = this.resolveClassForSquadOp(op);
+      const wantKind = resolveCharacterAvatarKind(desiredWep, opClass, true);
+
+      if (slot.modelRoot && slot.avatarKind !== wantKind) {
+        slot.mixer?.stopAllAction();
+        slot.slotGroup.remove(slot.modelRoot);
+        slot.modelRoot = null;
+        slot.mixer = null;
+        slot.rHandBone = null;
+        slot.lHandBone = null;
+      }
 
       if (!slot.modelRoot) {
-        const cloned = cloneVanguardCharacterAvatar(this.isSoftwareGl);
+        const cloned = cloneVanguardCharacterAvatar(this.isSoftwareGl, desiredWep, opClass);
         if (!cloned) {
           void preloadProRifleBotCharacter();
           return;
         }
         slot.modelRoot = cloned.modelRoot;
+        slot.avatarKind = cloned.avatarKind;
         slot.slotGroup.add(slot.modelRoot);
 
         slot.modelRoot.traverse((child) => {

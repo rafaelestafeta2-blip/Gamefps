@@ -16,10 +16,17 @@ import {
   loadSavedPlayerCash,
   loadSavedPlayerXp,
 } from '../progression/ranks';
+import {
+  PlayerInventoryState,
+  getPlayerInventoryState,
+  subscribePlayerInventory,
+  syncEquippedWeaponToInventory,
+} from '../progression/loadoutSystem';
 import { DrillMode, WeaponId } from '../types/game';
 import { CompetitiveRankedScreen } from './CompetitiveRankedScreen';
 import { FriendsSocialModal } from './FriendsSocialModal';
 import { GraphicsSettingsPanel } from './GraphicsSettingsPanel';
+import { InventoryLoadoutModal } from './InventoryLoadoutModal';
 import { MainMenuOverlays } from './MainMenuOverlays';
 import { MainMenuPlayPanel } from './MainMenuPlayPanel';
 import { MainMenuRanksModal } from './MainMenuRanksModal';
@@ -50,7 +57,11 @@ const WEAPON_DISPLAY_NAMES: Record<
   P50_PISTOL: { name: 'MARK 23 TÁTICA', caliber: '.45 ACP', category: 'Pistola Pesada' },
   M4_CARBINE: { name: 'M4A1 SOPMOD', caliber: '5.56x45mm', category: 'Fuzil de Assalto' },
   SMG_45: { name: 'SMG .45 SUB', caliber: '.45 ACP', category: 'Submetralhadora' },
+  SMG_MP5: { name: 'MP5A3 TÁTICA', caliber: '9x19mm', category: 'Submetralhadora' },
+  SHOTGUN_12: { name: 'M870 BREACHER 12GA', caliber: 'Calibre 12', category: 'Escopeta Curto Alcance' },
+  SHOTGUN_SPAS: { name: 'SPAS-12 TÁTICA 12GA', caliber: 'Calibre 12', category: 'Escopeta Semiautomática' },
   AK47_RIFLE: { name: 'AK-47 COMANDO', caliber: '7.62x39mm', category: 'Fuzil de Assalto' },
+  AK12_RIFLE: { name: 'AK-12 SPETSNAZ', caliber: '5.45x39mm', category: 'Fuzil de Assalto' },
   CARBINE_AR: { name: 'CARABINA TÁTICA', caliber: '5.56x45mm', category: 'Carabina de Precisão' },
   L49_LMG: { name: 'LMG PESADA 100R', caliber: '5.56x45mm', category: 'Metralhadora Leve' },
   SNIPER_TACTICAL: { name: 'SNIPER TÁTICA S&B', caliber: '.308 Win', category: 'Fuzil Sniper' },
@@ -72,8 +83,11 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   onRecalibrateGyro,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'PLAY' | 'WEAPON' | 'RANKS' | 'BATTLE_PASS' | 'SETTINGS'
+    'PLAY' | 'INVENTORY' | 'WEAPON' | 'RANKS' | 'BATTLE_PASS' | 'SETTINGS'
   >('PLAY');
+  const [inventoryState, setInventoryState] = useState<PlayerInventoryState>(() =>
+    getPlayerInventoryState()
+  );
   const [showNewsModal, setShowNewsModal] = useState(false);
   const [showEventsModal, setShowEventsModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -89,6 +103,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   useEffect(() => {
     soundEngine.playMenuMusic();
     const unsub = subscribePlayerProfile((next) => setSyncState(next));
+    const unsubInv = subscribePlayerInventory((next) => setInventoryState(next));
     const unsubSocial = subscribeSocialInbox((inbox) => {
       const reqCount = Object.keys(inbox.requests || {}).length;
       const invCount = Object.keys(inbox.invites || {}).length;
@@ -96,6 +111,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     });
     return () => {
       unsub();
+      unsubInv();
       unsubSocial();
       soundEngine.stopMenuMusic();
     };
@@ -113,7 +129,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       ((playerXp - xpCurrentLevelBase) / (xpForNextLevel - xpCurrentLevelBase)) * 100
     )
   );
-  const savedCash = Math.max(loadSavedPlayerCash(), syncState.profile.playerCash);
+  const savedCash = loadSavedPlayerCash();
 
   const handleHover = () => {
     soundEngine.playMenuHover();
@@ -154,6 +170,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       <MenuBackground
         showHero={activeTab === 'PLAY' && !showRankedScreen}
         activeWeapon={activeWeapon}
+        selectedClass={inventoryState.selectedClass}
       />
 
       {/* 2. TOP HEADER BAR (Único local de Perfil, Amigos, Correio e Configurações) */}
@@ -173,17 +190,19 @@ export const MainMenu: React.FC<MainMenuProps> = ({
 
       {/* 3. CORPO PRINCIPAL LIMPO (Rail Esquerdo + Centro Livre sobre o Soldado 3D + Direita) */}
       <main
-        className={`relative z-10 flex-1 min-h-0 flex items-center px-3 sm:px-6 py-2 pointer-events-none overflow-hidden ${
+        className={`relative z-10 flex-1 min-h-0 flex items-center px-2.5 sm:px-4 lg:px-6 py-1 lg:py-2.5 pointer-events-none overflow-hidden ${
           activeTab === 'PLAY' ? 'justify-between' : 'justify-center'
         }`}
       >
         {activeTab === 'PLAY' && (
           <MainMenuPlayPanel
             activeWeapon={activeWeapon}
+            selectedClass={inventoryState.selectedClass}
             weaponName={activeWeaponMeta.name}
             weaponCategory={activeWeaponMeta.category}
             weaponCaliber={activeWeaponMeta.caliber}
             playerMmr={syncState.profile.mmr || 2450}
+            onOpenInventory={() => setActiveTab('INVENTORY')}
             onOpenWeaponSelect={() => setActiveTab('WEAPON')}
             onStartTraining={handleLaunchTraining}
             onStartDrill={handleLaunchDrill}
@@ -203,12 +222,26 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           />
         )}
 
+        {activeTab === 'INVENTORY' && (
+          <InventoryLoadoutModal
+            playerXp={playerXp}
+            playerCash={savedCash}
+            onSyncEquippedWeapon={(wId) => {
+              onSelectStartingWeapon(wId);
+              syncProgressionFromLocal(playerXp, savedCash, wId);
+            }}
+            onOpenWeaponGunsmith={() => setActiveTab('WEAPON')}
+            onClose={() => setActiveTab('PLAY')}
+          />
+        )}
+
         {activeTab === 'WEAPON' && (
           <WeaponInspectionModal
             activeWeapon={activeWeapon}
             playerXp={playerXp}
             onSelectWeapon={(wId) => {
               onSelectStartingWeapon(wId);
+              syncEquippedWeaponToInventory(wId);
               syncProgressionFromLocal(playerXp, savedCash, wId);
             }}
             onClose={() => setActiveTab('PLAY')}

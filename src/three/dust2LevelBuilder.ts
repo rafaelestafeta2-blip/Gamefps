@@ -388,6 +388,6 @@ function spawnDust2Squads(
   spawnBot({ id: 'dust2_t_ally1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -13.5, y: 8.0, z: 18.5, isAlly: true, patrolAxis: 'X', patrolRange: 2.5, hasArmor: true });
   spawnBot({ id: 'dust2_t_ally2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: -18.8, y: 8.0, z: 18.5, isAlly: true, patrolAxis: 'Z', patrolRange: 3.5, hasArmor: true });
   spawnBot({ id: 'dust2_t_ally3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -14.5, y: 8.0, z: 21.0, isAlly: true, patrolAxis: 'Z', patrolRange: 3.0 });
-  spawnBot({ id: 'dust2_t_ally4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: -18.0, y: 8.0, z: 21.0, isAlly: true, patrolAxis: 'Z', patrolRange: 2.5 });
+  spawnBot({ id: 'dust2_t_ally4', callsign: 'WARDEN-05', weaponId: 'SMG_MP5', x: -18.0, y: 8.0, z: 21.0, isAlly: true, patrolAxis: 'Z', patrolRange: 2.5 });
 }
 

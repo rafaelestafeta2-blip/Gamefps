@@ -88,6 +88,17 @@ export const WeaponSilhouette: React.FC<{
       </svg>
     );
   }
+  if (weaponId === 'SHOTGUN_12' || weaponId === 'SHOTGUN_SPAS') {
+    return (
+      <svg viewBox="0 0 88 28" fill="none" className={className}>
+        <path
+          d="M5 14L20 11H46V12.5H78V15H46V16.5H72V18.5H40L32 18L22 23H16L22 17L5 19V14Z"
+          fill="currentColor"
+        />
+        <rect x="47" y="16" width="16" height="3.2" rx="1" fill="currentColor" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 84 28" fill="none" className={className}>
       <path

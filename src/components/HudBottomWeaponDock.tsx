@@ -1,4 +1,9 @@
 import React from 'react';
+import {
+  getPlayerInventoryState,
+  isWeaponOwnedInInventory,
+  WARFACE_CLASS_LOADOUT_META,
+} from '../progression/loadoutSystem';
 import { GrenadeType, HudState, WeaponId } from '../types/game';
 import {
   bindTap,
@@ -22,7 +27,11 @@ interface HudBottomWeaponDockProps {
 const SHORT_WEAPON_TAG: Record<WeaponId, string> = {
   M4_CARBINE: 'M4A1',
   SMG_45: 'SMG .45',
+  SMG_MP5: 'MP5A3',
+  SHOTGUN_12: 'M870 12GA',
+  SHOTGUN_SPAS: 'SPAS-12',
   AK47_RIFLE: 'AK-47',
+  AK12_RIFLE: 'AK-12',
   CARBINE_AR: 'CARBINE',
   L49_LMG: 'LMG 100',
   SNIPER_TACTICAL: 'SNIPER S&B',
@@ -34,7 +43,11 @@ const SHORT_WEAPON_TAG: Record<WeaponId, string> = {
 const PRIMARY_CYCLE_ORDER: WeaponId[] = [
   'M4_CARBINE',
   'SMG_45',
+  'SMG_MP5',
+  'SHOTGUN_12',
+  'SHOTGUN_SPAS',
   'AK47_RIFLE',
+  'AK12_RIFLE',
   'CARBINE_AR',
   'L49_LMG',
   'SNIPER_TACTICAL',
@@ -63,11 +76,24 @@ export const HudBottomWeaponDock: React.FC<HudBottomWeaponDockProps> = ({
     }
     if (!isPrimaryActive) {
       onSelectWeapon(hud.primaryWeapon);
-    } else {
+    } else if (hud.drillMode === 'FREE_RANGE') {
       const idx = PRIMARY_CYCLE_ORDER.indexOf(hud.primaryWeapon);
       const nextWeapon =
         PRIMARY_CYCLE_ORDER[(idx + 1) % PRIMARY_CYCLE_ORDER.length];
       onSelectWeapon(nextWeapon);
+    } else {
+      const selectedClass = getPlayerInventoryState().selectedClass;
+      const allowedOwned = WARFACE_CLASS_LOADOUT_META[
+        selectedClass
+      ].allowedPrimaries.filter((w) => isWeaponOwnedInInventory(w));
+      const pool = allowedOwned.length > 0 ? allowedOwned : [hud.primaryWeapon];
+      const idx = pool.indexOf(hud.primaryWeapon);
+      const nextWeapon = pool[(idx + 1) % pool.length];
+      if (nextWeapon !== hud.primaryWeapon) {
+        onSelectWeapon(nextWeapon);
+      } else {
+        onToggleWeaponSlot();
+      }
     }
   };
 

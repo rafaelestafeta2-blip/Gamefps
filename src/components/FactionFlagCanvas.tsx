@@ -91,8 +91,11 @@ export const FactionFlagCanvas: React.FC<FactionFlagCanvasProps> = ({
       const aspect = w / Math.max(1, h);
       const visH = 2 * Math.tan((camera.fov * Math.PI) / 360) * camera.position.z;
       const visW = visH * aspect;
-      if (isCentered) {
-        // Centralizada atrás do Operador 3D na tela Rankeada
+      if (layoutMode === 'HERO_CENTER') {
+        // Mastro à esquerda atrás das caixas militares e tecido tremulando atrás do Soldado 3D
+        flagRig.position.set(-visW * 0.165, visH * 0.42, 0);
+        flagRig.scale.setScalar(Math.max(0.62, Math.min(visW * 0.148, visH * 0.295)));
+      } else if (isCentered) {
         flagRig.position.set(-visW * 0.14, visH * 0.40, 0);
         flagRig.scale.setScalar(Math.max(0.58, Math.min(visW * 0.13, visH * 0.275)));
       } else {
@@ -101,7 +104,7 @@ export const FactionFlagCanvas: React.FC<FactionFlagCanvasProps> = ({
       }
     };
     syncRigScaleToAspect(width, height);
-    flagRig.rotation.z = isCentered ? -0.025 : -0.045;
+    flagRig.rotation.z = layoutMode === 'HERO_CENTER' ? -0.055 : isCentered ? -0.025 : -0.045;
     scene.add(flagRig);
 
     const poleMat = new THREE.MeshStandardMaterial({

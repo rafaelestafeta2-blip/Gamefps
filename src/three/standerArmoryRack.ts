@@ -10,7 +10,11 @@ interface WeaponPlaqueMeta {
 export const ARMORY_WEAPONS: WeaponPlaqueMeta[] = [
   { id: 'M4_CARBINE', label: 'M4A1 SOPMOD', cal: '5.56x45MM' },
   { id: 'AK47_RIFLE', label: 'AK-47 COMANDO', cal: '7.62x39MM' },
+  { id: 'AK12_RIFLE', label: 'AK-12 SPETSNAZ', cal: '5.45x39MM' },
   { id: 'SMG_45', label: 'SMG .45 SUB', cal: '.45 ACP' },
+  { id: 'SMG_MP5', label: 'MP5A3 9MM', cal: '9x19MM' },
+  { id: 'SHOTGUN_12', label: 'M870 BREACHER', cal: '12 GAUGE' },
+  { id: 'SHOTGUN_SPAS', label: 'SPAS-12 TÁTICA', cal: '12 GAUGE' },
   { id: 'CARBINE_AR', label: 'CARABINA AR', cal: '5.56x45MM' },
   { id: 'L49_LMG', label: 'LMG PESADA', cal: '100 TIROS' },
   { id: 'SNIPER_TACTICAL', label: 'SNIPER S&B', cal: '.308 WIN' },
@@ -108,7 +112,8 @@ function createWall3DWeaponModel(weaponId: WeaponId): THREE.Group {
   };
 
   switch (weaponId) {
-    case 'AK47_RIFLE': {
+    case 'AK47_RIFLE':
+    case 'AK12_RIFLE': {
       // Corpo AK-47 com madeira clássica e carregador curvo
       addPart(0.24, 0.05, 0.035, 0, 0, 0, metal); // Receptor
       addPart(0.26, 0.02, 0.02, 0.23, 0.008, 0, metal); // Cano
@@ -135,13 +140,24 @@ function createWall3DWeaponModel(weaponId: WeaponId): THREE.Group {
       }
       break;
     }
-    case 'SMG_45': {
+    case 'SMG_45':
+    case 'SMG_MP5': {
       addPart(0.19, 0.048, 0.032, 0, 0, 0, dark); // Caixa de culatra
       addPart(0.12, 0.02, 0.02, 0.15, 0.004, 0, dark); // Cano compacto
       addPart(0.14, 0.035, 0.015, -0.15, -0.01, 0, dark); // Coronha rebatível de arame
       addPart(0.035, 0.06, 0.02, -0.04, -0.048, 0, dark, 0, 0, 0.28); // Empunhadura
-      addPart(0.03, 0.14, 0.02, 0.02, -0.08, 0, dark, 0, 0, 0.05); // Carregador reto .45
+      addPart(0.03, 0.14, 0.02, 0.02, -0.08, 0, dark, 0, 0, weaponId === 'SMG_MP5' ? 0.22 : 0.05); // Carregador
       addPart(0.05, 0.03, 0.022, 0.01, 0.035, 0, dark); // Mini red dot
+      break;
+    }
+    case 'SHOTGUN_12':
+    case 'SHOTGUN_SPAS': {
+      addPart(0.22, 0.055, 0.036, 0, 0, 0, dark); // Receptor 12ga
+      addPart(0.36, 0.024, 0.024, 0.27, 0.014, 0, metal); // Cano 12ga
+      addPart(0.32, 0.02, 0.02, 0.25, -0.012, 0, dark); // Tubo carregador inferior
+      addPart(0.16, 0.042, 0.038, 0.21, -0.012, 0, dark); // Telha/Pump
+      addPart(0.2, 0.068, 0.032, -0.2, -0.02, 0, dark, 0, 0, -0.12); // Coronha
+      addPart(0.036, 0.068, 0.024, -0.08, -0.052, 0, dark, 0, 0, 0.34); // Punho
       break;
     }
     case 'L49_LMG': {

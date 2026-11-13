@@ -412,10 +412,12 @@ export function buildPreProductionLevel(
         g.add(slide, grip, barrel);
         break;
       }
-      case 'SMG_45': {
+      case 'SMG_45':
+      case 'SMG_MP5': {
         const body = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.065, 0.032), matMetal);
         const mag = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.16, 0.022), matAccent);
         mag.position.set(0.04, -0.09, 0);
+        if (weaponId === 'SMG_MP5') mag.rotation.z = 0.22;
         const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.11, 0.024), matMetal);
         grip.position.set(-0.09, -0.06, 0);
         grip.rotation.z = -0.25;
@@ -425,6 +427,22 @@ export function buildPreProductionLevel(
         const stock = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.016), matMetal);
         stock.position.set(-0.2, -0.01, 0);
         g.add(body, mag, grip, barrel, stock);
+        break;
+      }
+      case 'SHOTGUN_12':
+      case 'SHOTGUN_SPAS': {
+        const rec = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.06, 0.036), matMetal);
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.013, 0.42, 10), matMetal);
+        barrel.rotation.z = Math.PI / 2;
+        barrel.position.set(0.3, 0.016, 0);
+        const pump = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.042, 0.038), matAccent);
+        pump.position.set(0.23, -0.014, 0);
+        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.11, 0.026), matAccent);
+        grip.position.set(-0.11, -0.06, 0);
+        grip.rotation.z = -0.34;
+        const stock = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.075, 0.032), matMetal);
+        stock.position.set(-0.22, -0.02, 0);
+        g.add(rec, barrel, pump, grip, stock);
         break;
       }
       case 'M4_CARBINE': {
@@ -468,7 +486,8 @@ export function buildPreProductionLevel(
         g.add(rec, rail, barrel, scope, mag, grip, stock);
         break;
       }
-      case 'AK47_RIFLE': {
+      case 'AK47_RIFLE':
+      case 'AK12_RIFLE': {
         const rec = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.075, 0.032), matMetal);
         const woodHandguard = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.055, 0.034), matAccent);
         woodHandguard.position.set(0.18, 0.01, 0);

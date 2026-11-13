@@ -1,7 +1,11 @@
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, onSnapshot, setDoc, Unsubscribe } from 'firebase/firestore';
 import { evaluateUnlockedAchievements } from '../progression/achievementsData';
-import { getRankForXp, registerCloudProgressionHook } from '../progression/ranks';
+import {
+  getRankForXp,
+  registerCloudCashSpendHook,
+  registerCloudProgressionHook,
+} from '../progression/ranks';
 import { WeaponId } from '../types/game';
 import {
   auth,
@@ -216,6 +220,17 @@ export function syncProgressionFromLocal(
 
 registerCloudProgressionHook((xp, cash) => {
   syncProgressionFromLocal(xp, cash);
+});
+
+registerCloudCashSpendHook((newCash) => {
+  state.profile = {
+    ...state.profile,
+    playerCash: Math.max(0, newCash),
+    updatedAt: new Date().toISOString(),
+  };
+  persistLocalProfile(state.profile);
+  emitState();
+  scheduleCloudPush();
 });
 
 export function recordCombatTelemetryDelta(delta: {

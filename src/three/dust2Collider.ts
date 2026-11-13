@@ -226,7 +226,8 @@ export class Dust2TriangleCollider {
   /**
    * Computes exact barycentric Y height on floor/ramp/stair triangles under (x, z).
    * Ignores downward-facing ceiling triangles (`normal.y < -0.45`) above feet so climbing
-   * near a ceiling never snaps the player onto the roof of the map.
+   * near a ceiling never snaps the player onto the roof of the map, and rescues the player
+   * onto the nearest walkable floor above if `yBottom` ever drops below the terrain.
    */
   public getGroundHeight(x: number, yBottom: number, z: number): number {
     if (!this.ready) return yBottom;
@@ -234,10 +235,11 @@ export class Dust2TriangleCollider {
     const cx = Math.floor(x / this.cellSize);
     const cz = Math.floor(z / this.cellSize);
     const bucket = this.floorGrid.get(this.cellKey(cx, cz));
-    if (!bucket || bucket.length === 0) return 0;
+    if (!bucket || bucket.length === 0) return Math.max(0, yBottom);
 
     let bestY = -999;
-    let fallbackLowestY = 999;
+    let closestWalkableAboveY = 999;
+    let fallbackHighestFloorY = -999;
 
     for (let i = 0; i < bucket.length; i++) {
       const t = bucket[i];
@@ -248,24 +250,31 @@ export class Dust2TriangleCollider {
       const yOnTri = this.sampleTriangleY(t, x, z);
       if (yOnTri === null) continue;
 
+      if (yOnTri < 10.5 && yOnTri > yBottom && yOnTri < closestWalkableAboveY) {
+        closestWalkableAboveY = yOnTri;
+      }
+
+      if (yOnTri < 10.5 && yOnTri > fallbackHighestFloorY) {
+        fallbackHighestFloorY = yOnTri;
+      }
+
       // Never treat a downward-facing ceiling above the player's feet as a step-up floor
       if (t.normal.y < -0.45 && yOnTri > yBottom + 0.08) {
         continue;
       }
 
-      if (yOnTri < fallbackLowestY) {
-        fallbackLowestY = yOnTri;
-      }
-
-      if (yOnTri <= yBottom + 0.54 && yOnTri > bestY) {
+      if (yOnTri <= yBottom + 0.65 && yOnTri > bestY) {
         bestY = yOnTri;
       }
     }
 
     if (bestY > -900) return bestY;
-    if (fallbackLowestY < 900) return fallbackLowestY;
-    return 0;
+    // Rescue player if yBottom spawned or dipped below the floor at (x, z)
+    if (closestWalkableAboveY < 900) return closestWalkableAboveY;
+    if (fallbackHighestFloorY > -900) return fallbackHighestFloorY;
+    return Math.max(0, yBottom);
   }
+
 
   /**
    * Clamps upward vertical motion (`nextY > prevY`) so the player's head (`nextY + playerHeight`)

@@ -10,7 +10,10 @@ import { OnlineRoomState } from '../multiplayer/onlineTypes';
 import { DrillMode, WeaponId } from '../types/game';
 import { CompetitiveRanksModal } from './CompetitiveRanksModal';
 import { FactionFlagCanvas } from './FactionFlagCanvas';
-import { createWarzoneBackdropCanvas } from './FactionFlagTexture';
+import {
+  createWarzoneBackdropCanvas,
+  drawAnimatedWarzoneSkyLayer,
+} from './FactionFlagTexture';
 import {
   CompetitiveRankBadgeSvg,
   getCompetitiveRankProgression,
@@ -39,7 +42,6 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
   const [selectedArena, setSelectedArena] = useState<DrillMode>(initialArena);
   const [isSearching, setIsSearching] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
-  const [matchedPlayersCount, setMatchedPlayersCount] = useState(0);
   const [roomState, setRoomState] = useState<OnlineRoomState | null>(() => getActiveOnlineRoom());
   const [rankPage, setRankPage] = useState<0 | 1>(0);
   const [showAllRanksModal, setShowAllRanksModal] = useState(false);
@@ -51,7 +53,7 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
   const { current, next, targetMmr, mmrRemaining, progressPct } =
     getCompetitiveRankProgression(displayMmr);
 
-  // Cenário Warzone azul (VANGUARD) estático + faíscas azuis/âmbar
+  // Cenário Warzone azul (VANGUARD) + Helicópteros voando + Faíscas azuis/âmbar
   useEffect(() => {
     const bgCanvas = backdropRef.current;
     const sparkCanvas = sparksRef.current;
@@ -89,10 +91,14 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
       color: idx % 5 === 0 ? '251, 146, 60' : idx % 2 === 0 ? '56, 189, 248' : '99, 102, 241',
     }));
 
-    const renderSparks = () => {
+    const startTime = performance.now();
+    const renderSparks = (now: number) => {
       if (document.hidden) return;
       animId = requestAnimationFrame(renderSparks);
+      const timeSec = (now - startTime) * 0.001;
       sparkCtx.clearRect(0, 0, w, h);
+      drawAnimatedWarzoneSkyLayer(sparkCtx, w, h, timeSec, 'VANGUARD');
+
       for (const s of sparks) {
         s.x += s.vx;
         s.y += s.vy;
@@ -108,7 +114,7 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
         sparkCtx.fill();
       }
     };
-    renderSparks();
+    animId = requestAnimationFrame(renderSparks);
 
     return () => {
       cancelAnimationFrame(animId);
@@ -133,37 +139,17 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
     return () => unsub();
   }, [onRankedMatchReady, selectedArena]);
 
+  // Cronômetro real de busca Ranked (expande tolerância MMR gradualmente; NUNCA simula jogadores falsos)
   useEffect(() => {
     if (!isSearching) {
       setElapsedSec(0);
-      setMatchedPlayersCount(0);
       return;
     }
-    setMatchedPlayersCount(1);
     const timer = window.setInterval(() => {
-      setElapsedSec((prev) => {
-        const nextSec = prev + 1;
-        setMatchedPlayersCount((currCount) => {
-          const realRoomCount = roomState ? Object.keys(roomState.players || {}).length : 1;
-          const stepGain = nextSec % 2 === 0 ? 1 + (nextSec >= 8 ? 1 : 0) : 0;
-          const nextTotal = Math.min(
-            REQUIRED_RANKED_PLAYERS,
-            Math.max(realRoomCount, currCount + stepGain)
-          );
-          if (nextTotal >= REQUIRED_RANKED_PLAYERS && !launchedRef.current) {
-            launchedRef.current = true;
-            window.setTimeout(() => {
-              soundEngine.playMenuSelect();
-              onRankedMatchReady(roomState?.arenaMode || selectedArena);
-            }, 650);
-          }
-          return nextTotal;
-        });
-        return nextSec;
-      });
+      setElapsedSec((prev) => prev + 1);
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [isSearching, onRankedMatchReady, roomState, selectedArena]);
+  }, [isSearching]);
 
   const handleToggleSearchRanked = async () => {
     soundEngine.playMenuSelect();
@@ -174,7 +160,6 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
     }
     launchedRef.current = false;
     setIsSearching(true);
-    setMatchedPlayersCount(1);
     await quickMatchOrCreateRoom(selectedArena, 'RANKED');
   };
 
@@ -188,9 +173,7 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
   };
 
   const connectedPlayersCount = roomState ? Object.keys(roomState.players || {}).length : 0;
-  const shownPlayersCount = isSearching
-    ? Math.max(connectedPlayersCount, matchedPlayersCount)
-    : 0;
+  const shownPlayersCount = isSearching ? Math.max(1, connectedPlayersCount) : 0;
   const mmrTolerance = Math.min(400, 150 + Math.floor(elapsedSec / 4) * 25);
 
   return (

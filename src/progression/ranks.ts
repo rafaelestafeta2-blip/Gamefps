@@ -32,11 +32,18 @@ const LOCAL_STORAGE_CASH_KEY = 'kinetic_fps_warface_cash_v2';
 export const INITIAL_PLAYER_CASH = 3000;
 
 let cloudProgressionHook: ((xp: number, cash: number) => void) | null = null;
+let cloudCashSpendHook: ((newCash: number) => void) | null = null;
 
 export function registerCloudProgressionHook(
   hook: (xp: number, cash: number) => void
 ): void {
   cloudProgressionHook = hook;
+}
+
+export function registerCloudCashSpendHook(
+  hook: (newCash: number) => void
+): void {
+  cloudCashSpendHook = hook;
 }
 
 export function resetLocalProgression(): void {
@@ -105,6 +112,18 @@ export function addPlayerCash(delta: number): number {
   return next;
 }
 
+export function spendPlayerCash(amount: number): boolean {
+  const current = loadSavedPlayerCash();
+  if (amount <= 0) return true;
+  if (current < amount) return false;
+  const next = Math.max(0, current - Math.round(amount));
+  savePlayerCashDirect(next);
+  if (cloudCashSpendHook) {
+    cloudCashSpendHook(next);
+  }
+  return true;
+}
+
 export function getRankForXp(xp: number): RankDefinition {
   let currentRank = WARFACE_RANKS[0];
   for (const rank of WARFACE_RANKS) {
@@ -129,8 +148,22 @@ export function getRequiredXpForWeapon(weaponId: WeaponId): {
   requiredLevel: number;
   rankTitle: string;
 } {
-  if (weaponId === 'KNIFE_TACTICAL') {
+  if (
+    weaponId === 'KNIFE_TACTICAL' ||
+    weaponId === 'AK12_RIFLE' ||
+    weaponId === 'M4_CARBINE' ||
+    weaponId === 'SHOTGUN_12' ||
+    weaponId === 'SMG_45' ||
+    weaponId === 'SNIPER_TACTICAL' ||
+    weaponId === 'P50_PISTOL'
+  ) {
     return { requiredLevel: 1, rankTitle: 'Trainee' };
+  }
+  if (weaponId === 'SMG_MP5') {
+    return { requiredLevel: 4, rankTitle: 'Cadete Sênior' };
+  }
+  if (weaponId === 'SHOTGUN_SPAS') {
+    return { requiredLevel: 6, rankTitle: 'Recruta' };
   }
   for (const rank of WARFACE_RANKS) {
     if (rank.unlockedWeapons.includes(weaponId)) {
@@ -167,8 +200,20 @@ export function getRequiredXpForAttachment(
 }
 
 export function isWeaponUnlockedAtXp(weaponId: WeaponId, xp: number): boolean {
-  if (weaponId === 'KNIFE_TACTICAL') return true;
+  if (
+    weaponId === 'KNIFE_TACTICAL' ||
+    weaponId === 'AK12_RIFLE' ||
+    weaponId === 'M4_CARBINE' ||
+    weaponId === 'SHOTGUN_12' ||
+    weaponId === 'SMG_45' ||
+    weaponId === 'SNIPER_TACTICAL' ||
+    weaponId === 'P50_PISTOL'
+  ) {
+    return true;
+  }
   const currentRank = getRankForXp(xp);
+  if (weaponId === 'SMG_MP5') return currentRank.level >= 4;
+  if (weaponId === 'SHOTGUN_SPAS') return currentRank.level >= 6;
   return currentRank.unlockedWeapons.includes(weaponId);
 }
 

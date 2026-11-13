@@ -10,6 +10,8 @@ import {
 import {
   AK47_RIFLE_GITHUB_RAW_URL,
   AK47_RIFLE_LOCAL_URL,
+  AK12_RIFLE_GITHUB_RAW_URL,
+  AK12_RIFLE_LOCAL_URL,
   CARBINE_AR_GITHUB_RAW_URL,
   CARBINE_AR_LOCAL_URL,
   L49_LMG_GITHUB_RAW_URL,
@@ -27,6 +29,7 @@ import {
   KNIFE_GITHUB_RAW_URL,
   KNIFE_LOCAL_URL,
 } from '../three/weaponBuilder';
+import { createBotThirdPersonWeaponMesh } from '../three/botWeaponProps';
 import { WeaponId } from '../types/game';
 import { WarfaceRankIcon } from './WarfaceRankIcon';
 
@@ -38,7 +41,7 @@ interface WeaponInspectionModalProps {
   onStartTraining: () => void;
 }
 
-type WeaponCategory = 'ALL' | 'ASSALTO' | 'SMG' | 'SNIPER' | 'LMG' | 'PISTOLA';
+type WeaponCategory = 'ALL' | 'ASSALTO' | 'ESCOPETA' | 'SMG' | 'SNIPER' | 'LMG' | 'PISTOLA';
 
 interface WeaponSpec {
   id: WeaponId;
@@ -79,7 +82,7 @@ const WEAPON_SPECS: Record<WeaponId, WeaponSpec> = {
     reserve: 120,
     localUrl: M4_FPS_PACK_LOCAL_URL,
     githubUrl: M4_FPS_PACK_GITHUB_RAW_URL,
-    readyClipName: 'Fire',
+    readyClipName: 'allanims',
     readyPoseTime: 0,
     targetSpan: 0.78,
   },
@@ -101,6 +104,27 @@ const WEAPON_SPECS: Record<WeaponId, WeaponSpec> = {
     localUrl: AK47_RIFLE_LOCAL_URL,
     githubUrl: AK47_RIFLE_GITHUB_RAW_URL,
     readyClipName: 'RIG_UE5_Comando_AK_Idle',
+    readyPoseTime: 0,
+    targetSpan: 0.8,
+  },
+  AK12_RIFLE: {
+    id: 'AK12_RIFLE',
+    name: 'AK-12 SPETSNAZ',
+    caliber: '5.45x39mm Russian',
+    categoryTag: 'Fuzil de Assalto',
+    category: 'ASSALTO',
+    description:
+      'Fuzil de assalto moderno russo de 5ª geração com trilhos Picatinny integrados, mira óptica tática e recuo controlado.',
+    firepower: 93,
+    accuracy: 86,
+    mobility: 76,
+    range: '85m',
+    fireRate: '700 RPM',
+    magSize: 30,
+    reserve: 120,
+    localUrl: AK12_RIFLE_LOCAL_URL,
+    githubUrl: AK12_RIFLE_GITHUB_RAW_URL,
+    readyClipName: 'Idle',
     readyPoseTime: 0,
     targetSpan: 0.8,
   },
@@ -145,6 +169,66 @@ const WEAPON_SPECS: Record<WeaponId, WeaponSpec> = {
     readyClipName: 'allanims',
     readyPoseTime: 0,
     targetSpan: 0.68,
+  },
+  SMG_MP5: {
+    id: 'SMG_MP5',
+    name: 'MP5A3 TÁTICA',
+    caliber: '9x19mm Parabellum',
+    categoryTag: 'Submetralhadora',
+    category: 'SMG',
+    description:
+      'Submetralhadora clássica de forças especiais com controle excepcional de rajada e carregador curvo 9mm.',
+    firepower: 72,
+    accuracy: 85,
+    mobility: 94,
+    range: '40m',
+    fireRate: '830 RPM',
+    magSize: 30,
+    reserve: 120,
+    localUrl: '',
+    githubUrl: '',
+    readyPoseTime: 0,
+    targetSpan: 0.7,
+  },
+  SHOTGUN_12: {
+    id: 'SHOTGUN_12',
+    name: 'M870 BREACHER 12GA',
+    caliber: 'Calibre 12 Buckshot',
+    categoryTag: 'Escopeta Pump 12GA',
+    category: 'ESCOPETA',
+    description:
+      'Escopeta tática Pump-Action de curto alcance. Dispara 8 bagos de chumbo 00-Buckshot letais em combate próximo.',
+    firepower: 100,
+    accuracy: 62,
+    mobility: 82,
+    range: '14m',
+    fireRate: 'Pump 88 RPM',
+    magSize: 6,
+    reserve: 24,
+    localUrl: '',
+    githubUrl: '',
+    readyPoseTime: 0,
+    targetSpan: 0.78,
+  },
+  SHOTGUN_SPAS: {
+    id: 'SHOTGUN_SPAS',
+    name: 'SPAS-12 TÁTICA 12GA',
+    caliber: 'Calibre 12 Magnum',
+    categoryTag: 'Escopeta Semiautomática',
+    category: 'ESCOPETA',
+    description:
+      'Escopeta de combate semiautomática com tubo de 8 cartuchos e altíssima cadência em corredores CQB.',
+    firepower: 96,
+    accuracy: 64,
+    mobility: 78,
+    range: '15m',
+    fireRate: 'Semi 188 RPM',
+    magSize: 8,
+    reserve: 32,
+    localUrl: '',
+    githubUrl: '',
+    readyPoseTime: 0,
+    targetSpan: 0.8,
   },
   SNIPER_TACTICAL: {
     id: 'SNIPER_TACTICAL',
@@ -262,6 +346,12 @@ const HIDDEN_ARM_MATERIAL_NAMES = new Set([
   'm_gloves_black',
   'm_shirt_blackcamo2',
   'textura',
+  'v_hands_gloves_sf2.tga',
+  'v_hands_sleeves_sf2.tga',
+  'v_hands_watch_sf2_d.tga.001',
+  'dmc5_soldier_gear_mat',
+  'dmc5_soldier_hands_mat',
+  'dmc5_soldier_shirt_mat',
 ]);
 
 const HIDDEN_ARM_NODE_NAMES = new Set([
@@ -271,9 +361,22 @@ const HIDDEN_ARM_NODE_NAMES = new Set([
   'object_80',
   'object_84',
   'object_102',
+  'object_122',
+  'object_124',
+  'object_126',
+  'object_128',
   'mag2_j_051',
   'mag2',
   'mag2_m4_d_0',
+  'mag.001',
+  'mag.001_0',
+  'bullets',
+  'bullets_0',
+  'requests_studio_hands',
+  'requests_studio_hands_0',
+  'requests_studio_hands_1',
+  'watch',
+  'watch_0',
   'ch22_body',
   'ch22_body_textura_0',
   'armmesh_arms_0',
@@ -639,6 +742,16 @@ export const WeaponInspectionModal: React.FC<WeaponInspectionModalProps> = ({
             if (std.color) {
               std.color.setHex(0xffffff);
             }
+            if (
+              selectedId === 'M4_CARBINE' &&
+              ((std.name || '').toLowerCase() === 'lens' ||
+                m.name.toLowerCase().includes('lens_lens'))
+            ) {
+              std.transparent = true;
+              std.opacity = 1.0;
+              std.depthWrite = false;
+              m.renderOrder = 12;
+            }
             std.needsUpdate = true;
           };
           if (Array.isArray(m.material)) {
@@ -722,6 +835,39 @@ export const WeaponInspectionModal: React.FC<WeaponInspectionModalProps> = ({
       setIsLoadingModel(false);
     };
 
+    if (!wSpec.localUrl) {
+      const procModel = createBotThirdPersonWeaponMesh(selectedId, true);
+      procModel.rotation.x = -0.16;
+      const centeringGroup = new THREE.Group();
+      centeringGroup.add(procModel);
+      procModel.updateMatrixWorld(true);
+      const box = computeVisibleWeaponBounds(procModel);
+      if (!box.isEmpty()) {
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+        box.getCenter(center);
+        box.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+        const normScale = wSpec.targetSpan / maxDim;
+        procModel.position.set(
+          -center.x * normScale,
+          -center.y * normScale,
+          -center.z * normScale
+        );
+        procModel.scale.setScalar(normScale);
+      }
+      targetRotYRef.current = Math.PI * 0.45;
+      currentRotYRef.current = Math.PI * 0.45;
+      targetRotXRef.current = 0.05;
+      currentRotXRef.current = 0.05;
+      zoomScaleRef.current = 1.0;
+      turntablePivot.add(centeringGroup);
+      setIsLoadingModel(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     loader.load(wSpec.localUrl, onModelLoaded, undefined, () => {
       loader.load(wSpec.githubUrl, onModelLoaded, undefined, () => {
         if (!cancelled) setIsLoadingModel(false);
@@ -789,8 +935,9 @@ export const WeaponInspectionModal: React.FC<WeaponInspectionModalProps> = ({
         {/* Center Category Filter Tabs */}
         <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar">
           {[
-            { id: 'ALL', label: 'TODAS (8)' },
+            { id: 'ALL', label: 'TODAS' },
             { id: 'ASSALTO', label: 'ASSALTO' },
+            { id: 'ESCOPETA', label: '12GA' },
             { id: 'SMG', label: 'SMG' },
             { id: 'SNIPER', label: 'SNIPER' },
             { id: 'LMG', label: 'LMG' },

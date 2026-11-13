@@ -330,6 +330,6 @@ export function spawnYard5v5Bots(
   spawnBot({ id: 'yard_ally_1', callsign: 'RECON-02', weaponId: 'SNIPER_BOLT', x: -2.2, z: 33.8, isAlly: true, patrolAxis: 'Z', patrolRange: 5.5, patrolSpeed: 1.35, hasArmor: true });
   spawnBot({ id: 'yard_ally_2', callsign: 'STRIKER-03', weaponId: 'AK47_RIFLE', x: 2.2, z: 33.8, isAlly: true, patrolAxis: 'Z', patrolRange: 6.0, patrolSpeed: 1.25, hasArmor: true });
   spawnBot({ id: 'yard_ally_3', callsign: 'LIFELINE-04', weaponId: 'M4_CARBINE', x: -1.6, z: 36.2, isAlly: true, patrolAxis: 'Z', patrolRange: 4.5, patrolSpeed: 1.2 });
-  spawnBot({ id: 'yard_ally_4', callsign: 'WARDEN-05', weaponId: 'M4_CARBINE', x: 1.6, z: 36.2, isAlly: true, patrolAxis: 'Z', patrolRange: 4.5, patrolSpeed: 1.2 });
+  spawnBot({ id: 'yard_ally_4', callsign: 'WARDEN-05', weaponId: 'SMG_MP5', x: 1.6, z: 36.2, isAlly: true, patrolAxis: 'Z', patrolRange: 4.5, patrolSpeed: 1.2 });
 }
 

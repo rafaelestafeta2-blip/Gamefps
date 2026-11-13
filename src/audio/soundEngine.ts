@@ -29,9 +29,9 @@ export const AK47_RELOAD_WAV_LOCAL_URL = '/sounds/ak47_reload.wav';
 export const AK47_RELOAD_WAV_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/fd19226e4612b67ce68f0651d5b003ba3a200a99/Sound/Ak47/674742__serutonin-deprivd__ak-47-assault-rifle-being-unloaded-and-reloaded.wav';
 
-export const AK47_BOLT_RACK_WAV_LOCAL_URL = '/sounds/ak47_bolt_rack.wav';
+export const AK47_BOLT_RACK_WAV_LOCAL_URL = '/audio/ak_bolt_rack.wav';
 export const AK47_BOLT_RACK_WAV_GITHUB_RAW_URL =
-  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/fd19226e4612b67ce68f0651d5b003ba3a200a99/Sound/Ak47/543597__dwightsabeast__ak-47-action-rack-4.wav';
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/23774ab834898a82f4399fdfe52e621b5977b88f/Sound/543597__dwightsabeast__ak-47-action-rack-4%20(1).wav';
 
 export const MENU_MUSIC_LOCAL_URL =
   '/sounds/menu_theme.m4a';
@@ -1172,8 +1172,8 @@ class TacticalSoundEngine {
       return;
     }
 
-    // 3. REAL AK-47 KALASHNIKOV (7.62X39MM) PUNCHY METALLIC WAV SAMPLE FOR AK47_RIFLE
-    if (weaponId === 'AK47_RIFLE') {
+    // 3. REAL AK-47 KALASHNIKOV (7.62X39MM) PUNCHY METALLIC WAV SAMPLE FOR AK47_RIFLE & AK12_RIFLE
+    if (weaponId === 'AK47_RIFLE' || weaponId === 'AK12_RIFLE') {
       if (this.ak47ShotBuffer) {
         const src = ctx.createBufferSource();
         src.buffer = this.ak47ShotBuffer;
@@ -1245,7 +1245,55 @@ class TacticalSoundEngine {
       return;
     }
 
-    // 2. 5.56MM NATO PROCEDURAL SYNTHESIS FOR L49 LMG & M4A1 CARBINE
+    // 5. 12-GAUGE BUCKSHOT SHOTGUN BLAST (SHOTGUN_12 PUMP & SHOTGUN_SPAS COMBAT)
+    if (weaponId === 'SHOTGUN_12' || weaponId === 'SHOTGUN_SPAS') {
+      const boomOsc = ctx.createOscillator();
+      const boomGain = ctx.createGain();
+      boomOsc.type = 'triangle';
+      boomOsc.frequency.setValueAtTime(suppressed ? 95 : 135, now);
+      boomOsc.frequency.exponentialRampToValueAtTime(28, now + (suppressed ? 0.14 : 0.24));
+      boomGain.gain.setValueAtTime(suppressed ? 0.52 : 0.95, now);
+      boomGain.gain.exponentialRampToValueAtTime(0.001, now + (suppressed ? 0.16 : 0.28));
+      boomOsc.connect(boomGain);
+      boomGain.connect(ctx.destination);
+      boomOsc.start(now);
+      boomOsc.stop(now + 0.3);
+
+      const noiseSrc = ctx.createBufferSource();
+      noiseSrc.buffer = this.noiseBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'lowpass';
+      bp.frequency.setValueAtTime(suppressed ? 1600 : 5200, now);
+      bp.frequency.exponentialRampToValueAtTime(280, now + (suppressed ? 0.18 : 0.34));
+      const nGain = ctx.createGain();
+      nGain.gain.setValueAtTime(suppressed ? 0.55 : 1.05, now);
+      nGain.gain.exponentialRampToValueAtTime(0.001, now + (suppressed ? 0.19 : 0.36));
+      noiseSrc.connect(bp);
+      bp.connect(nGain);
+      nGain.connect(ctx.destination);
+      noiseSrc.start(now);
+      noiseSrc.stop(now + 0.38);
+
+      if (weaponId === 'SHOTGUN_12') {
+        // Metallic pump-action slide rack click-clack 230ms after shot
+        [0.22, 0.34].forEach((offset, idx) => {
+          const clkOsc = ctx.createOscillator();
+          const clkGain = ctx.createGain();
+          clkOsc.type = 'square';
+          clkOsc.frequency.setValueAtTime(idx === 0 ? 1850 : 2250, now + offset);
+          clkOsc.frequency.exponentialRampToValueAtTime(640, now + offset + 0.055);
+          clkGain.gain.setValueAtTime(0.14, now + offset);
+          clkGain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.06);
+          clkOsc.connect(clkGain);
+          clkGain.connect(ctx.destination);
+          clkOsc.start(now + offset);
+          clkOsc.stop(now + offset + 0.065);
+        });
+      }
+      return;
+    }
+
+    // 6. 5.56MM NATO / 9MM PROCEDURAL SYNTHESIS FOR L49 LMG & SMG_MP5
     if (suppressed) {
       // Suppressed 5.56mm: High-pressure baffle hiss + tight low thud + loud bolt carrier clack
       const noise = ctx.createBufferSource();
@@ -1497,13 +1545,13 @@ class TacticalSoundEngine {
       el.play().catch(() => {});
     }
 
-    if (isDry) {
-      setTimeout(() => {
-        if (!this.muted) {
-          this.playAk47BoltRack();
-        }
-      }, 1550);
-    }
+    // Play the authentic AK-47/AK-12 metallic bolt rack as the hand pulls the charging handle at the end of the reload animation
+    const boltRackDelayMs = isDry ? 1500 : 1380;
+    setTimeout(() => {
+      if (!this.muted) {
+        this.playAk47BoltRack();
+      }
+    }, boltRackDelayMs);
   }
 
   public playAk47BoltRack(): void {

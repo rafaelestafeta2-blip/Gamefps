@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OpticType, ReloadPhase, WeaponId } from '../types/game';
 import { ProceduralTextures } from './textures';
 import { WeaponAttachmentSystem } from './attachmentSystem';
+import { createSculptedFirstPersonWeaponGroup } from './sculptedFirearms';
 
 // Direct GitHub Raw URLs & bundled local mirrors for all 8 animated 3D FPS weapons and Arms Rig
 export const MARK_23_GITHUB_RAW_URL =
@@ -17,8 +18,71 @@ export const SMG_45_GITHUB_RAW_URL =
 export const SMG_45_LOCAL_URL = '/models/fps_animated_smg.glb';
 
 export const M4_FPS_PACK_GITHUB_RAW_URL =
-  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/7d6bce91991948aba943e1a2d31032cf4dfc9899/m4_-_fps_weapon_animations_pack_v.1.glb';
-export const M4_FPS_PACK_LOCAL_URL = '/models/m4_fps_pack.glb';
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/764ad262156d6371a9fdf172f30267aa431d5b78/Acessorio/Armas/fps_animated_carbine%20(1).glb';
+export const M4_FPS_PACK_LOCAL_URL =
+  '/models/weapons/fps_animated_carbine_m4.glb';
+
+/**
+ * Normalizes the 10,000x unbaked vertex coordinates on `Object_130` (M4A4 body)
+ * and `Object_132` (M4A4 magazine) in `animated_fps_m4a4.glb` into bind-world
+ * meters aligned with `Base_078` and `Mag_079`.
+ */
+export function normalizeAnimatedM4A4Model(modelScene: THREE.Object3D): void {
+  const pBaseX = -0.07181;
+  const pBaseY = 1.46559;
+  const pBaseZ = 0.54038;
+  const rawPivotX = 705.24015;
+  const rawPivotY = -14655.95;
+  const rawPivotZ = -5403.81;
+  const yaw = Math.atan2(0.03083, 0.17067);
+  const cosY = Math.cos(yaw);
+  const sinY = Math.sin(yaw);
+
+  const seenBuffers = new Set<THREE.BufferAttribute | THREE.InterleavedBufferAttribute>();
+  modelScene.traverse((child) => {
+    if (!(child as THREE.Mesh).isMesh) return;
+    const mesh = child as THREE.Mesh;
+    if (mesh.name !== 'Object_130' && mesh.name !== 'Object_132') return;
+    const pos = mesh.geometry?.attributes?.position;
+    if (!pos || seenBuffers.has(pos)) return;
+    seenBuffers.add(pos);
+
+    const norm = mesh.geometry.attributes.normal;
+    let modified = false;
+    for (let i = 0; i < pos.count; i++) {
+      if (Math.abs(pos.getY(i)) < 100) continue;
+      const dx = -(pos.getX(i) - rawPivotX) * 0.0001;
+      const dy = -(pos.getY(i) - rawPivotY) * 0.0001;
+      const dz = -(pos.getZ(i) - rawPivotZ) * 0.0001;
+      const rx = dx * cosY + dz * sinY;
+      const ry = dy;
+      const rz = -dx * sinY + dz * cosY;
+      pos.setXYZ(i, pBaseX + rx, pBaseY + ry, pBaseZ + rz);
+
+      if (norm) {
+        const ndx = -norm.getX(i);
+        const ndy = -norm.getY(i);
+        const ndz = -norm.getZ(i);
+        const nrx = ndx * cosY + ndz * sinY;
+        const nry = ndy;
+        const nrz = -ndx * sinY + ndz * cosY;
+        const len = Math.hypot(nrx, nry, nrz) || 1;
+        norm.setXYZ(i, nrx / len, nry / len, nrz / len);
+      }
+      modified = true;
+    }
+    if (modified) {
+      pos.needsUpdate = true;
+      if (norm) norm.needsUpdate = true;
+      // Remove untransformed tangent buffer so Three.js computes accurate derivative tangents for normalMap
+      if (mesh.geometry.attributes.tangent) {
+        mesh.geometry.deleteAttribute('tangent');
+      }
+      mesh.geometry.computeBoundingBox();
+      mesh.geometry.computeBoundingSphere();
+    }
+  });
+}
 
 export const CARBINE_AR_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/b0fe43592a9e7ce99b6ea83c9eed5cbb63379323/fps_animated_carbine.glb';
@@ -27,6 +91,10 @@ export const CARBINE_AR_LOCAL_URL = '/models/fps_animated_carbine.glb';
 export const AK47_RIFLE_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/b0fe43592a9e7ce99b6ea83c9eed5cbb63379323/fps_character_animation_pack_ak-47.glb';
 export const AK47_RIFLE_LOCAL_URL = '/models/fps_ak47.glb';
+
+export const AK12_RIFLE_GITHUB_RAW_URL =
+  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/25e11484b79c388dbcdb49cfa174cc7504beed05/Acessorio/Armas/ak-12animated.glb';
+export const AK12_RIFLE_LOCAL_URL = '/models/weapons/ak-12animated.glb';
 
 export const L49_LMG_GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/dd881049230b5ee85f944448a09d25db91f0eb37/lmg_animated.glb';
@@ -786,6 +854,28 @@ export function buildTacticalWeaponRig(
   m4BodyGroup.add(flashHiderGroup);
 
   // -------------------------------------------------------------------------
+  // 1B. SCULPTED PBR WEAPONS FOR SHOTGUN_12, SHOTGUN_SPAS & SMG_MP5
+  // -------------------------------------------------------------------------
+  let shotgun12PumpGroup: THREE.Group | null = null;
+  const buildShotgun12Group = (): THREE.Group => {
+    const built = createSculptedFirstPersonWeaponGroup('SHOTGUN_12');
+    if (built.pumpGroup) {
+      built.pumpGroup.userData.baseZ = built.pumpGroup.position.z;
+      built.pumpGroup.userData.pullSign = -1;
+      shotgun12PumpGroup = built.pumpGroup;
+    }
+    return built.group;
+  };
+
+  const buildShotgunSpasGroup = (): THREE.Group => {
+    return createSculptedFirstPersonWeaponGroup('SHOTGUN_SPAS').group;
+  };
+
+  const buildSmgMp5Group = (): THREE.Group => {
+    return createSculptedFirstPersonWeaponGroup('SMG_MP5').group;
+  };
+
+  // -------------------------------------------------------------------------
   // 2. WORLD ORIGIN MARKERS, SUPPRESSOR, LASER & MUZZLE FLASH (INSIDE MOTION ANCHOR)
   // -------------------------------------------------------------------------
   const ejectionPortWorldPos = new THREE.Object3D();
@@ -987,70 +1077,212 @@ export function buildTacticalWeaponRig(
   holoSightGroup.visible = false;
   opticsContainer.add(holoSightGroup);
 
-  const lpvoScopeGroup = new THREE.Group();
-  lpvoScopeGroup.position.set(0, 0.042, 0.05);
+  const buildFirefieldLpvoAssembly = (scaleFactor = 1.0) => {
+    const scopeGroup = new THREE.Group();
+    scopeGroup.scale.setScalar(scaleFactor);
 
-  const mountBase = new THREE.Mesh(
-    new THREE.BoxGeometry(0.03, 0.016, 0.12),
-    matFdePolymer
-  );
-  mountBase.position.set(0, 0.008, -0.01);
-  lpvoScopeGroup.add(mountBase);
+    const matScopeHousing = new THREE.MeshStandardMaterial({
+      color: 0x161920,
+      metalness: 0.42,
+      roughness: 0.44,
+      side: THREE.FrontSide,
+    });
+    const matScopeBezel = new THREE.MeshStandardMaterial({
+      color: 0x0e1015,
+      metalness: 0.35,
+      roughness: 0.52,
+      side: THREE.DoubleSide,
+    });
+    const matScopeMount = new THREE.MeshStandardMaterial({
+      color: 0x1c2028,
+      metalness: 0.3,
+      roughness: 0.62,
+    });
 
-  const ocularRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.02, 0.004, 12, 32),
-    matAnodizedUpper
-  );
-  ocularRing.position.set(0, 0.036, 0.068);
-  const objectiveRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.019, 0.0038, 12, 32),
-    matAnodizedUpper
-  );
-  objectiveRing.position.set(0, 0.036, -0.115);
-  lpvoScopeGroup.add(ocularRing, objectiveRing);
-
-  for (let a = 0; a < 8; a++) {
-    const angle = (a * Math.PI) / 4;
-    const strut = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.0035, 0.0035, 0.18, 8),
-      matFdePolymer
+    // 1. Wide Ribbed Picatinny Mount Base (visible right below the scope ring in ADS)
+    const lowerBridge = new THREE.Mesh(
+      new THREE.BoxGeometry(0.032, 0.012, 0.112),
+      matScopeMount
     );
-    strut.rotation.x = Math.PI / 2;
-    strut.position.set(
-      Math.cos(angle) * 0.019,
-      0.036 + Math.sin(angle) * 0.019,
-      -0.022
+    lowerBridge.position.set(0, 0.006, -0.018);
+    scopeGroup.add(lowerBridge);
+
+    const baseWings = new THREE.Mesh(
+      new THREE.BoxGeometry(0.056, 0.014, 0.042),
+      matScopeMount
     );
-    lpvoScopeGroup.add(strut);
-  }
+    baseWings.position.set(0, 0.011, 0.022);
+    scopeGroup.add(baseWings);
 
-  const lpvoThrowLever = new THREE.Mesh(
-    new THREE.BoxGeometry(0.006, 0.026, 0.008),
-    matParkerizedSteel
-  );
-  lpvoThrowLever.position.set(-0.024, 0.048, 0.048);
-  lpvoThrowLever.rotation.z = 0.6;
-  lpvoScopeGroup.add(lpvoThrowLever);
+    // Sculpted vertical grip ribs on left & right mount shoulders (matches reference photo)
+    const ribGeo = new THREE.BoxGeometry(0.0022, 0.015, 0.016);
+    [-0.025, -0.021, -0.017, 0.017, 0.021, 0.025].forEach((rx) => {
+      const rib = new THREE.Mesh(ribGeo, matScopeHousing);
+      rib.position.set(rx, 0.012, 0.034);
+      scopeGroup.add(rib);
+    });
 
-  const lpvoLens = new THREE.Mesh(
-    new THREE.CircleGeometry(0.018, 24),
-    matLensGlass
-  );
-  lpvoLens.position.set(0, 0.036, 0.065);
-  lpvoLens.renderOrder = 10;
-  lpvoScopeGroup.add(lpvoLens);
+    // Central clamp block + silver hex screw directly underneath scope ring
+    const centerClamp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.018, 0.015, 0.038),
+      matScopeHousing
+    );
+    centerClamp.position.set(0, 0.013, 0.024);
+    scopeGroup.add(centerClamp);
 
-  const lpvoReticleMesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.038, 0.038),
-    new THREE.MeshBasicMaterial({
-      map: textures.lpvoReticle,
-      transparent: true,
-      depthWrite: false,
-    })
-  );
-  lpvoReticleMesh.position.set(0, 0.036, 0.066);
-  lpvoReticleMesh.renderOrder = 12;
-  lpvoScopeGroup.add(lpvoReticleMesh);
+    const clampScrew = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0022, 0.0022, 0.004, 12),
+      matBoltChrome
+    );
+    clampScrew.rotation.x = Math.PI / 2;
+    clampScrew.position.set(0, 0.013, 0.043);
+    scopeGroup.add(clampScrew);
+
+    // Support ring saddles holding the optical tube (open-ended so interior lens stays unobstructed)
+    const rearSaddle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0205, 0.0205, 0.022, 24, 1, true),
+      matScopeHousing
+    );
+    rearSaddle.rotation.x = Math.PI / 2;
+    rearSaddle.position.set(0, 0.038, 0.012);
+    scopeGroup.add(rearSaddle);
+
+    const frontSaddle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0205, 0.0205, 0.02, 24, 1, true),
+      matScopeHousing
+    );
+    frontSaddle.rotation.x = Math.PI / 2;
+    frontSaddle.position.set(0, 0.038, -0.056);
+    scopeGroup.add(frontSaddle);
+
+    // Side windage & illumination turret knobs visible below ocular ring
+    const leftWindage = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0075, 0.0075, 0.014, 16),
+      matScopeHousing
+    );
+    leftWindage.rotation.z = Math.PI / 2;
+    leftWindage.position.set(-0.023, 0.034, -0.018);
+    scopeGroup.add(leftWindage);
+
+    const rightTurret = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0072, 0.0072, 0.013, 16),
+      matScopeHousing
+    );
+    rightTurret.rotation.z = Math.PI / 2;
+    rightTurret.position.set(0.022, 0.034, -0.018);
+    scopeGroup.add(rightTurret);
+
+    // 2. Forward Exterior Scope Housing (FrontSide only so ADS camera sees cleanly without dark inner tunnel)
+    const mainTube = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0188, 0.0188, 0.112, 32, 1, true),
+      matScopeHousing
+    );
+    mainTube.rotation.x = Math.PI / 2;
+    mainTube.position.set(0, 0.038, -0.014);
+    scopeGroup.add(mainTube);
+
+    const objBell = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0224, 0.0188, 0.044, 32, 1, true),
+      matScopeHousing
+    );
+    objBell.rotation.x = Math.PI / 2;
+    objBell.position.set(0, 0.038, -0.092);
+    scopeGroup.add(objBell);
+
+    const objLip = new THREE.Mesh(
+      new THREE.RingGeometry(0.0195, 0.0224, 32),
+      matScopeHousing
+    );
+    objLip.rotation.y = Math.PI;
+    objLip.position.set(0, 0.038, -0.114);
+    scopeGroup.add(objLip);
+
+    // 3. Scalloped Rear Ocular Ring & Throw Lever (occupies ~47% screen center in ADS)
+    const ocularOuterSleeve = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0216, 0.0196, 0.028, 36, 1, true),
+      matScopeHousing
+    );
+    ocularOuterSleeve.rotation.x = Math.PI / 2;
+    ocularOuterSleeve.position.set(0, 0.038, 0.054);
+    scopeGroup.add(ocularOuterSleeve);
+
+    // Short 1.6cm beveled inner ocular hood
+    const ocularInnerHood = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0192, 0.0176, 0.016, 40, 1, true),
+      matScopeBezel
+    );
+    ocularInnerHood.rotation.x = Math.PI / 2;
+    ocularInnerHood.position.set(0, 0.038, 0.06);
+    scopeGroup.add(ocularInnerHood);
+
+    // Rear crisp scalloped bezel face
+    const ocularBackBezel = new THREE.Mesh(
+      new THREE.RingGeometry(0.0174, 0.0217, 48),
+      matScopeBezel
+    );
+    ocularBackBezel.position.set(0, 0.038, 0.068);
+    scopeGroup.add(ocularBackBezel);
+
+    // 18 scalloped grip flutes around ocular ring circumference
+    const fluteGeo = new THREE.CylinderGeometry(0.0019, 0.0019, 0.024, 8);
+    fluteGeo.rotateX(Math.PI / 2);
+    for (let f = 0; f < 18; f++) {
+      const ang = (f * Math.PI * 2) / 18;
+      const flute = new THREE.Mesh(fluteGeo, matScopeBezel);
+      flute.position.set(
+        Math.cos(ang) * 0.0213,
+        0.038 + Math.sin(ang) * 0.0213,
+        0.056
+      );
+      scopeGroup.add(flute);
+    }
+
+    // Magnification Throw Lever sticking out at ~2 o'clock on the right side
+    const throwLever = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0018, 0.0026, 0.009, 10),
+      matScopeBezel
+    );
+    throwLever.position.set(0.0242, 0.0445, 0.056);
+    throwLever.rotation.z = -1.25;
+    scopeGroup.add(throwLever);
+
+    // 4. Coated Optical Glass & Centered Firefield Mil-Dot Reticle
+    const glassLens = new THREE.Mesh(
+      new THREE.CircleGeometry(0.0175, 40),
+      new THREE.MeshPhysicalMaterial({
+        color: 0xdbeafe,
+        metalness: 0.08,
+        roughness: 0.05,
+        transparent: true,
+        opacity: 0.07,
+        depthWrite: false,
+      })
+    );
+    glassLens.position.set(0, 0.038, 0.0655);
+    glassLens.renderOrder = 10;
+    scopeGroup.add(glassLens);
+
+    const reticleMesh = new THREE.Mesh(
+      new THREE.CircleGeometry(0.0176, 48),
+      new THREE.MeshBasicMaterial({
+        map: textures.lpvoReticle,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+    );
+    reticleMesh.position.set(0, 0.038, 0.0665);
+    reticleMesh.renderOrder = 14;
+    scopeGroup.add(reticleMesh);
+
+    return { scopeGroup, throwLever, reticleMesh };
+  };
+
+  const lpvoBuilt = buildFirefieldLpvoAssembly(1.0);
+  const lpvoScopeGroup = lpvoBuilt.scopeGroup;
+  lpvoScopeGroup.position.set(0, 0.008, 0.025);
+  const lpvoThrowLever = lpvoBuilt.throwLever;
+  const lpvoReticleMesh = lpvoBuilt.reticleMesh;
   lpvoScopeGroup.visible = false;
   opticsContainer.add(lpvoScopeGroup);
 
@@ -1180,6 +1412,7 @@ export function buildTacticalWeaponRig(
     mainBoneRestPos: THREE.Vector3 | null;
     mainBoneScale: number;
     invertZ: boolean;
+    builtInOpticNodes: THREE.Object3D[];
   }
 
   const createAnimatedWeaponEntry = (opts: {
@@ -1214,6 +1447,7 @@ export function buildTacticalWeaponRig(
       mainBoneRestPos: null,
       mainBoneScale: opts.mainBoneScale ?? 0.01,
       invertZ: Math.abs(opts.rotY - Math.PI) < 0.2,
+      builtInOpticNodes: [],
     };
 
     const onLoaded = (gltf: {
@@ -1230,6 +1464,15 @@ export function buildTacticalWeaponRig(
         if (opts.hideNodeNames && opts.hideNodeNames.includes(child.name)) {
           child.visible = false;
         }
+        if (
+          opts.weaponId === 'M4_CARBINE' &&
+          (child.name === 'scope' ||
+            child.name === 'scope_carbine_0' ||
+            child.name === 'lens' ||
+            child.name === 'lens_lens_0')
+        ) {
+          entry.builtInOpticNodes.push(child);
+        }
         if ((child as THREE.Mesh).isMesh) {
           const m = child as THREE.Mesh;
           m.frustumCulled = false;
@@ -1244,12 +1487,82 @@ export function buildTacticalWeaponRig(
             if (std.color) {
               std.color.setHex(0xffffff);
             }
+            const matName = (std.name || '').toLowerCase();
+            if (
+              opts.weaponId === 'M4_CARBINE' &&
+              (matName === 'lens' || m.name.toLowerCase().includes('lens_lens'))
+            ) {
+              std.transparent = true;
+              std.opacity = 1.0;
+              std.depthWrite = false;
+              m.renderOrder = 12;
+            } else if (
+              opts.weaponId === 'AK12_RIFLE' &&
+              (matName.includes('lense') || m.name.toLowerCase().includes('lense'))
+            ) {
+              std.map = null;
+              std.transparent = true;
+              std.opacity = 0.06;
+              std.roughness = 0.04;
+              std.metalness = 0.12;
+              if (std.color) std.color.setHex(0xdbeafe);
+              std.depthWrite = false;
+              m.renderOrder = 10;
+            } else if (
+              matName.includes('lense') ||
+              matName.includes('lens') ||
+              m.name.toLowerCase().includes('lense')
+            ) {
+              std.transparent = true;
+              std.opacity = 0.14;
+              std.roughness = 0.05;
+              std.metalness = 0.1;
+              if (std.color) std.color.setHex(0x88ccff);
+              std.depthWrite = false;
+            }
             std.needsUpdate = true;
           };
           if (Array.isArray(m.material)) {
             m.material.forEach(fixMat);
           } else if (m.material) {
             fixMat(m.material);
+          }
+
+          // Place crisp centered reticle directly inside AK-12's own original scope lens (no extra scope housing)
+          if (
+            opts.weaponId === 'AK12_RIFLE' &&
+            m.name.toLowerCase().includes('rail') &&
+            !m.userData.ak12ReticleMounted
+          ) {
+            m.userData.ak12ReticleMounted = true;
+            const skMesh = m as THREE.SkinnedMesh;
+            if (skMesh.isSkinnedMesh && skMesh.skeleton) {
+              const bone = skMesh.skeleton.bones[66];
+              if (bone) {
+                mountGroup.add(modelScene);
+                gunGroup.updateMatrixWorld(true);
+                bone.updateMatrixWorld(true);
+
+                // Exact rear ocular lens plane of AK-12's native aim_0 / lense_0 in gunGroup space
+                const desiredGunMat = gunGroup.matrixWorld
+                  .clone()
+                  .multiply(new THREE.Matrix4().makeTranslation(-0.0004, 0.052, 0.0835));
+                const invBone = bone.matrixWorld.clone().invert();
+                const localMat = new THREE.Matrix4().multiplyMatrices(invBone, desiredGunMat);
+                const akReticle = new THREE.Mesh(
+                  new THREE.CircleGeometry(0.0112, 48),
+                  new THREE.MeshBasicMaterial({
+                    map: textures.lpvoReticle,
+                    transparent: true,
+                    depthWrite: false,
+                    side: THREE.DoubleSide,
+                  })
+                );
+                akReticle.renderOrder = 14;
+                localMat.decompose(akReticle.position, akReticle.quaternion, akReticle.scale);
+                bone.add(akReticle);
+              }
+            }
           }
         }
       });
@@ -1355,6 +1668,31 @@ export function buildTacticalWeaponRig(
     action.play();
   };
 
+  const createProceduralWeaponEntry = (
+    weaponId: WeaponId,
+    buildMeshFn: () => THREE.Group
+  ): AnimatedWeaponPackEntry => {
+    const mountGroup = new THREE.Group();
+    const body = buildMeshFn();
+    mountGroup.add(body);
+    mountGroup.visible = activeWeapon === weaponId;
+    weaponMotionAnchor.add(mountGroup);
+    return {
+      weaponId,
+      localUrl: '',
+      githubUrl: '',
+      mountGroup,
+      loaded: true,
+      mixer: null,
+      actions: {},
+      mainBoneNode: null,
+      mainBoneRestPos: null,
+      mainBoneScale: 1,
+      invertZ: false,
+      builtInOpticNodes: [],
+    };
+  };
+
   const weaponPacks: Record<WeaponId, AnimatedWeaponPackEntry> = {
     // [1] Mark 23 (.45 ACP) — Default Starting Pistol
     P50_PISTOL: createAnimatedWeaponEntry({
@@ -1394,23 +1732,31 @@ export function buildTacticalWeaponRig(
       },
     }),
 
-    // [3] M4A1 FPS Pack (`m4_fps_pack.glb`)
+    // [2B] MP5A3 Tactical 9mm (Engineer SMG)
+    SMG_MP5: createProceduralWeaponEntry('SMG_MP5', buildSmgMp5Group),
+
+    // [2C] M870 Breacher 12-Gauge Pump Shotgun (Medic Primary)
+    SHOTGUN_12: createProceduralWeaponEntry('SHOTGUN_12', buildShotgun12Group),
+
+    // [2D] SPAS-12 Combat 12-Gauge Shotgun (Medic Semi-Auto)
+    SHOTGUN_SPAS: createProceduralWeaponEntry('SHOTGUN_SPAS', buildShotgunSpasGroup),
+
+    // [3] M4A1 Tactical Carbine (`fps_animated_carbine_m4.glb` — 2K PBR textures & clean rig)
     M4_CARBINE: createAnimatedWeaponEntry({
       weaponId: 'M4_CARBINE',
       localUrl: M4_FPS_PACK_LOCAL_URL,
       githubUrl: M4_FPS_PACK_GITHUB_RAW_URL,
-      scale: 1.0,
+      scale: 0.58,
       rotY: Math.PI,
-      pos: [-0.05683, -1.482, 0.12],
-      mainBoneName: 'Main_j_049',
-      mainBoneScale: 0.01,
-      hideNodeNames: ['Mag2_j_051', 'Mag2', 'Mag2_M4_D_0'],
-      clipAliases: {
-        Draw: 'Draw',
-        Fire: 'Fire',
-        Reload: 'Reload',
-        Reload_Empty: 'Reload_Empty',
-        Holster: 'Holster',
+      pos: [-0.015, -0.228, 0.105],
+      mainBoneName: 'carbine',
+      mainBoneScale: 0.012,
+      subclipWindows: {
+        Fire: [0.0, 0.26],
+        Reload_Empty: [0.33, 2.27],
+        Reload: [2.33, 4.47],
+        Draw: [4.53, 5.9],
+        Holster: [6.87, 7.4],
       },
     }),
 
@@ -1449,6 +1795,31 @@ export function buildTacticalWeaponRig(
         Reload: 'RIG_UE5_Comando_AK_Reload',
         Reload_Empty: 'RIG_UE5_Comando_AK_Reload',
         Holster: 'RIG_UE5_Comando_AK_Equip',
+      },
+    }),
+
+    // [5B] AK-12 Spetsnaz (`ak-12animated.glb`) — Animated FPS AK-12 with tactical hands, watch & optical sight
+    AK12_RIFLE: createAnimatedWeaponEntry({
+      weaponId: 'AK12_RIFLE',
+      localUrl: AK12_RIFLE_LOCAL_URL,
+      githubUrl: AK12_RIFLE_GITHUB_RAW_URL,
+      scale: 0.4,
+      rotY: Math.PI,
+      pos: [-0.1414, -1.6094, 0.326],
+      mainBoneName: 'Rifle_metarig',
+      mainBoneScale: 0.01,
+      hideNodeNames: [
+        'mag.001',
+        'mag.001_0',
+        'bullets',
+        'bullets_0',
+      ],
+      clipAliases: {
+        Draw: 'Equip',
+        Fire: 'Shoot',
+        Reload: 'Reload',
+        Reload_Empty: 'Reload',
+        Holster: 'Equip',
       },
     }),
 
@@ -1585,6 +1956,34 @@ export function buildTacticalWeaponRig(
       laserOriginWorldPos.position.set(0.018, 0.005, -0.26);
       peqLaserBeam.position.copy(laserOriginWorldPos.position);
       ejectionPortWorldPos.position.set(0.022, 0.018, -0.04);
+    } else if (weaponId === 'SMG_MP5') {
+      rightBasePos.set(0.022, -0.052, 0.075);
+      rightBaseEuler.set(-1.62, -0.08, 0.1);
+      leftBasePos.set(-0.024, -0.026, -0.21);
+      leftBaseEuler.set(-1.42, 0.22, -0.24);
+
+      opticsContainer.position.set(0, 0.036, -0.01);
+      opticsContainer.scale.setScalar(0.78);
+      suppressorGroup.position.set(0, 0.014, -0.41);
+      muzzleWorldPos.position.set(0, 0.014, -0.385);
+      muzzleFlashGroup.position.set(0, 0.014, -0.38);
+      laserOriginWorldPos.position.set(0.02, 0.004, -0.23);
+      peqLaserBeam.position.copy(laserOriginWorldPos.position);
+      ejectionPortWorldPos.position.set(0.022, 0.014, -0.03);
+    } else if (weaponId === 'SHOTGUN_12' || weaponId === 'SHOTGUN_SPAS') {
+      rightBasePos.set(0.022, -0.056, 0.115);
+      rightBaseEuler.set(-1.62, -0.08, 0.1);
+      leftBasePos.set(-0.026, -0.032, -0.24);
+      leftBaseEuler.set(-1.42, 0.22, -0.24);
+
+      opticsContainer.position.set(0, 0.039, 0.01);
+      opticsContainer.scale.setScalar(0.84);
+      suppressorGroup.position.set(0, 0.012, -0.60);
+      muzzleWorldPos.position.set(0, 0.012, -0.57);
+      muzzleFlashGroup.position.set(0, 0.012, -0.55);
+      laserOriginWorldPos.position.set(0.024, -0.014, -0.42);
+      peqLaserBeam.position.copy(laserOriginWorldPos.position);
+      ejectionPortWorldPos.position.set(0.026, 0.01, -0.01);
     } else if (weaponId === 'AK47_RIFLE') {
       rightBasePos.set(0.022, -0.054, 0.086);
       rightBaseEuler.set(-1.62, -0.08, 0.1);
@@ -1599,6 +1998,15 @@ export function buildTacticalWeaponRig(
       laserOriginWorldPos.position.set(0.014, 0.035, -0.18);
       peqLaserBeam.position.copy(laserOriginWorldPos.position);
       ejectionPortWorldPos.position.set(0.018, 0.04, 0.16);
+    } else if (weaponId === 'AK12_RIFLE') {
+      opticsContainer.position.set(0, 0.024, 0.04);
+      opticsContainer.scale.setScalar(0.88);
+      suppressorGroup.position.set(0, 0.01, -0.48);
+      muzzleWorldPos.position.set(0, 0.01, -0.464);
+      muzzleFlashGroup.position.set(0, 0.01, -0.455);
+      laserOriginWorldPos.position.set(0.022, 0.01, -0.24);
+      peqLaserBeam.position.copy(laserOriginWorldPos.position);
+      ejectionPortWorldPos.position.set(0.022, 0.012, 0.056);
     } else if (weaponId === 'SNIPER_TACTICAL') {
       rightBasePos.set(0.024, -0.052, 0.084);
       rightBaseEuler.set(-1.62, -0.08, 0.1);
@@ -1631,10 +2039,19 @@ export function buildTacticalWeaponRig(
       laserOriginWorldPos.position.set(0.032, 0.012, -0.36);
       peqLaserBeam.position.copy(laserOriginWorldPos.position);
       ejectionPortWorldPos.position.set(0.028, 0.005, -0.02);
+    } else if (weaponId === 'M4_CARBINE') {
+      opticsContainer.position.set(-0.015, -0.001, 0.025);
+      opticsContainer.scale.setScalar(0.95);
+      suppressorGroup.position.set(-0.015, -0.044, -0.75);
+      muzzleWorldPos.position.set(-0.015, -0.044, -0.699);
+      muzzleFlashGroup.position.set(-0.015, -0.044, -0.694);
+      laserOriginWorldPos.position.set(0.014, -0.042, -0.34);
+      peqLaserBeam.position.copy(laserOriginWorldPos.position);
+      ejectionPortWorldPos.position.set(0.025, -0.044, -0.06);
     } else {
-      // M4_CARBINE, CARBINE_AR
-      opticsContainer.position.set(0, 0.008, 0.01);
-      opticsContainer.scale.setScalar(0.92);
+      // CARBINE_AR
+      opticsContainer.position.set(0, 0.018, -0.02);
+      opticsContainer.scale.setScalar(0.9);
       suppressorGroup.position.set(0, -0.002, -0.54);
       muzzleWorldPos.position.set(0, -0.002, -0.52);
       muzzleFlashGroup.position.set(0, -0.002, -0.51);
@@ -1643,6 +2060,8 @@ export function buildTacticalWeaponRig(
       ejectionPortWorldPos.position.set(0.024, 0.006, 0.01);
     }
 
+    opticsContainer.visible =
+      weaponId !== 'AK12_RIFLE' && weaponId !== 'KNIFE_TACTICAL';
     leftHandGroup.position.copy(leftBasePos);
     leftHandGroup.rotation.copy(leftBaseEuler);
     rightHandGroup.position.copy(rightBasePos);
@@ -1688,7 +2107,11 @@ export function buildTacticalWeaponRig(
     // Only Sniper Tactical (or unloaded fallback) uses universal rigged FPS arms (arms_rig.glb);
     // AK-47 uses its own native rigged hands & sleeves baked into fps_ak47.glb
     const usesUniversalArms =
-      !activeEntry.loaded || weaponId === 'SNIPER_TACTICAL';
+      !activeEntry.loaded ||
+      weaponId === 'SNIPER_TACTICAL' ||
+      weaponId === 'SHOTGUN_12' ||
+      weaponId === 'SHOTGUN_SPAS' ||
+      weaponId === 'SMG_MP5';
     armsRigContainer.visible = usesUniversalArms;
 
     weaponMotionAnchor.position.set(0, 0, 0);
@@ -1700,6 +2123,7 @@ export function buildTacticalWeaponRig(
   };
 
   let sniperBoltHandTimer = 0;
+  let shotgunPumpTimer = 0;
 
   const triggerFireAnimation = (_isAds = false) => {
     const activeEntry = weaponPacks[activeWeapon];
@@ -1711,6 +2135,9 @@ export function buildTacticalWeaponRig(
           : 1.3;
     if (activeWeapon === 'SNIPER_TACTICAL') {
       sniperBoltHandTimer = 1.08;
+    }
+    if (activeWeapon === 'SHOTGUN_12') {
+      shotgunPumpTimer = 0.56;
     }
     playWeaponPackAction(activeEntry, 'Fire', undefined, speed);
   };
@@ -1758,6 +2185,16 @@ export function buildTacticalWeaponRig(
     animElapsed += dt;
 
     const activeEntry = weaponPacks[activeWeapon];
+    if (
+      activeWeapon === 'M4_CARBINE' &&
+      activeEntry &&
+      activeEntry.builtInOpticNodes.length > 0
+    ) {
+      const showBuiltIn = !holoSightGroup.visible && !lpvoScopeGroup.visible;
+      for (let i = 0; i < activeEntry.builtInOpticNodes.length; i++) {
+        activeEntry.builtInOpticNodes[i].visible = showBuiltIn;
+      }
+    }
     if (activeEntry && activeEntry.loaded && activeEntry.mixer) {
       activeEntry.mixer.update(dt);
 
@@ -1797,6 +2234,34 @@ export function buildTacticalWeaponRig(
     }
 
     root.updateMatrixWorld(true);
+
+    if (shotgun12PumpGroup) {
+      const baseZ: number = shotgun12PumpGroup.userData?.baseZ ?? -0.25;
+      const pullSign: number = shotgun12PumpGroup.userData?.pullSign ?? 1;
+      if (activeWeapon === 'SHOTGUN_12' && shotgunPumpTimer > 0) {
+        shotgunPumpTimer = Math.max(0, shotgunPumpTimer - dt);
+        const p = 1 - shotgunPumpTimer / 0.56;
+        // Crisp backward-then-forward 12ga pump rack stroke
+        const stroke =
+          p < 0.25
+            ? 0
+            : p < 0.58
+              ? (p - 0.25) / 0.33
+              : p < 0.88
+                ? 1 - (p - 0.58) / 0.3
+                : 0;
+        const pumpBackZ = stroke * 0.085;
+        shotgun12PumpGroup.position.z = baseZ + pullSign * pumpBackZ;
+        leftHandGroup.position.set(
+          leftBasePos.x,
+          leftBasePos.y,
+          leftBasePos.z + pumpBackZ
+        );
+      } else {
+        shotgun12PumpGroup.position.z = baseZ;
+        leftHandGroup.position.copy(leftBasePos);
+      }
+    }
 
     if (armsRigCtrl && armsRigContainer.visible) {
       if (activeWeapon === 'SNIPER_TACTICAL' && sniperBoltHandTimer > 0) {
@@ -1907,6 +2372,13 @@ export function getOpticAdsTransform(
       rotZ: Math.PI / 4,
     };
   }
+  if (activeWeapon === 'AK12_RIFLE') {
+    // Realistic Eye Relief on AK-12's native scope: centered at (-0.0004, 0.0520), rear bezel ~12.8cm -> ~48% screen
+    return {
+      pos: new THREE.Vector3(0.0004, -0.052, -0.22),
+      rotZ: 0,
+    };
+  }
   if (activeWeapon === 'P50_PISTOL') {
     if (optic === 'iron') {
       return {
@@ -1916,34 +2388,106 @@ export function getOpticAdsTransform(
     }
     if (optic === 'lpvo') {
       return {
-        pos: new THREE.Vector3(0, -0.085, -0.2),
+        pos: new THREE.Vector3(0, -0.0455, -0.154),
         rotZ: 0,
       };
     }
     return {
-      pos: new THREE.Vector3(0, -0.08, -0.21),
+      pos: new THREE.Vector3(0, -0.05, -0.21),
       rotZ: 0,
     };
   }
   if (activeWeapon === 'SMG_45') {
+    if (optic === 'lpvo') {
+      return {
+        pos: new THREE.Vector3(0, -0.0617, -0.148),
+        rotZ: 0,
+      };
+    }
     return {
-      pos: new THREE.Vector3(-0.012, -0.046, -0.22),
+      pos: new THREE.Vector3(-0.012, -0.054, -0.22),
+      rotZ: 0,
+    };
+  }
+  if (activeWeapon === 'SMG_MP5') {
+    if (optic === 'lpvo') {
+      return {
+        pos: new THREE.Vector3(0, -0.066, -0.16),
+        rotZ: 0,
+      };
+    }
+    return {
+      pos: new THREE.Vector3(0, -0.04, -0.22),
+      rotZ: 0,
+    };
+  }
+  if (activeWeapon === 'SHOTGUN_12' || activeWeapon === 'SHOTGUN_SPAS') {
+    if (optic === 'lpvo') {
+      return {
+        pos: new THREE.Vector3(0, -0.068, -0.155),
+        rotZ: 0,
+      };
+    }
+    if (optic === 'holo') {
+      return {
+        pos: new THREE.Vector3(0, -0.072, -0.2),
+        rotZ: 0,
+      };
+    }
+    return {
+      pos: new THREE.Vector3(0, -0.046, -0.215),
       rotZ: 0,
     };
   }
   if (activeWeapon === 'CARBINE_AR') {
+    if (optic === 'lpvo') {
+      return {
+        pos: new THREE.Vector3(0, -0.0594, -0.165),
+        rotZ: 0,
+      };
+    }
     return {
-      pos: new THREE.Vector3(-0.012, -0.048, -0.22),
+      pos: new THREE.Vector3(-0.012, -0.052, -0.22),
       rotZ: 0,
     };
   }
   if (activeWeapon === 'AK47_RIFLE') {
+    if (optic === 'lpvo') {
+      return {
+        pos: new THREE.Vector3(0.012, -0.0843, -0.338),
+        rotZ: 0,
+      };
+    }
     return {
       pos: new THREE.Vector3(0.012, 0.001, -0.34),
       rotZ: 0,
     };
   }
+  if (activeWeapon === 'M4_CARBINE') {
+    if (optic === 'lpvo') {
+      return {
+        pos: new THREE.Vector3(0.015, -0.0427, -0.23),
+        rotZ: 0,
+      };
+    }
+    if (optic === 'holo') {
+      return {
+        pos: new THREE.Vector3(0.015, -0.0674, -0.24),
+        rotZ: 0,
+      };
+    }
+    return {
+      pos: new THREE.Vector3(0.015, -0.0382, -0.235),
+      rotZ: 0,
+    };
+  }
   if (activeWeapon === 'L49_LMG') {
+    if (optic === 'lpvo') {
+      return {
+        pos: new THREE.Vector3(0, -0.0485, -0.16),
+        rotZ: 0,
+      };
+    }
     return {
       pos: new THREE.Vector3(-0.015, -0.048, -0.22),
       rotZ: 0,
@@ -1963,7 +2507,7 @@ export function getOpticAdsTransform(
   }
   if (optic === 'lpvo') {
     return {
-      pos: new THREE.Vector3(0, -0.082, -0.22),
+      pos: new THREE.Vector3(0, -0.056, -0.18),
       rotZ: 0,
     };
   }
@@ -1974,7 +2518,7 @@ export function getOpticAdsTransform(
     };
   }
   return {
-    pos: new THREE.Vector3(0, -0.078, -0.24),
+    pos: new THREE.Vector3(0, -0.06, -0.22),
     rotZ: 0,
   };
 }

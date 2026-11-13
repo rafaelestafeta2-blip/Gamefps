@@ -70,21 +70,25 @@ export function getTeamSpawnForArena(
   team: OnlineTeam,
   slotIndex = 0
 ): { x: number; y: number; z: number; yaw: number } {
-  const offsetX = ((slotIndex % 5) - 2) * 1.45;
+  const offsetX = ((slotIndex % 5) - 2) * 1.15;
   const offsetZ = (slotIndex % 2) * 1.1;
 
   if (mode === 'DUST2_BOMB_5V5') {
     if (team === 'VANGUARD') {
-      return { x: -12 + offsetX, y: 1.5, z: -27.5 + offsetZ, yaw: 0 };
+      // TR Spawn (South) at y = 8.0m facing East (-PI/2)
+      return { x: -16.25 + offsetX, y: 8.0, z: 18.75 + offsetZ, yaw: -Math.PI / 2 };
     }
-    return { x: 8.5 + offsetX, y: 1.5, z: 36.5 - offsetZ, yaw: Math.PI };
+    // CT Spawn (North Underpass) at y = 1.6m facing South (0)
+    return { x: -6.25 + offsetX, y: 1.6, z: -56.25 + offsetZ, yaw: 0 };
   }
 
   if (mode === 'ASSAULT_BOMB_5V5') {
     if (team === 'VANGUARD') {
-      return { x: -18.5 + offsetX, y: 1.5, z: 24.0 + offsetZ, yaw: Math.PI };
+      // Attacker Street Spawn at y = 0.5m facing North (0)
+      return { x: -26.7 + offsetX, y: 0.5, z: 36.7 + offsetZ, yaw: 0 };
     }
-    return { x: 8.0 + offsetX, y: 1.5, z: -14.0 - offsetZ, yaw: 0 };
+    // Defender Warehouse Interior Spawn at y = 0.5m facing South (PI)
+    return { x: -2.3 + offsetX, y: 0.5, z: 6.9 - offsetZ, yaw: Math.PI };
   }
 
   // YARD_BOMB_5V5 default
@@ -93,3 +97,4 @@ export function getTeamSpawnForArena(
   }
   return { x: 0 + offsetX, y: 0, z: -25.5 - offsetZ, yaw: Math.PI };
 }
+

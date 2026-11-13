@@ -17,6 +17,10 @@ import {
 import { TacticalGrenadeSystem } from './grenadeSystem';
 import { TacticalLevelData } from './levelBuilder';
 import { TacticalSkySystem } from './skySystem';
+import {
+  loadStanderTiroMapGeometry,
+  StanderTiroBundle,
+} from './standerTiroBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
 
 export interface MatchArenaPrepareParams {
@@ -136,6 +140,14 @@ export async function prepareMatchArena(
       70,
       `COLISORES BOX3 (${assaultLevelData.collider.boundingBoxes.length}) E ${assaultLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
     );
+  } else if (isFreeRange) {
+    reportProgress(12, 'BAIXANDO ARENA 3D STANDER_TIRO.GLB VIA GLTFLOADER + DRACO...');
+    await loadStanderTiroMapGeometry(
+      standerTiroLevelData as StanderTiroBundle,
+      isSoftwareGl,
+      loadingManager
+    );
+    reportProgress(68, 'ESTANDE DE TIRO 3D E ALVOS BALÍSTICOS PRONTOS!');
   } else {
     reportProgress(55, 'ATIVANDO GEOMETRIA E CAIXAS DE COLISÃO BOX3 DA ARENA...');
   }

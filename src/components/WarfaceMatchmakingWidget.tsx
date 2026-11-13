@@ -186,14 +186,26 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
           </span>
         </div>
 
-        <div className="mt-1 flex items-center justify-between text-[8px] font-mono text-slate-300">
+        <div className="mt-1 flex items-center justify-between gap-2 text-[8px] font-mono text-slate-300">
           <span className="truncate">
             {isConnecting
               ? 'Conectando à fila global Firebase...'
               : matchFound
                 ? '10/10 Jogadores prontos! Iniciando mapa...'
-                : `Aguardando fechar 10 jogadores (${playersCount}/10)...`}
+                : `Aguardando jogadores online (${playersCount}/10)...`}
           </span>
+          <button
+            type="button"
+            onClick={async () => {
+              soundEngine.playMenuSelect();
+              const launchArena = activeRoom?.arenaMode || selectedMode;
+              await leaveActiveRoom();
+              onMatchReady(launchArena);
+            }}
+            className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 border border-amber-400/50 text-[8px] font-mono font-bold text-amber-300 uppercase cursor-pointer"
+          >
+            ENTRAR C/ BOTS ›
+          </button>
         </div>
       </div>
     </div>

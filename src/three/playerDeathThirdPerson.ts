@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getPlayerInventoryState } from '../progression/loadoutSystem';
 import { HudState, WeaponId } from '../types/game';
 import {
   BotAnimState,
@@ -6,8 +7,10 @@ import {
   selectDirectionalDeathState,
 } from './botCharacterClips';
 import {
+  CharacterAvatarKind,
   cloneVanguardCharacterAvatar,
   preloadProRifleBotCharacter,
+  resolveCharacterAvatarKind,
 } from './botCharacterSystem';
 import { checkBotLineOfSight } from './botNavigationRoutes';
 import { createBotThirdPersonWeaponMesh } from './botWeaponProps';
@@ -31,6 +34,7 @@ export class PlayerDeathThirdPersonController {
   private isSoftwareGl: boolean;
   private rootGroup: THREE.Group;
   private modelRoot: THREE.Object3D | null = null;
+  private avatarKind: CharacterAvatarKind | null = null;
   private mixer: THREE.AnimationMixer | null = null;
   private actions: Partial<Record<BotAnimState, THREE.AnimationAction>> = {};
   private weaponProp: THREE.Group | null = null;
@@ -53,15 +57,28 @@ export class PlayerDeathThirdPersonController {
     void preloadProRifleBotCharacter();
   }
 
-  private ensureAvatarReady(): boolean {
-    if (this.modelRoot && this.mixer) return true;
-    const cloned = cloneVanguardCharacterAvatar(this.isSoftwareGl);
+  private ensureAvatarReady(weaponId?: WeaponId): boolean {
+    const selectedClass = getPlayerInventoryState().selectedClass;
+    const wantKind = resolveCharacterAvatarKind(weaponId, selectedClass, true);
+    if (this.modelRoot && this.mixer && this.avatarKind === wantKind) return true;
+    const cloned = cloneVanguardCharacterAvatar(
+      this.isSoftwareGl,
+      weaponId,
+      selectedClass
+    );
     if (!cloned) {
       void preloadProRifleBotCharacter();
       return false;
     }
 
+    if (this.modelRoot) {
+      this.mixer?.stopAllAction();
+      this.rootGroup.remove(this.modelRoot);
+      this.actions = {};
+    }
+
     this.modelRoot = cloned.modelRoot;
+    this.avatarKind = cloned.avatarKind;
     this.rootGroup.add(this.modelRoot);
 
     this.mixer = new THREE.AnimationMixer(this.modelRoot);
@@ -124,7 +141,7 @@ export class PlayerDeathThirdPersonController {
       this.weaponProp.visible = true;
     }
 
-    if (!this.ensureAvatarReady() || !this.mixer) return;
+    if (!this.ensureAvatarReady(activeWeapon) || !this.mixer) return;
 
     this.mixer.stopAllAction();
 
@@ -219,7 +236,7 @@ export class PlayerDeathThirdPersonController {
     weaponRigRoot.visible = false;
 
     if (!this.modelRoot) {
-      if (this.ensureAvatarReady() && this.mixer) {
+      if (this.ensureAvatarReady(this.currentWeaponId ?? undefined) && this.mixer) {
         const fallback = this.actions.RIFLE_DEATH;
         fallback?.reset().play();
       }
