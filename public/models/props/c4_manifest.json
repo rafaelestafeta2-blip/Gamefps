@@ -1,0 +1,5 @@
+{
+  "source": "Gamesfps@6ff394d1/Animaçao/Picup/c4_explosive.glb",
+  "file": "c4_explosive.glb",
+  "note": "webp-optimized planted bomb + plant-in-hand; replaces BoxGeometry placeholder in YardBombSystem"
+}

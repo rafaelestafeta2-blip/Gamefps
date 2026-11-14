@@ -23,6 +23,7 @@ import { DUST2_BOMB_SITE_A, DUST2_BOMB_SITE_B, getDust2CalloutForPos } from './d
 import { TacticalTargetEntity } from './levelBuilder';
 import { getYardCalloutForPos, YARD_BOMB_SITE_A, YARD_BOMB_SITE_B } from './yardMapData';
 import { YardBotEntity } from './yardPropsBuilder';
+import { createPlantedC4Visual } from './c4BombProp';
 
 const _allyOrigin = new THREE.Vector3();
 const _enemyPos = new THREE.Vector3();
@@ -65,13 +66,9 @@ export class YardBombSystem {
   }
 
   constructor(sceneGroup: THREE.Object3D) {
-    this.c4MeshGroup = new THREE.Group();
-    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.24), new THREE.MeshStandardMaterial({ color: 0x3f4d34, roughness: 0.65, metalness: 0.25 }));
-    const keypad = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.1), new THREE.MeshBasicMaterial({ color: 0x111827 }));
-    keypad.position.set(0.05, 0.065, 0);
-    this.c4LedMesh = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 8), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
-    this.c4LedMesh.position.set(-0.08, 0.07, 0);
-    this.c4MeshGroup.add(pack, keypad, this.c4LedMesh);
+    const planted = createPlantedC4Visual();
+    this.c4MeshGroup = planted.group;
+    this.c4LedMesh = planted.ledMesh;
     this.c4MeshGroup.visible = false;
     sceneGroup.add(this.c4MeshGroup);
   }

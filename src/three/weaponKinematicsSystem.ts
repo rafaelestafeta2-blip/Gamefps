@@ -401,12 +401,14 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
       !engine.state.cantedActive &&
       engine.state.adsAlpha > 0.82;
     const holdingClassKit = Boolean(engine.classKitProps?.isHolding?.());
+    const holdingC4Plant = Boolean(engine.c4PlantView?.isHolding?.());
     engine.weaponRig.root.visible =
       !engine.isPlayerDying &&
       !engine.playerDeathTp?.isActive() &&
       !isSniperScoped &&
       !engine.grenadeSystem.isBusyOrHolding() &&
-      !holdingClassKit;
+      !holdingClassKit &&
+      !holdingC4Plant;
 
     // 5. Mechanical Sub-Component Animations (Bolt Carrier, Selector, Reticle Parallax)
     if (engine.state.boltLockedBack) {

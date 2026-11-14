@@ -179,6 +179,7 @@ import {
   ClassKitPropSystem,
   preloadClassKitProps,
 } from './classKitPropSystem';
+import { C4PlantViewmodel, preloadC4BombProp } from './c4BombProp';
 import { preloadMixamoAnimPack } from './mixamoAnimPackLoader';
 
 export class TacticalFPSEngine {
@@ -294,6 +295,8 @@ export class TacticalFPSEngine {
   private playerGesture!: PlayerGestureThirdPerson;
   /** 1P class kit props (ammo crate / medkit / armor plate) held while using support. */
   private classKitProps!: ClassKitPropSystem;
+  /** 1P C4 held while planting in bomb modes. */
+  private c4PlantView!: C4PlantViewmodel;
 
   // Weapon & Recoil Spring Kinematics
   private swayPos = new THREE.Vector2();
@@ -555,8 +558,10 @@ export class TacticalFPSEngine {
       this.isSoftwareGl
     );
     this.classKitProps = new ClassKitPropSystem(this.camera);
+    this.c4PlantView = new C4PlantViewmodel(this.camera);
     void preloadMixamoAnimPack();
     void preloadClassKitProps();
+    void preloadC4BombProp();
     this.postMatchShowcase = new PostMatchShowcase3D(
       this.scene,
       this.isSoftwareGl
@@ -3070,6 +3075,13 @@ export class TacticalFPSEngine {
     updateClassSupport(this as any, dt);
     this.playerGesture?.update(dt);
     this.classKitProps?.update(dt);
+    const planting =
+      (this.state.drillMode === 'YARD_BOMB_5V5' ||
+        this.state.drillMode === 'DUST2_BOMB_5V5' ||
+        this.state.drillMode === 'ASSAULT_BOMB_5V5') &&
+      this.yardBombSystem?.info.bombStatus === 'PLANTING';
+    this.c4PlantView?.setPlanting(Boolean(planting));
+    this.c4PlantView?.update(dt);
 
     // 7. Update Pooled Brass Casings, Dropped Magazines, Sparks, Tracers & 3D Grenades
     this.fxPool.update(dt);
