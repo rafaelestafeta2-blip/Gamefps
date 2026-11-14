@@ -281,8 +281,9 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
         .addScaledVector(_right, rightInput);
       if (_moveVec.lengthSq() > 1) _moveVec.normalize();
 
-      let maxSpeed = 4.85;
-      if (engine.state.stance === 'SPRINT') maxSpeed = 7.15;
+      // Slight top-speed trim (~6%) — keep accel / slide / ADS mult / camera feel.
+      let maxSpeed = 4.55;
+      if (engine.state.stance === 'SPRINT') maxSpeed = 6.7;
       else if (engine.state.stance === 'CROUCH') maxSpeed = 2.55;
       else if (engine.state.stance === 'PRONE') maxSpeed = 1.2;
       if (engine.state.isAds) maxSpeed *= 0.62;
