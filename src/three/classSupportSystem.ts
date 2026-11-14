@@ -357,6 +357,14 @@ export function useClassSupport(engine: any): void {
   engine.state.supportCharges = cs.charges;
   engine.state.supportCooldownSec = cs.cooldownSec;
   engine.magCheckTimer = 1.6;
+  // Present kit in 1P hands (camera hold). No local 3P body at feet —
+  // that would clip the first-person view; playKitUse stays for spectate/remote later.
+  try {
+    const holdSec = usedOn === 'ALLY' ? 1.25 : 1.55;
+    engine.classKitProps?.presentKit?.(cs.kind, holdSec);
+  } catch {
+    /* optional visual */
+  }
   engine.emitHud?.(true);
   void usedOn;
 }

@@ -175,6 +175,10 @@ import {
   ClassSupportRuntime,
 } from './classSupportSystem';
 import { PlayerGestureThirdPerson } from './playerGestureThirdPerson';
+import {
+  ClassKitPropSystem,
+  preloadClassKitProps,
+} from './classKitPropSystem';
 import { preloadMixamoAnimPack } from './mixamoAnimPackLoader';
 
 export class TacticalFPSEngine {
@@ -286,8 +290,10 @@ export class TacticalFPSEngine {
   private mantleWallBlocked = false;
   /** Warface class support kits (ammo / heal+revive / armor). */
   private classSupport: ClassSupportRuntime = createClassSupportRuntime();
-  /** Mixamo 3P gestures (mantle hang, CPR) from Animaçao pack. */
+  /** Mixamo 3P gestures (mantle hang, CPR, kit use) from Animaçao pack. */
   private playerGesture!: PlayerGestureThirdPerson;
+  /** 1P class kit props (ammo crate / medkit / armor plate) held while using support. */
+  private classKitProps!: ClassKitPropSystem;
 
   // Weapon & Recoil Spring Kinematics
   private swayPos = new THREE.Vector2();
@@ -548,7 +554,9 @@ export class TacticalFPSEngine {
       this.scene,
       this.isSoftwareGl
     );
+    this.classKitProps = new ClassKitPropSystem(this.camera);
     void preloadMixamoAnimPack();
+    void preloadClassKitProps();
     this.postMatchShowcase = new PostMatchShowcase3D(
       this.scene,
       this.isSoftwareGl
@@ -3061,6 +3069,7 @@ export class TacticalFPSEngine {
     // 6b. Warface class support (ammo / heal+revive / armor) + medic markers
     updateClassSupport(this as any, dt);
     this.playerGesture?.update(dt);
+    this.classKitProps?.update(dt);
 
     // 7. Update Pooled Brass Casings, Dropped Magazines, Sparks, Tracers & 3D Grenades
     this.fxPool.update(dt);

@@ -394,17 +394,19 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
       targetRotZ + boltTiltRotZ - magCheckAlpha * 0.42
     );
 
-    // Hide 3D weapon viewmodel ONLY when looking through full-screen sniper scopes or holding a grenade
+    // Hide 3D weapon viewmodel when scoped sniper, holding grenade, or presenting class kit
     const isSniperScoped =
       (engine.state.activeWeapon === 'SNIPER_BOLT' ||
         engine.state.activeWeapon === 'SNIPER_TACTICAL') &&
       !engine.state.cantedActive &&
       engine.state.adsAlpha > 0.82;
+    const holdingClassKit = Boolean(engine.classKitProps?.isHolding?.());
     engine.weaponRig.root.visible =
       !engine.isPlayerDying &&
       !engine.playerDeathTp?.isActive() &&
       !isSniperScoped &&
-      !engine.grenadeSystem.isBusyOrHolding();
+      !engine.grenadeSystem.isBusyOrHolding() &&
+      !holdingClassKit;
 
     // 5. Mechanical Sub-Component Animations (Bolt Carrier, Selector, Reticle Parallax)
     if (engine.state.boltLockedBack) {
