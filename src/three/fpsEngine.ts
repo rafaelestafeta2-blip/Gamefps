@@ -1567,11 +1567,15 @@ export class TacticalFPSEngine {
     enabled: boolean;
     sharpen?: number;
     bloom?: number;
+    exposure?: number;
+    lift?: number;
   }): void {
     configureTacticalPostFx(this.postFx, this.renderer, {
       enabled: opts.enabled,
-      sharpen: opts.sharpen ?? 0.32,
-      bloom: opts.bloom ?? 0.18,
+      sharpen: opts.sharpen ?? 0.2,
+      bloom: opts.bloom ?? 0.12,
+      exposure: opts.exposure,
+      lift: opts.lift,
     });
   }
 

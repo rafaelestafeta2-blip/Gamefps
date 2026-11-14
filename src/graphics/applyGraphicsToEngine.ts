@@ -22,6 +22,8 @@ interface InternalEngineAccess {
     enabled: boolean;
     sharpen?: number;
     bloom?: number;
+    exposure?: number;
+    lift?: number;
   }) => void;
   state: {
     fpsLimit: number;
@@ -97,10 +99,15 @@ export function applyGraphicsToEngine(
     settings.fpsLimit !== 30 &&
     settings.resolution !== 'SCALE_50';
   if (typeof engine.configurePostFx === 'function') {
+    // Milder sharpen/bloom — previous 0.28–0.4 unsharp crushed blacks with ACES.
+    // Exposure/lift compensate for LinearSRGB → canvas encode path.
+    const acesOn = settings.acesToneMapping;
     engine.configurePostFx({
       enabled: postEnabled,
-      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.4 : 0.28,
-      bloom: settings.muzzleLight ? 0.2 : 0.12,
+      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.26 : 0.18,
+      bloom: settings.muzzleLight ? 0.14 : 0.08,
+      exposure: acesOn ? 1.08 : 1.04,
+      lift: acesOn ? 0.022 : 0.012,
     });
   }
 

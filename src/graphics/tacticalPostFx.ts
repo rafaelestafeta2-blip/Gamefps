@@ -2,6 +2,12 @@
  * Lightweight fullscreen post overlay (sharpen + controlled bloom glow + damage pulse).
  * Drawn AFTER the main scene via an orthographic quad — no EffectComposer dependency.
  * Gated by quality: skip on LOW / battery saver / software GL.
+ *
+ * Color pipeline notes (Three r187):
+ * - Scene → RT keeps LinearSRGB (ACES already applied in material shaders when enabled).
+ * - The blit ShaderMaterial MUST NOT re-tonemap (`toneMapped: false`) and MUST run
+ *   `colorspace_fragment` so linear display-referred values become sRGB on the canvas.
+ * - Missing that encode was crushing midtones/shadows (looked “too dark” with the toggle on).
  */
 
 import * as THREE from 'three';
@@ -20,33 +26,50 @@ uniform sampler2D tDiffuse;
 uniform float uSharpen;
 uniform float uBloom;
 uniform float uDamage;
+uniform float uExposure;
+uniform float uLift;
 uniform vec2 uTexel;
 varying vec2 vUv;
 
 void main() {
-  vec4 c = texture2D(tDiffuse, vUv);
-  // Unsharp-style sharpen
+  vec4 tex = texture2D(tDiffuse, vUv);
+  vec3 c = tex.rgb;
+
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+
+  // Unsharp-style sharpen with shadow protection (avoid crushing blacks).
   if (uSharpen > 0.001) {
-    vec4 n = texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y));
-    vec4 s = texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y));
-    vec4 e = texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.0));
-    vec4 w = texture2D(tDiffuse, vUv - vec2(uTexel.x, 0.0));
-    vec4 blur = (n + s + e + w) * 0.25;
-    c.rgb += (c.rgb - blur.rgb) * uSharpen;
+    vec3 n = texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y)).rgb;
+    vec3 s = texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y)).rgb;
+    vec3 e = texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.0)).rgb;
+    vec3 w = texture2D(tDiffuse, vUv - vec2(uTexel.x, 0.0)).rgb;
+    vec3 blur = (n + s + e + w) * 0.25;
+    vec3 detail = c - blur;
+    float shadowProtect = smoothstep(0.03, 0.22, lum);
+    // Soft-knee: less amplification on already-bright pixels (keeps sky from blowing).
+    float highlightProtect = 1.0 - smoothstep(0.78, 0.98, lum);
+    c += detail * uSharpen * shadowProtect * highlightProtect;
   }
-  // Soft bloom from bright pixels only
+
+  // Soft bloom from bright pixels only (narrower mask = less washed sky).
   if (uBloom > 0.001) {
-    float lum = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-    float bloomMask = max(0.0, lum - 0.72) * uBloom;
-    c.rgb += c.rgb * bloomMask;
+    float bloomMask = max(0.0, lum - 0.82) * uBloom;
+    c += c * bloomMask * 0.65;
   }
-  // Damage vignette (edge darken + red)
+
+  // Mild exposure + shadow lift so midtones stay readable outdoors / in doorways.
+  c = c * uExposure + vec3(uLift);
+
+  // Damage vignette (edge darken + red) — only when actually damaged.
   if (uDamage > 0.001) {
     vec2 d = vUv - 0.5;
-    float vig = smoothstep(0.2, 0.95, length(d) * 1.45);
-    c.rgb = mix(c.rgb, c.rgb * vec3(0.55, 0.12, 0.12), vig * uDamage);
+    float vig = smoothstep(0.35, 1.05, length(d) * 1.35);
+    c = mix(c, c * vec3(0.7, 0.22, 0.18), vig * uDamage * 0.85);
   }
-  gl_FragColor = vec4(clamp(c.rgb, 0.0, 1.0), 1.0);
+
+  c = max(c, vec3(0.0));
+  gl_FragColor = vec4(c, 1.0);
+  #include <colorspace_fragment>
 }
 `;
 
@@ -54,6 +77,8 @@ export interface TacticalPostFxState {
   enabled: boolean;
   sharpen: number;
   bloom: number;
+  exposure: number;
+  lift: number;
   rt: THREE.WebGLRenderTarget | null;
   scene: THREE.Scene | null;
   camera: THREE.OrthographicCamera | null;
@@ -64,8 +89,10 @@ export interface TacticalPostFxState {
 export function createTacticalPostFx(): TacticalPostFxState {
   return {
     enabled: false,
-    sharpen: 0.35,
-    bloom: 0.22,
+    sharpen: 0.22,
+    bloom: 0.14,
+    exposure: 1.06,
+    lift: 0.018,
     rt: null,
     scene: null,
     camera: null,
@@ -77,11 +104,19 @@ export function createTacticalPostFx(): TacticalPostFxState {
 export function configureTacticalPostFx(
   state: TacticalPostFxState,
   renderer: THREE.WebGLRenderer,
-  opts: { enabled: boolean; sharpen: number; bloom: number }
+  opts: {
+    enabled: boolean;
+    sharpen: number;
+    bloom: number;
+    exposure?: number;
+    lift?: number;
+  }
 ): void {
   state.enabled = opts.enabled;
   state.sharpen = opts.sharpen;
   state.bloom = opts.bloom;
+  if (typeof opts.exposure === 'number') state.exposure = opts.exposure;
+  if (typeof opts.lift === 'number') state.lift = opts.lift;
   if (!opts.enabled) return;
 
   const size = new THREE.Vector2();
@@ -95,8 +130,10 @@ export function configureTacticalPostFx(
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
       depthBuffer: true,
       stencilBuffer: false,
+      colorSpace: THREE.LinearSRGBColorSpace,
     });
     state.material = new THREE.ShaderMaterial({
       uniforms: {
@@ -104,12 +141,16 @@ export function configureTacticalPostFx(
         uSharpen: { value: state.sharpen },
         uBloom: { value: state.bloom },
         uDamage: { value: 0 },
+        uExposure: { value: state.exposure },
+        uLift: { value: state.lift },
         uTexel: { value: new THREE.Vector2(1 / w, 1 / h) },
       },
       vertexShader: VERT,
       fragmentShader: FRAG,
       depthTest: false,
       depthWrite: false,
+      // Scene already ACES-mapped into the RT; never stack a second filmic curve.
+      toneMapped: false,
     });
     state.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), state.material);
     state.scene = new THREE.Scene();
@@ -119,6 +160,8 @@ export function configureTacticalPostFx(
     state.rt.setSize(w, h);
     if (state.material) {
       state.material.uniforms.uTexel.value.set(1 / w, 1 / h);
+      state.material.uniforms.uExposure.value = state.exposure;
+      state.material.uniforms.uLift.value = state.lift;
     }
   }
 }
@@ -143,7 +186,9 @@ export function renderWithTacticalPostFx(
   state.material.uniforms.tDiffuse.value = state.rt.texture;
   state.material.uniforms.uSharpen.value = state.sharpen;
   state.material.uniforms.uBloom.value = state.bloom;
-  state.material.uniforms.uDamage.value = Math.min(1, damageFlashAlpha * 1.1);
+  state.material.uniforms.uExposure.value = state.exposure;
+  state.material.uniforms.uLift.value = state.lift;
+  state.material.uniforms.uDamage.value = Math.min(1, damageFlashAlpha * 1.05);
 
   renderer.setRenderTarget(null);
   renderer.render(state.scene, state.camera);
