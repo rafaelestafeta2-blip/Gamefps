@@ -32,6 +32,7 @@ let state: CloudSyncState = {
   profile: loadLocalProfileFallback(),
   authReady: false,
   isGoogleLinked: false,
+  isGuestSession: false,
   isSyncing: false,
   lastSyncedAt: null,
   syncError: null,
@@ -101,6 +102,7 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
 
+  state.isGuestSession = false;
   state.isGoogleLinked = true;
   state.isSyncing = true;
   emitState();
@@ -162,6 +164,14 @@ export function subscribePlayerProfile(listener: SyncListener): () => void {
   };
 }
 
+export function enterAsGuest(): void {
+  state.isGuestSession = true;
+  state.authReady = true;
+  state.isSyncing = false;
+  state.syncError = null;
+  emitState();
+}
+
 export async function signInWithGoogleAccount(): Promise<boolean> {
   state.syncError = null;
   state.isSyncing = true;
@@ -183,6 +193,7 @@ export async function signOutGoogleAccount(): Promise<void> {
   }
   await performGoogleSignOut();
   state.isGoogleLinked = false;
+  state.isGuestSession = false;
   emitState();
 }
 

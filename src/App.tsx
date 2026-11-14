@@ -53,7 +53,7 @@ export default function App() {
           state.profile.activeWeapon
         );
       }
-      if (state.authReady && !state.isGoogleLinked) {
+      if (state.authReady && !state.isGoogleLinked && !state.isGuestSession) {
         setHud((prev) => {
           if (
             prev.screen === 'MAIN_MENU' ||
