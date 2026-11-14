@@ -87,10 +87,6 @@ import {
 import { PlayerDeathThirdPersonController } from './playerDeathThirdPerson';
 import { PostMatchShowcase3D } from './postMatchShowcase3D';
 import {
-  alertBotsToPlayerCombat,
-  updateSmartBotNavigation,
-} from './botNavigationSystem';
-import {
   buildStanderTiroLevel,
   loadStanderTiroMapGeometry,
   STANDER_TIRO_SPAWN,

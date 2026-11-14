@@ -11,7 +11,18 @@ import {
   triggerBotGrenadeAnimation,
   triggerBotHitAnimation,
 } from './botCharacterSystem';
-import { BotNavData, checkBotLineOfSight, getMapRoutes, getWaypointTowardPlantedSite, isTargetInFieldOfView, moveBotWithPhysics } from './botNavigationRoutes';
+import {
+  BotNavData,
+  botNeedsRepath,
+  checkBotLineOfSight,
+  clearBotNeedsRepath,
+  getMapRoutes,
+  getWaypointTowardPlantedSite,
+  isTargetInFieldOfView,
+  moveBotWithPhysics,
+  pickApproachWaypoint,
+  setLastKnownPos,
+} from './botNavigationRoutes';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { TacticalGrenadeSystem } from './grenadeSystem';
 import { ColliderBox, TacticalTargetEntity } from './levelBuilder';
@@ -36,6 +47,10 @@ function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): Bo
     if (existing.acquireTimer == null) existing.acquireTimer = 0;
     if (existing.flankTimer == null) existing.flankTimer = 0;
     if (existing.jumpCooldown == null) existing.jumpCooldown = 0;
+    if (existing.progressFailTimer == null) existing.progressFailTimer = 0;
+    if (existing.unstickPhase == null) existing.unstickPhase = 0;
+    if (existing.unstickTimer == null) existing.unstickTimer = 0;
+    if (existing.heardAlertTimer == null) existing.heardAlertTimer = 0;
     return existing;
   }
 
@@ -52,31 +67,68 @@ function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): Bo
     grenadeCooldown: 14.0 + Math.random() * 12.0, grenadesLeft: index % 3 === 0 ? 1 : 0,
     coverTimer: 0, peekTimer: 0, coverSide: Math.random() > 0.5 ? 1 : -1,
     strafeTimer: 0, strafeDir: Math.random() > 0.5 ? 1 : -1, stuckTimer: 0,
+    progressFailTimer: 0, unstickPhase: 0, unstickTimer: 0,
     avoidAngle: 0, avoidTimer: 0, verticalVel: 0, jumpCooldown: 0, plantOrDefuseTimer: 0, lastKeypadDigit: -1,
     visionRange: 40.0, fieldOfView: 130.0,
-    acquireTimer: 0, flankTimer: 0,
+    acquireTimer: 0, flankTimer: 0, heardAlertTimer: 0,
   };
   bot.root.userData = bot.root.userData || {};
   bot.root.userData.navData = navData;
   return navData;
 }
 
+/**
+ * Gunfire / damage hearing — sets frozen LKP, does NOT grant LOS or live tracking.
+ * Direct hit → stronger chase; sound-only → investigate toward shot origin.
+ */
 export function alertBotsToPlayerCombat(
-  targets: TacticalTargetEntity[], playerPos: THREE.Vector3, hitBot?: TacticalTargetEntity | null
+  targets: TacticalTargetEntity[],
+  playerPos: THREE.Vector3,
+  hitBot?: TacticalTargetEntity | null,
+  opts?: { hearingRadius?: number; isFootstep?: boolean }
 ): void {
+  const hearR = opts?.hearingRadius ?? (opts?.isFootstep ? 14 : 28);
   for (let i = 0; i < targets.length; i++) {
     const bot = targets[i] as YardBotEntity;
     if (bot.isDown || bot.type !== 'COMBAT_BOT' || bot.isAlly) continue;
-    const isDirectHit = hitBot && bot.id === hitBot.id;
-    if (!isDirectHit && bot.root.position.distanceTo(playerPos) > 32.0) continue;
+    const isDirectHit = Boolean(hitBot && bot.id === hitBot.id);
+    const dist = bot.root.position.distanceTo(playerPos);
+    if (!isDirectHit && dist > hearR) continue;
     const nav = bot.root.userData?.navData as BotNavData | undefined;
     if (!nav) continue;
+    // Don't override an active visual lock with a weaker hear.
+    if (nav.tacticalState === 'COMBAT' || nav.tacticalState === 'PEEK' || nav.tacticalState === 'COVER') {
+      if (nav.chaseTimer > 4 && !isDirectHit) continue;
+    }
     nav.lockedTargetId = 'PLAYER';
-    nav.chaseTimer = 25.0;
-    nav.lastKnownPos = playerPos.clone();
-    nav.tacticalState = 'COMBAT';
-    bot.isTelegraphing = true;
+    setLastKnownPos(nav, playerPos);
+    if (isDirectHit) {
+      nav.chaseTimer = Math.max(nav.chaseTimer, 22);
+      nav.heardAlertTimer = 0;
+      nav.tacticalState = 'COMBAT';
+      bot.isTelegraphing = true;
+    } else {
+      nav.chaseTimer = Math.max(nav.chaseTimer, opts?.isFootstep ? 8 : 14);
+      nav.heardAlertTimer = opts?.isFootstep ? 2.5 : 5.0;
+      nav.tacticalState = 'INVESTIGATE';
+      bot.isTelegraphing = true;
+      nav.acquireTimer = 0;
+    }
   }
+}
+
+/** Footstep hearing — sprint is loud; walk alerts only at close range. Never grants LOS. */
+export function alertBotsToPlayerFootsteps(
+  targets: TacticalTargetEntity[],
+  playerPos: THREE.Vector3,
+  isSprinting: boolean,
+  isMoving = true
+): void {
+  if (!isMoving) return;
+  alertBotsToPlayerCombat(targets, playerPos, null, {
+    hearingRadius: isSprinting ? 14 : 7.5,
+    isFootstep: true,
+  });
 }
 
 export function updateSmartBotNavigation(
@@ -114,6 +166,7 @@ export function updateSmartBotNavigation(
     nav.fireCooldown = Math.max(0, nav.fireCooldown - dt);
     nav.grenadeCooldown = Math.max(0, nav.grenadeCooldown - dt);
     nav.chaseTimer = Math.max(0, nav.chaseTimer - dt);
+    nav.heardAlertTimer = Math.max(0, (nav.heardAlertTimer || 0) - dt);
 
     const bPos = bot.root.position;
     _botHead.set(bPos.x, bPos.y + 1.45, bPos.z);
@@ -138,7 +191,8 @@ export function updateSmartBotNavigation(
           isVisibleTargetPlayer = true;
           nav.lockedTargetId = 'PLAYER';
           nav.chaseTimer = 18.0;
-          nav.lastKnownPos = playerPos.clone();
+          nav.heardAlertTimer = 0;
+          setLastKnownPos(nav, playerPos);
         }
       }
     }
@@ -157,39 +211,33 @@ export function updateSmartBotNavigation(
           isVisibleTargetPlayer = false;
           nav.lockedTargetId = other.id;
           nav.chaseTimer = 22.0;
-          nav.lastKnownPos = oPos.clone();
+          nav.heardAlertTimer = 0;
+          setLastKnownPos(nav, oPos);
         }
       }
     }
 
+    // Chase frozen LKP only — never live-track through walls (no wallhack).
     let chasedTargetPos: THREE.Vector3 | null = visibleEnemyPos;
-    if (!chasedTargetPos && !isC4Planted && nav.lockedTargetId && nav.chaseTimer > 0) {
-      if (nav.lockedTargetId === 'PLAYER') {
-        if (playerAlive) {
-          nav.lastKnownPos = (nav.lastKnownPos || playerPos.clone()).copy(playerPos);
-          chasedTargetPos = nav.lastKnownPos;
-        } else {
-          nav.lockedTargetId = null;
-          nav.chaseTimer = 0;
-        }
-      } else {
+    if (!chasedTargetPos && nav.chaseTimer > 0 && nav.lastKnownPos) {
+      if (nav.lockedTargetId === 'PLAYER' && !playerAlive) {
+        nav.lockedTargetId = null;
+        nav.chaseTimer = 0;
+      } else if (nav.lockedTargetId && nav.lockedTargetId !== 'PLAYER') {
         const lockedBot = bots.find((b) => b.id === nav.lockedTargetId);
-        if (lockedBot && !lockedBot.isDown) {
-          nav.lastKnownPos = (nav.lastKnownPos || lockedBot.root.position.clone()).copy(lockedBot.root.position);
-          chasedTargetPos = nav.lastKnownPos;
-        } else {
+        if (!lockedBot || lockedBot.isDown) {
           nav.lockedTargetId = null;
-          nav.chaseTimer = 0;
+          // Keep investigating last spot briefly after target dies.
+          nav.chaseTimer = Math.min(nav.chaseTimer, 4);
         }
+      }
+      if (nav.chaseTimer > 0 && nav.lastKnownPos) {
+        chasedTargetPos = nav.lastKnownPos;
       }
     }
 
-    if (!isBombMode && !bot.isAlly && playerAlive && !chasedTargetPos) {
-      nav.lockedTargetId = 'PLAYER';
-      nav.chaseTimer = 30.0;
-      nav.lastKnownPos = (nav.lastKnownPos || playerPos.clone()).copy(playerPos);
-      chasedTargetPos = nav.lastKnownPos;
-    }
+    // Offline wave modes: never live-track. Push only after see/hear set a frozen LKP.
+    // (Gunfire + sprint footsteps feed LKP via alert helpers.)
 
     let lockLookAtTarget: THREE.Vector3 | null = null;
     const isEscortAlly = bot.isAlly && (bot.callsign === 'LIFELINE-04' || bot.callsign === 'STRIKER-03');
@@ -330,25 +378,35 @@ export function updateSmartBotNavigation(
       const isSniperBot = bot.weaponId === 'SNIPER_BOLT' || bot.weaponId === 'SNIPER_TACTICAL';
       const idealDist = isSniperBot ? 15.0 : 4.6;
 
-      // Cover / peek / flank cadence — COD-mobile style, not endless side-strafe.
+      // Cover → peek → flank/reposition cadence (not endless side-strafe).
       if (nav.coverTimer == null) nav.coverTimer = 0;
       if (nav.peekTimer == null) nav.peekTimer = 0;
       if (nav.flankTimer == null) nav.flankTimer = 0;
       if (!nav.coverSide) nav.coverSide = Math.random() > 0.5 ? 1 : -1;
-      if (nav.tacticalState === 'COMBAT' && distToEnemy < idealDist + 8) {
+      if (nav.tacticalState === 'COMBAT' && distToEnemy < idealDist + 9) {
         const roll = Math.random();
-        if (roll < 0.028) {
+        if (roll < 0.032) {
           nav.tacticalState = 'COVER';
           nav.coverTimer = 0.85 + Math.random() * 1.15;
           nav.coverSide = Math.random() > 0.5 ? 1 : -1;
           if (bot.root.userData?.botAnimCtrl) {
             bot.root.userData.botAnimCtrl.crouchStance = true;
           }
-        } else if (roll < 0.04) {
-          // Flank / reposition burst
-          nav.flankTimer = 1.1 + Math.random() * 1.2;
+        } else if (roll < 0.055) {
+          // Flank / reposition burst around the fight ring.
+          nav.flankTimer = 1.15 + Math.random() * 1.35;
           nav.strafeDir = Math.random() > 0.5 ? 1 : -1;
+          nav.coverSide = nav.strafeDir >= 0 ? 1 : -1;
         }
+      }
+      // After peek ends into COMBAT, occasionally commit to a hard flank.
+      if (
+        nav.tacticalState === 'COMBAT' &&
+        (nav.flankTimer || 0) <= 0 &&
+        Math.random() < 0.008
+      ) {
+        nav.flankTimer = 1.4 + Math.random() * 1.1;
+        nav.strafeDir *= -1;
       }
       if (nav.flankTimer > 0) nav.flankTimer -= dt;
       if (nav.tacticalState === 'COVER') {
@@ -446,10 +504,17 @@ export function updateSmartBotNavigation(
         moveTarget = _combatMoveGoal;
         moveSpeed = 1.85;
       }
-    } else if (nav.tacticalState === 'INVESTIGATE' && chasedTargetPos) {
-      // Sprint to last known, then fan out if close (search, not freeze).
+    } else if (
+      (nav.tacticalState === 'INVESTIGATE' ||
+        (!visibleEnemyPos && chasedTargetPos && nav.chaseTimer > 0)) &&
+      chasedTargetPos
+    ) {
+      // Path toward frozen LKP via approach corridor, then fan/search — never wallhack.
+      if (nav.tacticalState !== 'INVESTIGATE') {
+        nav.tacticalState = 'INVESTIGATE';
+      }
       const distLast = Math.hypot(bPos.x - chasedTargetPos.x, bPos.z - chasedTargetPos.z);
-      if (distLast < 2.4) {
+      if (distLast < 2.6) {
         const a = performance.now() * 0.0015 + i;
         _combatMoveGoal.set(
           chasedTargetPos.x + Math.cos(a) * 3.2,
@@ -457,12 +522,37 @@ export function updateSmartBotNavigation(
           chasedTargetPos.z + Math.sin(a) * 3.2
         );
         moveTarget = _combatMoveGoal;
-        moveSpeed = 2.8;
+        moveSpeed = 2.85;
       } else {
-        moveTarget = chasedTargetPos;
+        const needsRepath = botNeedsRepath(nav, bot);
+        moveTarget = pickApproachWaypoint(
+          bPos,
+          chasedTargetPos,
+          mode,
+          Boolean(bot.isAlly),
+          8.5,
+          needsRepath || nav.unstickPhase >= 2
+        );
+        if (needsRepath) clearBotNeedsRepath(nav, bot);
         moveSpeed = 4.55;
       }
     } else if (nav.waypoints.length > 0) {
+      if (botNeedsRepath(nav, bot)) {
+        // Soft repath: snap to nearest waypoint after doorway unstick.
+        let best = nav.wpIndex;
+        let bestD = Infinity;
+        for (let w = 0; w < nav.waypoints.length; w++) {
+          const wp = nav.waypoints[w];
+          const d = Math.hypot(bPos.x - wp.x, bPos.z - wp.z);
+          if (d < bestD) {
+            bestD = d;
+            best = w;
+          }
+        }
+        nav.wpIndex = best;
+        nav.progressFailTimer = 0;
+        clearBotNeedsRepath(nav, bot);
+      }
       const curWp = nav.waypoints[nav.wpIndex];
       if (Math.hypot(bPos.x - curWp.x, bPos.z - curWp.z) < 2.2) {
         const minLoopIdx = Math.min(2, nav.waypoints.length - 1);
@@ -473,6 +563,25 @@ export function updateSmartBotNavigation(
     } else {
       moveTarget = bPos;
       moveSpeed = 0;
+    }
+
+    // When closing through buildings, prefer corridor approaches over raw combat beelines.
+    if (
+      visibleEnemyPos &&
+      (nav.tacticalState === 'COMBAT' || nav.tacticalState === 'COVER') &&
+      moveTarget === _combatMoveGoal
+    ) {
+      const distE = Math.hypot(bPos.x - visibleEnemyPos.x, bPos.z - visibleEnemyPos.z);
+      if (distE > 8.5 && (nav.flankTimer || 0) <= 0) {
+        moveTarget = pickApproachWaypoint(
+          bPos,
+          moveTarget,
+          mode,
+          Boolean(bot.isAlly),
+          8.5,
+          botNeedsRepath(nav, bot) || nav.unstickPhase >= 2
+        );
+      }
     }
 
     moveBotWithPhysics(bot, nav, moveTarget, moveSpeed, dt, colliders, activeGlbCollider, lockLookAtTarget);
@@ -548,7 +657,8 @@ export function updateSmartBotNavigation(
             if (victimNav && !victimNav.lockedTargetId) {
               victimNav.lockedTargetId = bot.id;
               victimNav.chaseTimer = 20.0;
-              victimNav.lastKnownPos = bPos.clone();
+              setLastKnownPos(victimNav, bPos);
+              victimNav.tacticalState = 'INVESTIGATE';
             }
             if (visibleEnemyBot.health <= 0) {
               visibleEnemyBot.isDown = true;

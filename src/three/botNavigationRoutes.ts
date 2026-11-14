@@ -35,6 +35,11 @@ export interface BotNavData {
   strafeTimer: number;
   strafeDir: number;
   stuckTimer: number;
+  /** Seconds with almost no progress toward moveTarget (doorway / wall grind). */
+  progressFailTimer: number;
+  /** Escalating unstick phase: 0 idle, 1 sidestep, 2 backtrack, 3 repath. */
+  unstickPhase: number;
+  unstickTimer: number;
   avoidAngle: number;
   avoidTimer: number;
   verticalVel: number;
@@ -48,6 +53,8 @@ export interface BotNavData {
   acquireTimer: number;
   /** Seconds left to hold a flank / reposition goal. */
   flankTimer: number;
+  /** Hearing-only alert (gunfire/footsteps) — chase LKP without LOS cheat. */
+  heardAlertTimer: number;
 }
 
 export interface TacticalMapRoutes {
@@ -133,32 +140,70 @@ export function getWaypointTowardPlantedSite(
 ): THREE.Vector3 {
   const routes = getMapRoutes(mode);
   const sitePos = plantedSite === 'A' ? routes.siteA : routes.siteB;
-  const distToSite = Math.hypot(botPos.x - sitePos.x, botPos.z - sitePos.z);
-  if (distToSite <= 11.5) return sitePos;
+  return pickApproachWaypoint(botPos, sitePos, mode, isAlly, 11.5);
+}
 
-  const lane =
-    plantedSite === 'A'
-      ? isAlly
-        ? routes.vgA
-        : routes.btA
-      : isAlly
-        ? routes.vgB
-        : routes.btB;
+/**
+ * Corridor-aware approach: pick a lane waypoint that advances toward `goal`
+ * instead of beelining into walls/doorframes.
+ */
+export function pickApproachWaypoint(
+  botPos: THREE.Vector3,
+  goal: THREE.Vector3,
+  mode: DrillMode,
+  isAlly: boolean,
+  directArriveDist = 8.5,
+  preferAltLane = false
+): THREE.Vector3 {
+  const distToGoal = Math.hypot(botPos.x - goal.x, botPos.z - goal.z);
+  if (distToGoal <= directArriveDist) return goal;
 
-  let bestWp = sitePos;
+  const routes = getMapRoutes(mode);
+  const primary = isAlly
+    ? [routes.vgA, routes.vgB, routes.vgMid]
+    : [routes.btA, routes.btB, routes.btMid];
+  // When stuck, shuffle lane preference so bots don't all jam the same doorway.
+  const lanes = preferAltLane
+    ? [primary[1], primary[2], primary[0]]
+    : primary;
+
+  let bestWp = goal;
   let bestScore = Infinity;
-  for (let i = 0; i < lane.length; i++) {
-    const wp = lane[i];
-    const wpDistToSite = Math.hypot(wp.x - sitePos.x, wp.z - sitePos.z);
-    if (wpDistToSite >= distToSite - 2.0) continue;
-    const botDistToWp = Math.hypot(botPos.x - wp.x, botPos.z - wp.z);
-    const score = botDistToWp + wpDistToSite * 0.45;
-    if (score < bestScore) {
-      bestScore = score;
-      bestWp = wp;
+  for (let L = 0; L < lanes.length; L++) {
+    const lane = lanes[L];
+    for (let i = 0; i < lane.length; i++) {
+      const wp = lane[i];
+      const wpDistToGoal = Math.hypot(wp.x - goal.x, wp.z - goal.z);
+      // Prefer waypoints that are closer to the goal than we currently are.
+      if (wpDistToGoal >= distToGoal - 1.2) continue;
+      const botDistToWp = Math.hypot(botPos.x - wp.x, botPos.z - wp.z);
+      // Slight preference for nearer corridor nodes; penalize far hops.
+      const score = botDistToWp * 1.05 + wpDistToGoal * 0.55 + L * 0.8;
+      if (score < bestScore) {
+        bestScore = score;
+        bestWp = wp;
+      }
     }
   }
   return bestWp;
+}
+
+/** Snapshot last-known position (frozen) — never live-track while hidden. */
+export function setLastKnownPos(nav: BotNavData, pos: THREE.Vector3): void {
+  if (!nav.lastKnownPos) nav.lastKnownPos = pos.clone();
+  else nav.lastKnownPos.copy(pos);
+}
+
+/** True after doorway unstick escalates to a forced corridor repath. */
+export function botNeedsRepath(nav: BotNavData, bot?: YardBotEntity): boolean {
+  if (nav.unstickPhase >= 3) return true;
+  if (bot?.root.userData?.botNeedsRepath) return true;
+  return false;
+}
+
+export function clearBotNeedsRepath(nav: BotNavData, bot?: YardBotEntity): void {
+  if (bot?.root.userData) bot.root.userData.botNeedsRepath = false;
+  if (nav.unstickPhase >= 3) nav.unstickPhase = 1;
 }
 
 export function isTargetInFieldOfView(
@@ -287,11 +332,17 @@ export function moveBotWithPhysics(
   const bPos = bot.root.position;
   const botRadius = 0.34;
   if (nav.jumpCooldown == null) nav.jumpCooldown = 0;
+  if (nav.progressFailTimer == null) nav.progressFailTimer = 0;
+  if (nav.unstickPhase == null) nav.unstickPhase = 0;
+  if (nav.unstickTimer == null) nav.unstickTimer = 0;
   nav.jumpCooldown = Math.max(0, nav.jumpCooldown - dt);
+  nav.unstickTimer = Math.max(0, nav.unstickTimer - dt);
 
   if (nav.avoidTimer > 0) nav.avoidTimer = Math.max(0, nav.avoidTimer - dt);
 
-  let horizDist = 0;
+  const prevDistToGoal = Math.hypot(moveTarget.x - bPos.x, moveTarget.z - bPos.z);
+  let horizDist = prevDistToGoal;
+
   if (moveSpeed > 0.05) {
     _navDir.subVectors(moveTarget, bPos);
     _navDir.y = 0;
@@ -302,7 +353,25 @@ export function moveBotWithPhysics(
 
       let moveDirX = _navDir.x;
       let moveDirZ = _navDir.z;
-      if (nav.avoidTimer > 0 && Math.abs(nav.avoidAngle) > 0.01) {
+
+      // Escalating unstick steering (doorways / corridors).
+      if (nav.unstickPhase === 1) {
+        // Sidestep perpendicular to goal.
+        const side = nav.strafeDir >= 0 ? 1 : -1;
+        moveDirX = -_navDir.z * side * 0.85 + _navDir.x * 0.25;
+        moveDirZ = _navDir.x * side * 0.85 + _navDir.z * 0.25;
+        const len = Math.hypot(moveDirX, moveDirZ) || 1;
+        moveDirX /= len;
+        moveDirZ /= len;
+      } else if (nav.unstickPhase === 2) {
+        // Backtrack then peel off.
+        const side = nav.strafeDir >= 0 ? 1 : -1;
+        moveDirX = -_navDir.x * 0.75 - _navDir.z * side * 0.55;
+        moveDirZ = -_navDir.z * 0.75 + _navDir.x * side * 0.55;
+        const len = Math.hypot(moveDirX, moveDirZ) || 1;
+        moveDirX /= len;
+        moveDirZ /= len;
+      } else if (nav.avoidTimer > 0 && Math.abs(nav.avoidAngle) > 0.01) {
         const cosA = Math.cos(nav.avoidAngle);
         const sinA = Math.sin(nav.avoidAngle);
         moveDirX = _navDir.x * cosA - _navDir.z * sinA;
@@ -315,40 +384,73 @@ export function moveBotWithPhysics(
 
       let attempt = tryStepDirection(prevX, prevZ, bPos.y, moveDirX, moveDirZ, step, botRadius, colliders, activeGlbCollider);
 
-      if (attempt.movedDist < step * 0.6) {
+      if (attempt.movedDist < step * 0.55) {
+        // Prefer steers that still advance toward the goal (not just any free space).
+        let best = attempt;
+        let bestScore = -Infinity;
         for (let i = 0; i < STEER_TEST_ANGLES.length; i++) {
           const ang = STEER_TEST_ANGLES[i] * (nav.strafeDir >= 0 ? 1 : -1);
           const cosA = Math.cos(ang);
           const sinA = Math.sin(ang);
           _steerDir.set(_navDir.x * cosA - _navDir.z * sinA, 0, _navDir.x * sinA + _navDir.z * cosA);
           const alt = tryStepDirection(prevX, prevZ, bPos.y, _steerDir.x, _steerDir.z, step, botRadius, colliders, activeGlbCollider);
-          if (alt.movedDist > attempt.movedDist * 1.25 && alt.movedDist > step * 0.4) {
-            attempt = alt;
+          if (alt.movedDist < step * 0.28) continue;
+          const newDist = Math.hypot(moveTarget.x - alt.x, moveTarget.z - alt.z);
+          const progress = prevDistToGoal - newDist;
+          const score = alt.movedDist * 1.2 + progress * 2.4;
+          if (score > bestScore) {
+            bestScore = score;
+            best = alt;
             moveDirX = _steerDir.x;
             moveDirZ = _steerDir.z;
             nav.avoidAngle = ang;
-            nav.avoidTimer = 0.55;
-            break;
+            nav.avoidTimer = 0.42;
           }
         }
+        attempt = best;
       }
 
       bPos.x = attempt.x;
       bPos.z = attempt.z;
 
-      if (attempt.movedDist < step * 0.3) {
+      const newDistToGoal = Math.hypot(moveTarget.x - bPos.x, moveTarget.z - bPos.z);
+      const madeProgress = newDistToGoal < prevDistToGoal - 0.015 || attempt.movedDist > step * 0.45;
+
+      if (attempt.movedDist < step * 0.28 || !madeProgress) {
         nav.stuckTimer += dt;
-        if (nav.stuckTimer > 0.32) {
-          nav.stuckTimer = 0;
-          nav.strafeDir *= -1;
-          nav.avoidAngle = nav.strafeDir * 1.45;
-          nav.avoidTimer = 0.75;
-          if (!lockLookAtTarget && nav.waypoints.length > 0) {
-            nav.wpIndex = (nav.wpIndex + 1) % nav.waypoints.length;
+        nav.progressFailTimer += dt;
+      } else {
+        nav.stuckTimer = Math.max(0, nav.stuckTimer - dt * 3.0);
+        nav.progressFailTimer = Math.max(0, nav.progressFailTimer - dt * 2.2);
+        if (nav.progressFailTimer < 0.35 && nav.unstickPhase > 0 && nav.unstickTimer <= 0) {
+          nav.unstickPhase = 0;
+        }
+      }
+
+      // Escalate unstick when grinding a doorway/wall.
+      if (nav.progressFailTimer > 0.55 && nav.unstickTimer <= 0) {
+        nav.unstickPhase = Math.min(3, (nav.unstickPhase || 0) + 1);
+        nav.unstickTimer = nav.unstickPhase === 1 ? 0.55 : nav.unstickPhase === 2 ? 0.7 : 0.35;
+        nav.strafeDir *= -1;
+        nav.progressFailTimer = 0.15;
+        bot.root.userData.botNeedsRepath = nav.unstickPhase >= 3;
+        if (nav.unstickPhase >= 3) {
+          nav.unstickPhase = 1;
+          if (nav.waypoints.length > 0) {
+            // Skip jammed node — jump to a farther waypoint on the lane.
+            nav.wpIndex = Math.min(
+              nav.waypoints.length - 1,
+              nav.wpIndex + 1 + Math.floor(Math.random() * 2)
+            );
           }
         }
-      } else {
-        nav.stuckTimer = Math.max(0, nav.stuckTimer - dt * 2.5);
+      } else if (nav.stuckTimer > 0.4 && nav.unstickTimer <= 0) {
+        nav.stuckTimer = 0;
+        nav.strafeDir *= -1;
+        nav.avoidAngle = nav.strafeDir * 1.35;
+        nav.avoidTimer = 0.65;
+        nav.unstickPhase = Math.max(1, nav.unstickPhase || 1);
+        nav.unstickTimer = 0.5;
       }
 
       if (!lockLookAtTarget) {
@@ -356,6 +458,8 @@ export function moveBotWithPhysics(
         bot.root.rotation.y = dampAngleShortest(bot.root.rotation.y, lookAngle, 10.5, dt);
       }
     }
+  } else {
+    nav.progressFailTimer = Math.max(0, nav.progressFailTimer - dt * 2);
   }
 
   if (lockLookAtTarget) {
@@ -374,7 +478,7 @@ export function moveBotWithPhysics(
   if (grounded && nav.jumpCooldown <= 0 && moveSpeed > 0.05) {
     const heightDelta = moveTarget.y - floorY;
     const wantStepUp = heightDelta > 0.55 && horizDist < 3.2 && horizDist > 0.25;
-    const wantStuckHop = nav.stuckTimer > 0.22 && heightDelta > -0.2;
+    const wantStuckHop = (nav.stuckTimer > 0.22 || nav.unstickPhase >= 2) && heightDelta > -0.2;
     if (wantStepUp || wantStuckHop) {
       nav.verticalVel = wantStepUp ? 6.4 : 5.2;
       nav.jumpCooldown = 0.9;

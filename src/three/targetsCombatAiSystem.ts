@@ -10,7 +10,7 @@ import { isOnlineMatchActive } from '../multiplayer/onlineRoomService';
 import { addPlayerCash } from '../progression/ranks';
 import { canGrantMatchProgressionRewards } from '../progression/matchProgressionGate';
 import {
-  alertBotsToPlayerCombat,
+  alertBotsToPlayerFootsteps,
   updateSmartBotNavigation,
 } from './botNavigationSystem';
 import {
@@ -124,6 +124,30 @@ export function updateTargetsAndCombatAI(engine: any, dt: number): void {
           engine.state.health > 0 &&
           !engine.isPlayerDying &&
           !engine.playerDeathTp?.isActive();
+
+        // Footsteps → nearby enemies investigate frozen LKP (no LOS / wallhack).
+        const horizSpd = Math.hypot(engine.playerVel?.x || 0, engine.playerVel?.z || 0);
+        const isMoving =
+          playerAlive &&
+          horizSpd > 0.85 &&
+          !engine.state.isProneToggled &&
+          engine.state.stance !== 'PRONE';
+        const isSprinting = isMoving && engine.state.stance === 'SPRINT';
+        if (isMoving) {
+          engine._botFootstepHearTimer =
+            (engine._botFootstepHearTimer || 0) - dt;
+          if (engine._botFootstepHearTimer <= 0) {
+            engine._botFootstepHearTimer = isSprinting ? 0.34 : 0.55;
+            alertBotsToPlayerFootsteps(
+              engine.targets,
+              _worldPos,
+              isSprinting,
+              true
+            );
+          }
+        } else {
+          engine._botFootstepHearTimer = 0;
+        }
 
         updateSmartBotNavigation(
           engine.targets as YardBotEntity[],
