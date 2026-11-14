@@ -155,6 +155,8 @@ export interface TacticalWeaponRig {
     reloadPhase?: ReloadPhase,
     reloadProgress?: number
   ) => void;
+  /** True when active pack has real Walk/Run clips (AK-47 today). */
+  activePackHasWalkRunClips: () => boolean;
   muzzleFlashGroup: THREE.Group;
   muzzleLight: THREE.PointLight;
   ejectionPortWorldPos: THREE.Object3D;
@@ -2209,28 +2211,51 @@ export function buildTacticalWeaponRig(
       }
     }
     if (activeEntry && activeEntry.loaded && activeEntry.mixer) {
-      // AK-47 pack includes Walk / Run / Idle_Aim — play looping locomotion when idle of oneshots.
-      if (activeWeapon === 'AK47_RIFLE' && reloadPhase === 'IDLE') {
+      // Prefer real locomotion clips when the GLB has them; otherwise idle loops only.
+      // AK-47: full Walk/Run/Idle_Aim. AK-12: Idle. Others: Draw/Fire/Reload only → procedural bob.
+      if (reloadPhase === 'IDLE') {
         const busy =
           activeEntry.actions['Fire']?.isRunning() ||
           activeEntry.actions['Reload']?.isRunning() ||
-          activeEntry.actions['Draw']?.isRunning();
+          activeEntry.actions['Reload_Empty']?.isRunning() ||
+          activeEntry.actions['Draw']?.isRunning() ||
+          activeEntry.actions['Shoot']?.isRunning();
         if (!busy) {
-          const walk = activeEntry.actions['RIG_UE5_Comando_AK_Walk'];
-          const walkAim = activeEntry.actions['RIG_UE5_Comando_AK_Walk_Aim'];
-          const run = activeEntry.actions['RIG_UE5_Comando_AK__Run'];
-          const idle = activeEntry.actions['RIG_UE5_Comando_AK_Idle'];
-          const idleAim = activeEntry.actions['RIG_UE5_Comando_AK_Idle_Aim'];
+          const acts = activeEntry.actions;
+          const walk =
+            acts['RIG_UE5_Comando_AK_Walk'] ||
+            acts['Walk'] ||
+            acts['walk'];
+          const walkAim =
+            acts['RIG_UE5_Comando_AK_Walk_Aim'] ||
+            acts['Walk_Aim'] ||
+            acts['walk_aim'];
+          const run =
+            acts['RIG_UE5_Comando_AK__Run'] ||
+            acts['Run'] ||
+            acts['run'] ||
+            acts['Sprint'];
+          const idle =
+            acts['RIG_UE5_Comando_AK_Idle'] ||
+            acts['Idle'] ||
+            acts['idle'] ||
+            acts['RIG_UE5_Comando_AK_Hold'] ||
+            acts['Hold'];
+          const idleAim =
+            acts['RIG_UE5_Comando_AK_Idle_Aim'] ||
+            acts['Idle_Aim'] ||
+            acts['idle_aim'];
+
           let loco: THREE.AnimationAction | undefined;
-          if (isMoving && isAds) loco = walkAim || walk;
-          else if (isMoving) loco = run || walk;
+          if (isMoving && isAds) loco = walkAim || walk || idleAim || idle;
+          else if (isMoving) loco = run || walk || idle;
           else if (isAds) loco = idleAim || idle;
           else loco = idle;
-          if (loco) {
-            Object.entries(activeEntry.actions).forEach(([, act]) => {
-              if (act !== loco && act.isRunning() && act.loop !== THREE.LoopRepeat) {
-                // oneshots own the mixer — leave them
-              } else if (act !== loco && act.loop === THREE.LoopRepeat) {
+
+          // Only loop real idle/loco clips — never force Fire/Reload into LoopRepeat.
+          if (loco && (loco === idle || loco === idleAim || loco === walk || loco === walkAim || loco === run)) {
+            Object.entries(acts).forEach(([, act]) => {
+              if (act !== loco && act.loop === THREE.LoopRepeat) {
                 act.weight = 0;
                 act.stop();
               }
@@ -2244,7 +2269,13 @@ export function buildTacticalWeaponRig(
             } else {
               loco.weight = 1;
             }
-            loco.timeScale = isMoving ? (isAds ? 0.95 : 1.15) : 1.0;
+            loco.timeScale = isMoving
+              ? isAds
+                ? 0.95
+                : run && loco === run
+                  ? 1.2
+                  : 1.1
+              : 1.0;
           }
         }
       }
@@ -2371,6 +2402,20 @@ export function buildTacticalWeaponRig(
     }
   };
 
+  const activePackHasWalkRunClips = (): boolean => {
+    const entry = weaponPacks[activeWeapon];
+    if (!entry?.loaded) return false;
+    const a = entry.actions;
+    return !!(
+      a['RIG_UE5_Comando_AK_Walk'] ||
+      a['RIG_UE5_Comando_AK__Run'] ||
+      a['Walk'] ||
+      a['Run'] ||
+      a['Walk_Aim'] ||
+      a['Sprint']
+    );
+  };
+
   return {
     root,
     gunGroup,
@@ -2404,6 +2449,7 @@ export function buildTacticalWeaponRig(
     triggerEquipAnimation,
     triggerHolsterAnimation,
     updateGlbAnimations,
+    activePackHasWalkRunClips,
     muzzleFlashGroup,
     muzzleLight,
     ejectionPortWorldPos,

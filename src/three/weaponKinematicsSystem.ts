@@ -267,14 +267,26 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
     const bobScale = THREE.MathUtils.lerp(1.0, 0.14, engine.state.adsAlpha);
     const bobAmpScale =
       engine.state.stance === 'SPRINT' ? 1.25 : engine.state.stance === 'CROUCH' ? 0.7 : 1;
+    // Packs without Walk/Run clips get stronger procedural bob so locomotion still reads.
+    const hasGlbLoco =
+      typeof engine.weaponRig.activePackHasWalkRunClips === 'function'
+        ? engine.weaponRig.activePackHasWalkRunClips()
+        : engine.state.activeWeapon === 'AK47_RIFLE';
+    const proceduralLocoBoost = hasGlbLoco ? 1 : engine.state.stance === 'SPRINT' ? 1.7 : 1.45;
     const bobX =
-      Math.cos(engine.walkBobPhase) * 0.013 * engine.walkBobAmp * bobScale * bobAmpScale;
+      Math.cos(engine.walkBobPhase) *
+      0.013 *
+      engine.walkBobAmp *
+      bobScale *
+      bobAmpScale *
+      proceduralLocoBoost;
     const bobY =
       Math.abs(Math.sin(engine.walkBobPhase)) *
       -0.014 *
       engine.walkBobAmp *
       bobScale *
-      bobAmpScale;
+      bobAmpScale *
+      proceduralLocoBoost;
 
     // Camera head bob + roll polish (COD weight) — applied on top of movement pose.
     const headBobScale = THREE.MathUtils.lerp(1.0, 0.2, engine.state.adsAlpha);
@@ -283,18 +295,21 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
       0.016 *
       engine.walkBobAmp *
       headBobScale *
-      bobAmpScale;
+      bobAmpScale *
+      (hasGlbLoco ? 1 : 1.2);
     const headBobRoll =
       Math.sin(engine.walkBobPhase) *
       0.012 *
       engine.walkBobAmp *
       headBobScale *
-      bobAmpScale;
+      bobAmpScale *
+      (hasGlbLoco ? 1 : 1.25);
     const headBobPitch =
       Math.cos(engine.walkBobPhase * 2) *
       0.004 *
       engine.walkBobAmp *
-      headBobScale;
+      headBobScale *
+      (hasGlbLoco ? 1 : 1.15);
     if (engine.yawObject) {
       engine.yawObject.position.y += headBobY;
     }

@@ -7,6 +7,7 @@ import {
   _resolvedHoriz,
   _right,
 } from './engineMathTemps';
+import { tryStartMantle, updateMantle } from './playerMantleSystem';
 
 
 /**
@@ -14,6 +15,22 @@ import {
  * `engine` is the live TacticalFPSEngine instance (cast at call site).
  */
 export function updatePlayerMovementAndCollision(engine: any, dt: number): void {
+    // Mantle / vault owns horizontal+vertical while active (code-only — no mantle GLB).
+    if (updateMantle(engine, dt)) {
+      engine.currentEyeHeight = THREE.MathUtils.damp(
+        engine.currentEyeHeight,
+        1.55,
+        14,
+        dt
+      );
+      engine.yawObject.position.set(
+        engine.playerPos.x,
+        engine.playerPos.y + engine.currentEyeHeight,
+        engine.playerPos.z
+      );
+      return;
+    }
+
     // Se o jogador estiver morrendo, bloqueia imediatamente qualquer caminhada, pulo, agachamento ou tiro
     if (engine.isPlayerDying || engine.playerDeathTp?.isActive()) {
       engine.playerVel.set(0, 0, 0);
@@ -361,33 +378,54 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
             ? 1.10
             : 1.72;
 
+    const intendedX = engine.playerPos.x + engine.playerVel.x * dt;
+    const intendedZ = engine.playerPos.z + engine.playerVel.z * dt;
+    engine.mantleWallBlocked = false;
+
     if (activeGlbCollider) {
-      const candX = engine.playerPos.x + engine.playerVel.x * dt;
-      const candZ = engine.playerPos.z + engine.playerVel.z * dt;
       activeGlbCollider.resolveHorizontal(
-        candX,
-        candZ,
+        intendedX,
+        intendedZ,
         engine.playerPos.y,
         currentHeight,
         radius,
         _resolvedHoriz
       );
+      const blockedDist = Math.hypot(
+        _resolvedHoriz.x - intendedX,
+        _resolvedHoriz.z - intendedZ
+      );
+      if (blockedDist > 0.04 && Math.hypot(engine.playerVel.x, engine.playerVel.z) > 0.8) {
+        engine.mantleWallBlocked = true;
+      }
       engine.playerPos.x = _resolvedHoriz.x;
       engine.playerPos.z = _resolvedHoriz.z;
     } else {
-      const nextX = engine.playerPos.x + engine.playerVel.x * dt;
+      const nextX = intendedX;
       if (!engine.checkHorizontalCollision(nextX, engine.playerPos.z, engine.playerPos.y, radius)) {
         engine.playerPos.x = nextX;
       } else {
         engine.playerVel.x = 0;
+        engine.mantleWallBlocked = true;
       }
 
-      const nextZ = engine.playerPos.z + engine.playerVel.z * dt;
+      const nextZ = intendedZ;
       if (!engine.checkHorizontalCollision(engine.playerPos.x, nextZ, engine.playerPos.y, radius)) {
         engine.playerPos.z = nextZ;
       } else {
         engine.playerVel.z = 0;
+        engine.mantleWallBlocked = true;
       }
+    }
+
+    // Attempt mantle when jammed into a waist/chest ledge (Space / jump buffer / air into wall).
+    if (tryStartMantle(engine)) {
+      engine.yawObject.position.set(
+        engine.playerPos.x,
+        engine.playerPos.y + engine.currentEyeHeight,
+        engine.playerPos.z
+      );
+      return;
     }
 
     const wasGrounded = engine.isGrounded;

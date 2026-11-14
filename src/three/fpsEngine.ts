@@ -98,6 +98,7 @@ import {
 } from './standerTiroBuilder';
 import { TacticalSkySystem } from './skySystem';
 import {
+  getActiveOnlineRoom,
   getLocalOnlinePlayerState,
   isOnlineMatchActive,
   leaveActiveRoom,
@@ -162,6 +163,7 @@ import { updatePlayerMovementAndCollision as runPlayerMovement } from './playerM
 import { checkHorizontalCollision as runHorizontalCollision } from './playerCollisionSystem';
 import { updateWeaponKinematicsAndOptics as runWeaponKinematics } from './weaponKinematicsSystem';
 import { updateTargetsAndCombatAI as runTargetsCombatAI } from './targetsCombatAiSystem';
+import { createMantleState, MantleState } from './playerMantleSystem';
 
 export class TacticalFPSEngine {
   private container: HTMLElement;
@@ -266,6 +268,10 @@ export class TacticalFPSEngine {
   private cameraBaseRoll = 0;
   /** True when slide forced crouch toggle on entry (auto-clear on exit). */
   private slideForcedCrouch = false;
+  /** Code-only mantle / vault state (no dedicated mantle GLB). */
+  private mantle: MantleState = createMantleState();
+  /** Set by movement when horizontal resolve blocks intended forward motion. */
+  private mantleWallBlocked = false;
 
   // Weapon & Recoil Spring Kinematics
   private swayPos = new THREE.Vector2();
@@ -703,6 +709,12 @@ export class TacticalFPSEngine {
           );
         }
         if (this.state.health <= 0) {
+          const room = getActiveOnlineRoom();
+          const atk = room?.players?.[hit.attackerUid];
+          const killerPos =
+            atk != null
+              ? new THREE.Vector3(atk.x, atk.y, atk.z)
+              : null;
           this.triggerPlayerDeathSequence(
             hit.isHeadshot,
             hit.attackerCallsign,
@@ -710,7 +722,8 @@ export class TacticalFPSEngine {
             hit.weaponId,
             () => {
               this.emitHud();
-            }
+            },
+            killerPos
           );
         }
         this.emitHud();
@@ -1443,6 +1456,7 @@ export class TacticalFPSEngine {
       if (t.health <= 0) {
         killsCount++;
         t.isDown = true;
+        t.lastDeathWasHeadshot = false;
         t.downTimer = this.state.drillMode === 'FREE_RANGE' ? 2.6 : 9999;
         t.isTelegraphing = false;
         if (t.laserLine) t.laserLine.visible = false;
@@ -2003,6 +2017,7 @@ export class TacticalFPSEngine {
     let activeCount = 0;
     this.targets.forEach((t) => {
       t.isDown = false;
+      t.lastDeathWasHeadshot = false;
       t.downTimer = 0;
       t.health = t.maxHealth;
       t.armorHealth = t.armorMesh ? 60 : 0;

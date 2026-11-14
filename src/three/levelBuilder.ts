@@ -34,6 +34,8 @@ export interface TacticalTargetEntity {
   downTimer: number;
   hitTiltAngle: number;
   hitTiltVelocity: number;
+  /** Sticky flag for directional death anim selection (set on lethal hit). */
+  lastDeathWasHeadshot?: boolean;
   // Combat AI telegraph state
   canShootBack: boolean;
   windupTimer: number;

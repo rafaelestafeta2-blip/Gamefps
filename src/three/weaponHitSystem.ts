@@ -118,6 +118,7 @@ export function handleTargetHit(engine: any, targetId: string, hitZone: 'HEAD' |
 
     if (target.health <= 0) {
       target.isDown = true;
+      target.lastDeathWasHeadshot = isHead;
       target.downTimer = engine.state.drillMode === 'FREE_RANGE' ? 2.6 : 9999;
       target.isTelegraphing = false;
       if (target.laserLine) target.laserLine.visible = false;

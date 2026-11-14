@@ -621,11 +621,21 @@ export function updateAllBotCharacters(
       t.pivotGroup.rotation.x = 0;
       if (!ctrl.currentState.startsWith('RIFLE_DEATH')) {
         ctrl.deathElapsed = 0;
-        const wasCrouched = ctrl.currentState === 'RIFLE_CROUCH' || ctrl.currentState === 'RIFLE_CROUCH_WALK';
-        const isHeadshot = Math.abs(t.hitTiltVelocity) > 12;
+        const wasCrouched =
+          ctrl.crouchStance ||
+          ctrl.currentState === 'RIFLE_CROUCH' ||
+          ctrl.currentState === 'RIFLE_CROUCH_WALK';
+        const isHeadshot =
+          t.lastDeathWasHeadshot === true || Math.abs(t.hitTiltVelocity) > 12;
         transitionBotAnim(
           ctrl,
-          selectDirectionalDeathState(t.root.position, t.root.rotation.y, playerPos, isHeadshot, wasCrouched),
+          selectDirectionalDeathState(
+            t.root.position,
+            t.root.rotation.y,
+            playerPos,
+            isHeadshot,
+            wasCrouched
+          ),
           0.08
         );
       }

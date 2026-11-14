@@ -302,6 +302,7 @@ export function selectDirectionalDeathState(
     // Tiro veio pelas costas
     return isHeadshot ? 'RIFLE_DEATH_BACK_HEADSHOT' : 'RIFLE_DEATH_BACK';
   }
-  // Tiro veio de lado / flanco
+  // Flank: only RIGHT death clip exists in Pro Rifle Pack (no LEFT asset).
+  // Headshot from flank still uses RIGHT — no dedicated side-headshot clip on disk.
   return 'RIFLE_DEATH_RIGHT';
 }

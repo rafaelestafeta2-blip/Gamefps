@@ -412,9 +412,12 @@ export class YardBombSystem {
           enemy.hitTiltVelocity = -12.0;
           triggerBotHitAnimation(enemy);
           if (enemy.health <= 0) {
+            const hs = Math.random() < 0.35;
             enemy.isDown = true;
+            enemy.lastDeathWasHeadshot = hs;
+            if (hs) enemy.hitTiltVelocity = -18.0;
             enemy.downTimer = 9999;
-            onRegisterKill?.(ally.callsign || 'RECON-02', 'VANGUARD', enemy.callsign || 'KRAKEN-BT', 'BLACKTHORN', ally.weaponId || 'M4_CARBINE', Math.random() < 0.35);
+            onRegisterKill?.(ally.callsign || 'RECON-02', 'VANGUARD', enemy.callsign || 'KRAKEN-BT', 'BLACKTHORN', ally.weaponId || 'M4_CARBINE', hs);
           }
         } else if (Math.random() < (playerAlive ? 0.18 : 0.36) && !ally.isDown) {
           triggerBotFireAnimation(enemy);
@@ -423,9 +426,12 @@ export class YardBombSystem {
           ally.hitTiltVelocity = -12.0;
           triggerBotHitAnimation(ally);
           if (ally.health <= 0) {
+            const hs = Math.random() < 0.25;
             ally.isDown = true;
+            ally.lastDeathWasHeadshot = hs;
+            if (hs) ally.hitTiltVelocity = -18.0;
             ally.downTimer = 9999;
-            onRegisterKill?.(enemy.callsign || 'KRAKEN-BT', 'BLACKTHORN', ally.callsign || 'RECON-02', 'VANGUARD', enemy.weaponId || 'AK47_RIFLE', Math.random() < 0.25);
+            onRegisterKill?.(enemy.callsign || 'KRAKEN-BT', 'BLACKTHORN', ally.callsign || 'RECON-02', 'VANGUARD', enemy.weaponId || 'AK47_RIFLE', hs);
           }
         }
       }
