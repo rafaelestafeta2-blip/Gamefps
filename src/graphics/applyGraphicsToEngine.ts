@@ -176,6 +176,8 @@ export function applyGraphicsToEngine(
       renderer.shadowMap.type = THREE.PCFShadowMap;
       forceAllMaterialsNeedsUpdate = true;
     }
+    // Intermittent updates — full soft refresh every frame kills mid-range Android GPUs.
+    renderer.shadowMap.autoUpdate = false;
 
     let targetMapSize = 1024;
     switch (effectiveShadows) {
@@ -186,10 +188,13 @@ export function applyGraphicsToEngine(
         targetMapSize = 1024;
         break;
       case 'HIGH':
+        // Cap HIGH at 1536-equivalent via 1024 on very small viewports is handled by DRS;
+        // keep 2048 only when DPR ceiling is generous.
         targetMapSize = 2048;
         break;
       case 'ULTRA':
-        targetMapSize = 4096;
+        // 4096 shadow maps rarely pay off on mobile SoCs — soft-cap at 2048.
+        targetMapSize = 2048;
         break;
     }
 
@@ -204,6 +209,7 @@ export function applyGraphicsToEngine(
         keyLight.shadow.map = null;
       }
       cache.lastShadowQuality = effectiveShadows;
+      renderer.shadowMap.needsUpdate = true;
     }
   } else if (keyLight) {
     keyLight.castShadow = false;

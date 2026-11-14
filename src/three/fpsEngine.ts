@@ -119,6 +119,19 @@ import {
 import { emitHudIfChanged, HudRadarCacheEntry } from './hudBridge';
 import { clearSharedMaterialCache } from './scenePerfOptimizer';
 import { disposeAllSecondaryWebGLRenderers } from './webglContextGuard';
+import {
+  CombatRayHit,
+  getAimRaycastIntervalSec,
+  raycastCombatShot,
+} from './combatRaycast';
+import {
+  configureIntermittentShadows,
+  createShadowBudgetState,
+  followKeyLightShadowFrustum,
+  requestShadowRefresh,
+  ShadowBudgetState,
+  tickShadowBudget,
+} from './shadowUpdateBudget';
 
 // Pre-allocated math helpers outside the frame loop (Zero GC)
 const _resolvedHoriz = { x: 0, z: 0 };
@@ -190,6 +203,14 @@ export class TacticalFPSEngine {
   private aimRaycastInitialized = false;
   private cachedAimHits: THREE.Intersection[] = [];
   private isWindowFocused = true;
+  private shadowBudget: ShadowBudgetState = createShadowBudgetState();
+  private readonly combatRayHit: CombatRayHit = {
+    distance: 0,
+    point: new THREE.Vector3(),
+    normal: new THREE.Vector3(),
+    object: null,
+    isEnvironment: false,
+  };
 
   // Input State (Separated Held vs Edge-Triggered + Mobile Touch Analog State)
   private keysHeld = new Set<string>();
@@ -395,7 +416,9 @@ export class TacticalFPSEngine {
     this.renderer.setPixelRatio(this.currentRenderScale);
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCF (not Soft) — Soft is significantly heavier on mobile GPUs.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    configureIntermittentShadows(this.renderer);
     container.appendChild(this.renderer.domElement);
 
     // 2. Scene, Studio IBL Environment (`RoomEnvironment`) & Horizon Fog
@@ -671,6 +694,7 @@ export class TacticalFPSEngine {
     }
     // Free menu/inspection WebGL contexts so the match owns the GPU.
     disposeAllSecondaryWebGLRenderers();
+    requestShadowRefresh(this.shadowBudget);
     this.resetScenario(this.state.drillMode);
     this.state.screen = 'PLAYING';
     this.hudForceEmit.value = true;
@@ -1645,6 +1669,8 @@ export class TacticalFPSEngine {
         this.renderer.shadowMap.enabled = true;
         this.keyLight.castShadow = true;
         this.currentRenderScale = dpr;
+        configureIntermittentShadows(this.renderer);
+        requestShadowRefresh(this.shadowBudget);
       } else {
         this.renderer.shadowMap.enabled = false;
         this.keyLight.castShadow = false;
@@ -2628,11 +2654,21 @@ export class TacticalFPSEngine {
       this.raycaster.set(_rayOrigin, _rayDir);
       this.raycaster.far = 2.4;
 
-      const hits = this.raycaster.intersectObjects(this.shootableMeshes, false);
-      if (hits.length > 0) {
-        const hit = hits[0];
-        const hitMesh = hit.object as THREE.Mesh;
-        const wallWeaponId = hitMesh.userData.wallWeaponId as
+      const knifeCollider =
+        this.state.drillMode === 'DUST2_BOMB_5V5'
+          ? this.dust2LevelData.collider
+          : this.state.drillMode === 'ASSAULT_BOMB_5V5'
+            ? this.assaultLevelData.collider
+            : null;
+      const hit = raycastCombatShot(
+        this.raycaster,
+        this.shootableMeshes,
+        knifeCollider,
+        this.combatRayHit
+      );
+      if (hit) {
+        const hitMesh = hit.object as THREE.Mesh | null;
+        const wallWeaponId = hitMesh?.userData?.wallWeaponId as
           | WeaponId
           | undefined;
         if (wallWeaponId) {
@@ -2640,13 +2676,13 @@ export class TacticalFPSEngine {
           return;
         }
 
-        const targetId = hitMesh.userData.targetId as string | undefined;
+        const targetId = hitMesh?.userData?.targetId as string | undefined;
         if (targetId) {
           soundEngine.playKnifeHit();
           mobileHardware.vibrateKnifeHit();
           this.state.hitMarkerAlpha = 1.0;
           this.state.hitMarkerIsCrit = true;
-          _hitNormal.set(0, 1, 0);
+          _hitNormal.copy(hit.normal);
           this.handleTargetHit(
             targetId,
             'HEAD',
@@ -2656,7 +2692,7 @@ export class TacticalFPSEngine {
           );
         } else {
           soundEngine.playKnifeHit();
-          _hitNormal.set(0, 1, 0);
+          _hitNormal.copy(hit.normal);
           this.fxPool.spawnImpactFX(hit.point, _hitNormal, false, false);
         }
       }
@@ -2847,26 +2883,30 @@ export class TacticalFPSEngine {
       this.raycaster.set(_rayOrigin, pDir);
       this.raycaster.far = isShotgun ? 34 : 140;
 
-      const hits = this.raycaster.intersectObjects(this.shootableMeshes, false);
-      if (hits.length > 0) {
-        const hit = hits[0];
-        const hitMesh = hit.object as THREE.Mesh;
+      const glbCollider =
+        this.state.drillMode === 'DUST2_BOMB_5V5'
+          ? this.dust2LevelData.collider
+          : this.state.drillMode === 'ASSAULT_BOMB_5V5'
+            ? this.assaultLevelData.collider
+            : null;
+
+      const hit = raycastCombatShot(
+        this.raycaster,
+        this.shootableMeshes,
+        glbCollider,
+        this.combatRayHit
+      );
+
+      if (hit) {
+        const hitMesh = hit.object as THREE.Mesh | null;
         const dist = hit.distance;
+        _hitNormal.copy(hit.normal);
 
         if (p < 3) {
           this.fxPool.spawnTracer(_worldPos2, hit.point);
         }
 
-        if (hit.face) {
-          _hitNormal
-            .copy(hit.face.normal)
-            .transformDirection(hitMesh.matrixWorld)
-            .normalize();
-        } else {
-          _hitNormal.set(0, 1, 0);
-        }
-
-        const wallWeaponId = hitMesh.userData.wallWeaponId as
+        const wallWeaponId = hitMesh?.userData?.wallWeaponId as
           | WeaponId
           | undefined;
         if (wallWeaponId && !wallSelected) {
@@ -2875,8 +2915,8 @@ export class TacticalFPSEngine {
           return;
         }
 
-        const targetId = hitMesh.userData.targetId as string | undefined;
-        const hitZone = hitMesh.userData.hitZone as
+        const targetId = hitMesh?.userData?.targetId as string | undefined;
+        const hitZone = hitMesh?.userData?.hitZone as
           | 'HEAD'
           | 'TORSO_A'
           | 'ARMOR'
@@ -2884,9 +2924,18 @@ export class TacticalFPSEngine {
           | undefined;
 
         if (targetId && hitZone) {
-          this.handleTargetHit(targetId, hitZone, dist, hit.point, _hitNormal, isShotgun);
+          this.handleTargetHit(
+            targetId,
+            hitZone,
+            dist,
+            hit.point,
+            _hitNormal,
+            isShotgun
+          );
         } else {
-          const surfMat = detectSurfaceMaterialFromMesh(hitMesh, hit.point);
+          const surfMat = hitMesh
+            ? detectSurfaceMaterialFromMesh(hitMesh, hit.point)
+            : 'CONCRETE';
           this.fxPool.spawnImpactFX(
             hit.point,
             _hitNormal,
@@ -3148,6 +3197,10 @@ export class TacticalFPSEngine {
         this.hitstopTimer -= dt;
       } else {
         this.updatePlayingSimulation(dt);
+      }
+      if (this.keyLight?.castShadow && this.renderer.shadowMap.enabled) {
+        followKeyLightShadowFrustum(this.keyLight, this.playerPos);
+        tickShadowBudget(this.renderer, this.shadowBudget, this.playerPos, dt);
       }
     }
 
@@ -4100,9 +4153,14 @@ export class TacticalFPSEngine {
           ? this.assaultLevelData.collider
           : null;
 
+    const aimInterval = getAimRaycastIntervalSec({
+      laserActive: this.state.laserActive && this.state.activeWeapon !== 'KNIFE_TACTICAL',
+      isAds: this.state.isAds,
+    });
+
     if (activeGlbCollider && activeGlbCollider.ready) {
       this.aimRaycastTimer += dt;
-      if (!this.aimRaycastInitialized || this.aimRaycastTimer >= 0.033) {
+      if (!this.aimRaycastInitialized || this.aimRaycastTimer >= aimInterval) {
         this.aimRaycastInitialized = true;
         this.aimRaycastTimer = 0;
         this.camera.getWorldPosition(_rayOrigin);
@@ -4147,7 +4205,7 @@ export class TacticalFPSEngine {
       }
     } else {
       this.aimRaycastTimer += dt;
-      if (!this.aimRaycastInitialized || this.aimRaycastTimer >= 0.033) {
+      if (!this.aimRaycastInitialized || this.aimRaycastTimer >= aimInterval) {
         this.aimRaycastInitialized = true;
         this.aimRaycastTimer = 0;
         this.camera.getWorldPosition(_rayOrigin);

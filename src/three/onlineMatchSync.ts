@@ -106,7 +106,7 @@ export function syncOnlineMatchFrame(ctx: OnlineMatchSyncContext): void {
   const localPlayer = getLocalOnlinePlayerState();
   if (!room || !localPlayer) return;
 
-  // 1. Publish local player transform & state to WebSocket + Firestore
+  // 1. Publish local player transform over WebSocket (throttled in combatNetcode)
   publishLocalPlayerTransform({
     x: ctx.playerPos.x,
     y: ctx.playerPos.y,
