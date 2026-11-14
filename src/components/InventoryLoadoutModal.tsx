@@ -181,11 +181,19 @@ export const InventoryLoadoutModal: React.FC<InventoryLoadoutModalProps> = ({
   });
 
   useEffect(() => {
-    preloadAllWeaponThumbnails3D([
-      ...(Object.keys(WEAPON_INVENTORY_CATALOG) as WeaponId[]),
-    ]);
-    preloadGrenadeThumbnails3D();
-    return subscribePlayerInventory((next) => setInventory(next));
+    // Defer thumbnail studio warm so the left RankedOperator3DCanvas claims its
+    // pinned WebGL slot first (otherwise thumbs evict the operator on open).
+    const warmId = window.setTimeout(() => {
+      preloadAllWeaponThumbnails3D([
+        ...(Object.keys(WEAPON_INVENTORY_CATALOG) as WeaponId[]),
+      ]);
+      preloadGrenadeThumbnails3D();
+    }, 280);
+    const unsub = subscribePlayerInventory((next) => setInventory(next));
+    return () => {
+      window.clearTimeout(warmId);
+      unsub();
+    };
   }, []);
 
   const activeClass = inventory.selectedClass;

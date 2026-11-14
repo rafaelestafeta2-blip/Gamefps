@@ -51,14 +51,19 @@ void main() {
     c += detail * uSharpen * shadowProtect * highlightProtect;
   }
 
-  // Soft bloom from bright pixels only (narrower mask = less washed sky).
+  // Soft bloom from bright pixels only (narrower/higher knee = less milky walls).
   if (uBloom > 0.001) {
-    float bloomMask = max(0.0, lum - 0.82) * uBloom;
-    c += c * bloomMask * 0.65;
+    float bloomMask = max(0.0, lum - 0.88) * uBloom;
+    c += c * bloomMask * 0.45;
   }
 
-  // Mild exposure + shadow lift so midtones stay readable outdoors / in doorways.
-  c = c * uExposure + vec3(uLift);
+  // Exposure on full image; lift ONLY shadows (flat +lift was washing midtones white).
+  c *= uExposure;
+  float shadowLift = (1.0 - smoothstep(0.0, 0.42, lum));
+  c += vec3(uLift) * shadowLift;
+
+  // Mild midtone contrast regain (matches Dust2 grit without crushing blacks).
+  c = (c - 0.5) * 1.08 + 0.5;
 
   // Damage vignette (edge darken + red) — only when actually damaged.
   if (uDamage > 0.001) {
@@ -89,10 +94,10 @@ export interface TacticalPostFxState {
 export function createTacticalPostFx(): TacticalPostFxState {
   return {
     enabled: false,
-    sharpen: 0.22,
-    bloom: 0.14,
-    exposure: 1.06,
-    lift: 0.018,
+    sharpen: 0.24,
+    bloom: 0.1,
+    exposure: 0.98,
+    lift: 0.008,
     rt: null,
     scene: null,
     camera: null,

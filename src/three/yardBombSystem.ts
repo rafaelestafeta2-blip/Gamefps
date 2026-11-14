@@ -62,6 +62,7 @@ function createInitialSquadStats(): SquadOperatorStats[] {
 export class YardBombSystem {
   private c4MeshGroup: THREE.Group;
   private c4LedMesh: THREE.Mesh;
+  private c4EnsureLoaded: () => Promise<void>;
   private beepAccum = 0;
   private allyFireTimer = 0;
   private isPlantingHeld = false;
@@ -90,8 +91,10 @@ export class YardBombSystem {
     const planted = createPlantedC4Visual();
     this.c4MeshGroup = planted.group;
     this.c4LedMesh = planted.ledMesh;
+    this.c4EnsureLoaded = planted.ensureLoaded;
     this.c4MeshGroup.visible = false;
     sceneGroup.add(this.c4MeshGroup);
+    void this.c4EnsureLoaded();
   }
 
   public resetRound(mode: DrillMode = 'YARD_BOMB_5V5', keepMatchScore = false): void {
@@ -442,8 +445,10 @@ export class YardBombSystem {
         }
         recordCombatTelemetryDelta({ bombsPlanted: 1 });
         const sitePos = this.info.plantedSite === 'A' ? siteA : siteB;
-        this.c4MeshGroup.position.set(sitePos.x, isDust2 || isAssault ? sitePos.y + 0.12 : 1.02, sitePos.z);
+        // Prefer site Y (+ pack thickness) for all bomb maps — hard-coded 1.02 buried C4 on Hangar/Mirage.
+        this.c4MeshGroup.position.set(sitePos.x, sitePos.y + 0.12, sitePos.z);
         this.c4MeshGroup.visible = true;
+        void this.c4EnsureLoaded();
         soundEngine.playMechanicalSwitch(1.45);
         playRealBombPlantedVoice();
         mobileHardware.vibrateHitConfirm(true);
@@ -452,8 +457,9 @@ export class YardBombSystem {
 
     if (this.info.bombStatus === 'PLANTED' && !this.c4MeshGroup.visible && this.info.plantedSite) {
       const sitePos = this.info.plantedSite === 'A' ? siteA : siteB;
-      this.c4MeshGroup.position.set(sitePos.x, isDust2 || isAssault ? sitePos.y + 0.12 : 1.02, sitePos.z);
+      this.c4MeshGroup.position.set(sitePos.x, sitePos.y + 0.12, sitePos.z);
       this.c4MeshGroup.visible = true;
+      void this.c4EnsureLoaded();
     }
 
     if (this.info.bombStatus === 'PLANTED') {

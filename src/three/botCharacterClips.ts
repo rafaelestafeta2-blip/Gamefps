@@ -63,6 +63,39 @@ function normalizeMixamoClip(clip: THREE.AnimationClip): THREE.AnimationClip {
   return cloned;
 }
 
+/**
+ * Tripo medic IBM ≠ rifleman/Mixamo bind — position tracks explode the mesh.
+ * Keep quaternion (+ hips Y only) so menu/inventory idle looks correct.
+ */
+export function retargetClipsRotationOnly(clips: BotClipMap): BotClipMap {
+  const next = { ...clips };
+  (Object.keys(next) as BotAnimState[]).forEach((key) => {
+    const src = next[key];
+    if (!src) return;
+    const tracks: THREE.KeyframeTrack[] = [];
+    for (let i = 0; i < src.tracks.length; i++) {
+      const t = src.tracks[i];
+      const name = t.name.includes(':') ? t.name.replace(/:/g, '') : t.name;
+      if (name.endsWith('.quaternion')) {
+        const qt = t.clone();
+        qt.name = name;
+        tracks.push(qt);
+      } else if (name === 'mixamorigHips.position') {
+        // Keep vertical root motion only — zero XZ drift from foreign bind.
+        const vals = new Float32Array(t.values.length);
+        for (let s = 0; s < t.values.length; s += 3) {
+          vals[s] = 0;
+          vals[s + 1] = t.values[s + 1];
+          vals[s + 2] = 0;
+        }
+        tracks.push(new THREE.VectorKeyframeTrack(name, t.times, vals));
+      }
+    }
+    next[key] = new THREE.AnimationClip(src.name, src.duration, tracks);
+  });
+  return next;
+}
+
 function buildDerivedImpulseClip(
   baseAimClip: THREE.AnimationClip,
   clipName: string,

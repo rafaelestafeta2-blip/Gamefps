@@ -247,6 +247,8 @@ export class TacticalFPSEngine {
   private raycaster = new THREE.Raycaster();
   private laserDotMesh: THREE.Mesh;
   private keyLight!: THREE.DirectionalLight;
+  private hemiLight!: THREE.HemisphereLight;
+  private rimLight!: THREE.DirectionalLight;
   private skySystem: TacticalSkySystem;
 
   // Loop, Timing & Dynamic Resolution Governor (DRS)
@@ -329,9 +331,9 @@ export class TacticalFPSEngine {
   /** Mixamo 3P gestures (mantle hang, CPR, kit use) from Animaçao pack. */
   private playerGesture!: PlayerGestureThirdPerson;
   /** 1P class kit props (ammo crate / medkit / armor plate) held while using support. */
-  private classKitProps!: ClassKitPropSystem;
+  public classKitProps!: ClassKitPropSystem;
   /** 1P C4 held while planting in bomb modes. */
-  private c4PlantView!: C4PlantViewmodel;
+  public c4PlantView!: C4PlantViewmodel;
 
   // Weapon & Recoil Spring Kinematics
   private swayPos = new THREE.Vector2();
@@ -512,7 +514,7 @@ export class TacticalFPSEngine {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 0.95;
     this.currentRenderScale = this.isSoftwareGl
       ? 1.0
       : Math.min(window.devicePixelRatio || 1, 1.35);
@@ -538,7 +540,9 @@ export class TacticalFPSEngine {
     pmremGenerator.dispose();
 
     // 3. Balanced 3-Point Warm/Cool Lighting Rig
+    // Outdoor desert maps dim hemi/rim via skySystem to avoid milky fill over map suns.
     const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x1e293b, 0.75);
+    this.hemiLight = hemiLight;
     hemiLight.position.set(0, 30, 0);
     this.scene.add(hemiLight);
 
@@ -562,10 +566,16 @@ export class TacticalFPSEngine {
     this.scene.add(keyLight);
 
     const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.55);
+    this.rimLight = rimLight;
     rimLight.position.set(-25, 18, -35);
     this.scene.add(rimLight);
 
-    this.skySystem = new TacticalSkySystem(this.scene, this.keyLight);
+    this.skySystem = new TacticalSkySystem(
+      this.scene,
+      this.keyLight,
+      this.hemiLight,
+      this.rimLight
+    );
 
     // 4. First-Person Camera Hierarchy (Yaw -> Pitch -> Camera -> WeaponRig)
     this.camera = new THREE.PerspectiveCamera(

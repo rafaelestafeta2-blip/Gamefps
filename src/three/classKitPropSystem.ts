@@ -6,8 +6,11 @@
  */
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { ClassSupportKind } from './classSupportSystem';
+import {
+  createGameGltfLoader,
+  ensureMeshoptDecoder,
+} from './gltfLoaderFactory';
 import {
   getKitUseTimings,
   preloadMixamoAnimPack,
@@ -21,9 +24,9 @@ const KIT_URLS: Record<'AMMO' | 'HEAL' | 'ARMOR', string> = {
 
 /** Target world size (meters) for 1P hold vs world/gesture prop. */
 const HOLD_SIZE: Record<'AMMO' | 'HEAL' | 'ARMOR', number> = {
-  AMMO: 0.28,
-  HEAL: 0.22,
-  ARMOR: 0.26,
+  AMMO: 0.34,
+  HEAL: 0.26,
+  ARMOR: 0.3,
 };
 
 function normalizeKitRoot(
@@ -50,15 +53,46 @@ function normalizeKitRoot(
     if (!mesh.isMesh) return;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
+    mesh.frustumCulled = false;
+    mesh.visible = true;
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const mat of mats) {
       if (!mat) continue;
       const std = mat as THREE.MeshStandardMaterial;
-      if (std.map) std.map.anisotropy = Math.min(8, std.map.anisotropy || 4);
+      if (std.map) {
+        std.map.colorSpace = THREE.SRGBColorSpace;
+        std.map.anisotropy = Math.min(8, std.map.anisotropy || 4);
+        std.map.needsUpdate = true;
+      }
+      std.side = THREE.FrontSide;
+      std.transparent = false;
+      std.opacity = 1;
+      std.depthWrite = true;
       std.needsUpdate = true;
     }
   });
   return wrap;
+}
+
+function makeFallbackKit(kind: 'AMMO' | 'HEAL' | 'ARMOR'): THREE.Group {
+  const g = new THREE.Group();
+  g.name = `ClassKitFallback_${kind}`;
+  const color =
+    kind === 'AMMO' ? 0xb45309 : kind === 'HEAL' ? 0xdc2626 : 0x64748b;
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(
+      kind === 'ARMOR' ? 0.22 : 0.2,
+      kind === 'ARMOR' ? 0.06 : 0.14,
+      kind === 'ARMOR' ? 0.28 : 0.16
+    ),
+    new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.55,
+      metalness: kind === 'ARMOR' ? 0.45 : 0.15,
+    })
+  );
+  g.add(mesh);
+  return g;
 }
 
 let loadPromise: Promise<void> | null = null;
@@ -70,12 +104,17 @@ export function preloadClassKitProps(
   if (templates.size === 3) return Promise.resolve();
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
-    const loader = new GLTFLoader(loadingManager);
+    await ensureMeshoptDecoder();
+    const loader = createGameGltfLoader(loadingManager);
     const kinds = Object.keys(KIT_URLS) as Array<'AMMO' | 'HEAL' | 'ARMOR'>;
     await Promise.all(
       kinds.map(
         (kind) =>
           new Promise<void>((resolve) => {
+            if (templates.has(kind)) {
+              resolve();
+              return;
+            }
             loader.load(
               KIT_URLS[kind],
               (gltf) => {
@@ -83,7 +122,11 @@ export function preloadClassKitProps(
                 resolve();
               },
               undefined,
-              () => resolve()
+              (err) => {
+                console.warn(`Class kit ${kind} GLB failed — fallback:`, err);
+                templates.set(kind, makeFallbackKit(kind));
+                resolve();
+              }
             );
           })
       )
@@ -92,9 +135,9 @@ export function preloadClassKitProps(
   return loadPromise;
 }
 
-function cloneKit(kind: 'AMMO' | 'HEAL' | 'ARMOR'): THREE.Group | null {
+function cloneKit(kind: 'AMMO' | 'HEAL' | 'ARMOR'): THREE.Group {
   const t = templates.get(kind);
-  if (!t) return null;
+  if (!t) return makeFallbackKit(kind);
   return t.clone(true);
 }
 
@@ -119,6 +162,7 @@ export class ClassKitPropSystem {
   private putDur = 0.8;
   private basePos = new THREE.Vector3(0.18, -0.22, -0.42);
   private baseRot = new THREE.Euler(-0.35, 0.55, 0.15);
+  private presentToken = 0;
 
   constructor(camera: THREE.Camera) {
     this.camera = camera;
@@ -138,16 +182,54 @@ export class ClassKitPropSystem {
   }
 
   private applyKindPose(kind: ClassKitHoldKind, clone: THREE.Object3D): void {
-    this.basePos.set(0.18, -0.22, -0.42);
+    this.basePos.set(0.2, -0.24, -0.4);
     this.baseRot.set(-0.35, 0.55, 0.15);
     if (kind === 'AMMO') {
-      this.basePos.set(0.12, -0.28, -0.48);
-      this.baseRot.set(-0.2, 0.4, 0.05);
-      clone.scale.setScalar(1.15);
+      this.basePos.set(0.14, -0.3, -0.44);
+      this.baseRot.set(-0.15, 0.35, 0.08);
+      clone.scale.setScalar(1.25);
+    } else if (kind === 'HEAL') {
+      this.basePos.set(0.18, -0.26, -0.4);
+      this.baseRot.set(-0.4, 0.5, 0.2);
+      clone.scale.setScalar(1.2);
     } else if (kind === 'ARMOR') {
-      this.baseRot.set(-0.55, 0.35, 0.4);
-      clone.scale.setScalar(1.05);
+      this.basePos.set(0.16, -0.28, -0.42);
+      this.baseRot.set(-0.6, 0.3, 0.45);
+      clone.scale.setScalar(1.15);
     }
+  }
+
+  private mountKitVisual(kind: ClassKitHoldKind): void {
+    if (this.activeVisual) {
+      this.viewmodelGroup.remove(this.activeVisual);
+      this.activeVisual = null;
+    }
+    const clone = cloneKit(kind);
+    clone.visible = true;
+    this.activeVisual = clone;
+    this.viewmodelGroup.add(clone);
+    this.applyKindPose(kind, clone);
+
+    const t = getKitUseTimings();
+    this.pickupDur = t.pickup;
+    this.holdDur = t.hold;
+    this.putDur = t.putDown;
+
+    this.phase = 'PICKUP';
+    this.holdTimer = 0;
+    this.currentKind = kind;
+    this.holding = true;
+    this.viewmodelGroup.visible = true;
+    this.viewmodelGroup.position.set(
+      this.basePos.x,
+      this.basePos.y - 0.28,
+      this.basePos.z + 0.08
+    );
+    this.viewmodelGroup.rotation.set(
+      this.baseRot.x + 0.45,
+      this.baseRot.y,
+      this.baseRot.z
+    );
   }
 
   /**
@@ -156,44 +238,30 @@ export class ClassKitPropSystem {
    */
   public presentKit(kind: ClassSupportKind, _durationSec = 1.4): void {
     if (kind !== 'AMMO' && kind !== 'HEAL' && kind !== 'ARMOR') return;
+    const token = ++this.presentToken;
+
+    // Sync path when already warm — first frame must show the crate/kit/plate.
+    if (templates.has(kind)) {
+      this.mountKitVisual(kind);
+      return;
+    }
+
+    // Mark holding immediately so weapon kinematics hides the gun this frame.
+    this.holding = true;
+    this.currentKind = kind;
+    this.viewmodelGroup.visible = true;
+    this.viewmodelGroup.position.set(0.18, -0.35, -0.4);
+
     void Promise.all([preloadClassKitProps(), preloadMixamoAnimPack()]).then(
       () => {
-        if (this.activeVisual) {
-          this.viewmodelGroup.remove(this.activeVisual);
-          this.activeVisual = null;
-        }
-        const clone = cloneKit(kind);
-        if (!clone) return;
-        this.activeVisual = clone;
-        this.viewmodelGroup.add(clone);
-        this.applyKindPose(kind, clone);
-
-        const t = getKitUseTimings();
-        this.pickupDur = t.pickup;
-        this.holdDur = t.hold;
-        this.putDur = t.putDown;
-
-        this.phase = 'PICKUP';
-        this.holdTimer = 0;
-        this.currentKind = kind;
-        this.holding = true;
-        this.viewmodelGroup.visible = true;
-        // Start below frame (rising into hold).
-        this.viewmodelGroup.position.set(
-          this.basePos.x,
-          this.basePos.y - 0.28,
-          this.basePos.z + 0.08
-        );
-        this.viewmodelGroup.rotation.set(
-          this.baseRot.x + 0.45,
-          this.baseRot.y,
-          this.baseRot.z
-        );
+        if (token !== this.presentToken) return;
+        this.mountKitVisual(kind);
       }
     );
   }
 
   public hide(): void {
+    this.presentToken++;
     this.holding = false;
     this.currentKind = null;
     this.holdTimer = 0;
@@ -265,7 +333,13 @@ export class ClassKitPropSystem {
     if (this.activeVisual) {
       this.activeVisual.scale.setScalar(
         THREE.MathUtils.lerp(1, 0.75, e) *
-          (this.currentKind === 'AMMO' ? 1.15 : this.currentKind === 'ARMOR' ? 1.05 : 1)
+          (this.currentKind === 'AMMO'
+            ? 1.25
+            : this.currentKind === 'ARMOR'
+              ? 1.15
+              : this.currentKind === 'HEAL'
+                ? 1.2
+                : 1)
       );
     }
     if (this.holdTimer >= this.putDur) {
@@ -276,7 +350,6 @@ export class ClassKitPropSystem {
   /** Clone for attaching to a Mixamo right-hand bone (3P gesture). */
   public createWorldProp(kind: ClassKitHoldKind): THREE.Group | null {
     const clone = cloneKit(kind);
-    if (!clone) return null;
     clone.scale.setScalar(kind === 'AMMO' ? 55 : 48);
     clone.position.set(4, -2, 0);
     clone.rotation.set(0, Math.PI * 0.5, Math.PI * 0.15);
@@ -288,7 +361,6 @@ export function createClassKitHandProp(
   kind: ClassKitHoldKind
 ): THREE.Group | null {
   const clone = cloneKit(kind);
-  if (!clone) return null;
   clone.scale.setScalar(kind === 'AMMO' ? 55 : 48);
   clone.position.set(4, -2, 0);
   clone.rotation.set(0, Math.PI * 0.5, Math.PI * 0.15);

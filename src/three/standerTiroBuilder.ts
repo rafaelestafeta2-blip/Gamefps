@@ -137,71 +137,116 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
   };
 }
 
+/** Prevent boot + FREE_RANGE start from double-adding the GLB (z-fight). */
+let standerLoadInflight: Promise<void> | null = null;
+
 /**
  * Loads optimized `shooting_range_2k.glb` (Draco). Meter-scale; lift floor to y=0.
+ * Only `shooting_range_2k` — no legacy stander_tiro geometry.
  */
 export async function loadStanderTiroMapGeometry(
   bundle: StanderTiroBundle,
   _isSoftwareGl: boolean,
   loadingManager?: THREE.LoadingManager
 ): Promise<void> {
-  if (bundle.isLoaded) return;
-
-  const dracoLoader = new DRACOLoader(loadingManager);
-  dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
-  dracoLoader.setDecoderConfig({ type: 'js' });
-
-  const loader = new GLTFLoader(loadingManager);
-  loader.setDRACOLoader(dracoLoader);
-
-  const loadFromUrl = (url: string) =>
-    new Promise<THREE.Group>((resolve, reject) => {
-      loader.load(
-        url,
-        (gltf) => resolve(gltf.scene),
-        undefined,
-        (err) => reject(err)
-      );
-    });
-
-  let gltfScene: THREE.Group;
-  try {
-    gltfScene = await loadFromUrl(STANDER_TIRO_LOCAL_URL);
-  } finally {
-    dracoLoader.dispose();
+  if (bundle.isLoaded && bundle.glbRoot.children.length > 0) return;
+  if (standerLoadInflight) {
+    await standerLoadInflight;
+    return;
   }
 
-  gltfScene.scale.setScalar(1);
-  gltfScene.rotation.set(0, 0, 0);
-  gltfScene.position.set(0, STANDER_FLOOR_Y_LIFT, 0);
-  gltfScene.updateMatrixWorld(true);
-
-  gltfScene.traverse((child) => {
-    if (!(child as THREE.Mesh).isMesh) return;
-    const mesh = child as THREE.Mesh;
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    mesh.frustumCulled = true;
-
-    const name = mesh.name || '';
-    // Built-in paper/rail targets stay visual; gameplay uses paperTargetBuilder hits.
-    if (
-      name.includes('Floor') ||
-      name.includes('Wall') ||
-      name.includes('BulletTrap') ||
-      name.includes('ShootingPlace') ||
-      name.includes('Concrete')
-    ) {
-      mesh.userData.isEnvironment = true;
-      bundle.shootableMeshes.push(mesh);
+  standerLoadInflight = (async () => {
+    // Clear any partial/duplicate GLB children from a raced prior load.
+    while (bundle.glbRoot.children.length > 0) {
+      const child = bundle.glbRoot.children[0];
+      bundle.glbRoot.remove(child);
+      child.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.geometry?.dispose();
+      });
     }
 
-    if (name.includes('WeaponWall')) {
-      mesh.userData.wallWeaponId = 'M4_CARBINE';
-      bundle.shootableMeshes.push(mesh);
-    }
-  });
+    const dracoLoader = new DRACOLoader(loadingManager);
+    dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
+    dracoLoader.setDecoderConfig({ type: 'js' });
 
-  bundle.glbRoot.add(gltfScene);
-  bundle.isLoaded = true;
+    const loader = new GLTFLoader(loadingManager);
+    loader.setDRACOLoader(dracoLoader);
+
+    const loadFromUrl = (url: string) =>
+      new Promise<THREE.Group>((resolve, reject) => {
+        loader.load(
+          url,
+          (gltf) => resolve(gltf.scene),
+          undefined,
+          (err) => reject(err)
+        );
+      });
+
+    let gltfScene: THREE.Group;
+    try {
+      gltfScene = await loadFromUrl(STANDER_TIRO_LOCAL_URL);
+    } finally {
+      dracoLoader.dispose();
+    }
+
+    gltfScene.name = 'ShootingRange2kGLB';
+    gltfScene.scale.setScalar(1);
+    gltfScene.rotation.set(0, 0, 0);
+    gltfScene.position.set(0, STANDER_FLOOR_Y_LIFT, 0);
+    gltfScene.updateMatrixWorld(true);
+
+    gltfScene.traverse((child) => {
+      if (!(child as THREE.Mesh).isMesh) return;
+      const mesh = child as THREE.Mesh;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.frustumCulled = true;
+
+      const name = mesh.name || '';
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      mats.forEach((m) => {
+        const std = m as THREE.MeshStandardMaterial;
+        if (!std) return;
+        // Booth dividers / coplanar FAB faces — FrontSide + polygonOffset kills z-fight flicker.
+        if (
+          name.includes('ShootingPlaceWall') ||
+          name.includes('TopPart') ||
+          name.includes('TargetRail')
+        ) {
+          std.side = THREE.FrontSide;
+          std.polygonOffset = true;
+          std.polygonOffsetFactor = 1;
+          std.polygonOffsetUnits = 1;
+          std.needsUpdate = true;
+        }
+      });
+
+      if (
+        name.includes('Floor') ||
+        name.includes('Wall') ||
+        name.includes('BulletTrap') ||
+        name.includes('ShootingPlace') ||
+        name.includes('Concrete')
+      ) {
+        mesh.userData.isEnvironment = true;
+        bundle.shootableMeshes.push(mesh);
+      }
+
+      if (name.includes('WeaponWall')) {
+        mesh.userData.wallWeaponId = 'M4_CARBINE';
+        bundle.shootableMeshes.push(mesh);
+      }
+    });
+
+    bundle.glbRoot.add(gltfScene);
+    bundle.isLoaded = true;
+  })();
+
+  try {
+    await standerLoadInflight;
+  } finally {
+    standerLoadInflight = null;
+  }
 }

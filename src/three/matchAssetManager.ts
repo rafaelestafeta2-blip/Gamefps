@@ -403,6 +403,9 @@ export async function prepareMatchArena(
   reportProgress(90, 'PRÉ-DECODIFICANDO ÁUDIOS TÁTICOS E COMPILANDO SHADERS GPU...');
   await soundEngine.prewarmGrenadeAudio();
 
+  reportProgress(92, 'AQUECENDO GRANADAS 3D (GLB + BIND 1P)...');
+  await grenadeSystem.ensureGrenadeAssetsReady();
+
   if (!isSoftwareGl) {
     try {
       if (

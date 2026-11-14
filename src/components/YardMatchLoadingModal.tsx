@@ -151,6 +151,8 @@ const YARD_RADAR_IMAGE = '/assets/aistudio/Yard_Map_Radar_7754e5f9.webp';
 const TUTORIAL_STORAGE_KEY = 'kinetic_plant_bomb_tutorial_played';
 const BRIEFING_DURATION_MS = 40000;
 const ONLINE_BARRIER_TIMEOUT_MS = 25000;
+/** Hard cap so Hangar/Eastern/etc never freeze forever on VS with 0% progress. */
+const PREPARE_TIMEOUT_MS = 90000;
 
 export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   mode = 'YARD_BOMB_5V5',
@@ -168,6 +170,8 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   const completedRef = useRef(false);
   const localMapReadyRef = useRef(false);
   const lastProgressSentRef = useRef(-1);
+  const onPrepareMapRef = useRef(onPrepareMap);
+  onPrepareMapRef.current = onPrepareMap;
 
   const isDust2 = mode === 'DUST2_BOMB_5V5';
   const isAssault = mode === 'ASSAULT_BOMB_5V5';
@@ -246,9 +250,10 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
     }
 
     const runRealPreparation = async () => {
+      const prepareFn = onPrepareMapRef.current;
       try {
-        if (onPrepareMap) {
-          await onPrepareMap(mode, (pct, label) => {
+        if (prepareFn) {
+          const preparePromise = prepareFn(mode, (pct, label) => {
             if (cancelled) return;
             const clamped = Math.min(100, Math.max(0, Math.round(pct)));
             setProgress((prev) => Math.max(prev, clamped));
@@ -258,6 +263,16 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
               publishLocalLoadProgress(clamped, false);
             }
           });
+          const timed = await Promise.race([
+            preparePromise.then(() => 'ok' as const),
+            new Promise<'timeout'>((resolve) => {
+              window.setTimeout(() => resolve('timeout'), PREPARE_TIMEOUT_MS);
+            }),
+          ]);
+          if (timed === 'timeout') {
+            console.warn('Arena prepare timed out — recovering into match:', mode);
+            setStatusText('TIMEOUT NO CARREGAMENTO — INICIANDO COM FALLBACK...');
+          }
         }
         if (cancelled) return;
         localMapReadyRef.current = true;
@@ -275,6 +290,7 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       } catch (err) {
         console.error('Erro ao preparar arena 3D:', err);
         if (!cancelled) {
+          setStatusText('FALHA NO GLB — RECUPERANDO PARTIDA...');
           localMapReadyRef.current = true;
           setProgress(100);
           setIsArenaReady(true);
@@ -291,6 +307,26 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       const remainingSec = Math.max(0, Math.ceil((BRIEFING_DURATION_MS - elapsed) / 1000));
       setSecondsLeft(remainingSec);
 
+      // Heartbeat so the bar never looks frozen while GLB/Draco work is silent.
+      if (!localMapReadyRef.current) {
+        setProgress((prev) => {
+          if (prev >= 92) return prev;
+          const soft = Math.min(92, Math.floor(elapsed / 900));
+          return Math.max(prev, soft);
+        });
+      }
+
+      if (!localMapReadyRef.current && elapsed >= PREPARE_TIMEOUT_MS && !completedRef.current) {
+        window.clearInterval(tick);
+        localMapReadyRef.current = true;
+        setProgress(100);
+        setIsArenaReady(true);
+        setStatusText('TIMEOUT — LIBERANDO PARTIDA...');
+        if (isOnline) publishLocalLoadProgress(100, true);
+        else finishLoading();
+        return;
+      }
+
       if (isOnline && localMapReadyRef.current && elapsed >= ONLINE_BARRIER_TIMEOUT_MS && !completedRef.current) {
         window.clearInterval(tick);
         finishLoading();
@@ -306,7 +342,7 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       window.clearInterval(tick);
       soundEngine.stopPlantBombTutorial();
     };
-  }, [mode, onPrepareMap, isOnline]);
+  }, [mode, isOnline]);
 
   const totalBlocks = 18;
   const filledBlocks = Math.round((progress / 100) * totalBlocks);
@@ -459,10 +495,18 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
           ))}
         </div>
 
-        <div className="col-span-2 flex flex-col items-center justify-center text-center relative">
+        <div className="col-span-2 flex flex-col items-center justify-center text-center relative gap-2">
           <div className="relative w-14 h-14 sm:w-20 sm:h-20 rounded-full flex items-center justify-center border border-white/20 bg-[#070c14]/90 shadow-[0_0_30px_rgba(56,189,248,0.35)]">
-            <div className="absolute inset-0 rounded-full border-2 border-l-sky-400 border-t-sky-300 border-r-red-500 border-b-amber-400 opacity-85" />
+            <div
+              className={`absolute inset-0 rounded-full border-2 border-l-sky-400 border-t-sky-300 border-r-red-500 border-b-amber-400 opacity-85 ${
+                !isArenaReady ? 'animate-spin' : ''
+              }`}
+              style={!isArenaReady ? { animationDuration: '2.4s' } : undefined}
+            />
             <span className="font-display font-black text-base sm:text-2xl tracking-wider text-white">VS</span>
+          </div>
+          <div className="px-2 py-0.5 rounded bg-black/70 border border-sky-400/40 font-mono text-[10px] sm:text-xs font-bold text-sky-200 tabular-nums">
+            {Math.round(progress)}%
           </div>
         </div>
 

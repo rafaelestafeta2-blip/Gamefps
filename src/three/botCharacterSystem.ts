@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { WarfaceClassId } from '../components/WarfaceClassIcons';
 import { WeaponId } from '../types/game';
-import { BotAnimController, BotAnimState, BotClipMap, buildProRiflePackClips, selectDirectionalDeathState, syncBotWeaponWithMixamoHands, transitionBotAnim } from './botCharacterClips';
+import { BotAnimController, BotAnimState, BotClipMap, buildProRiflePackClips, retargetClipsRotationOnly, selectDirectionalDeathState, syncBotWeaponWithMixamoHands, transitionBotAnim } from './botCharacterClips';
 import { createBotThirdPersonWeaponMesh } from './botWeaponProps';
 import { TacticalTargetEntity } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
@@ -303,14 +303,22 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
       }
       if (medicRes) {
         vanguardMedicTemplateScene = medicRes.root;
-        // Mesh-only Tripo medic → reuse rifleman (or DEFAULT pack) Mixamo clips.
-        vanguardMedicClips =
+        // Mesh-only Tripo medic → reuse rifleman/DEFAULT Mixamo clips, then
+        // strip foreign position tracks (IBM mismatch was exploding menu mesh).
+        const medicBase =
           medicRes.clips || vanguardRiflemanClips || sharedClips;
+        vanguardMedicClips = medicBase
+          ? retargetClipsRotationOnly(medicBase)
+          : null;
         vanguardMedicShowcaseMatMap = medicRes.showcaseMap;
         vanguardMedicAllyMatMap = medicRes.aMap;
         vanguardMedicEnemyMatMap = medicRes.eMap;
       }
       applyPackOverlays();
+      // Overlay may reintroduce pack position tracks — re-strip for medic.
+      if (vanguardMedicClips) {
+        vanguardMedicClips = retargetClipsRotationOnly(vanguardMedicClips);
+      }
     } finally {
       dracoLoader.dispose();
     }

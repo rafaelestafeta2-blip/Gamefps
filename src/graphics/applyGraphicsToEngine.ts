@@ -99,15 +99,14 @@ export function applyGraphicsToEngine(
     settings.fpsLimit !== 30 &&
     settings.resolution !== 'SCALE_50';
   if (typeof engine.configurePostFx === 'function') {
-    // Milder sharpen/bloom — previous 0.28–0.4 unsharp crushed blacks with ACES.
-    // Exposure/lift compensate for LinearSRGB → canvas encode path.
+    // Keep grit like Dust2 mid-alley: less lift/bloom, slight sharpen; avoid milky walls.
     const acesOn = settings.acesToneMapping;
     engine.configurePostFx({
       enabled: postEnabled,
-      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.26 : 0.18,
-      bloom: settings.muzzleLight ? 0.14 : 0.08,
-      exposure: acesOn ? 1.08 : 1.04,
-      lift: acesOn ? 0.022 : 0.012,
+      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.3 : 0.22,
+      bloom: settings.muzzleLight ? 0.1 : 0.06,
+      exposure: acesOn ? 0.98 : 0.96,
+      lift: acesOn ? 0.008 : 0.005,
     });
   }
 
@@ -183,7 +182,8 @@ export function applyGraphicsToEngine(
   ) {
     cache.lastAcesToneMapping = settings.acesToneMapping;
     renderer.toneMapping = targetToneMapping;
-    renderer.toneMappingExposure = settings.acesToneMapping ? 1.12 : 1.0;
+    // 1.12 + map fill lights blew sandstone/WebP atlases white; ~0.95 restores midtones.
+    renderer.toneMappingExposure = settings.acesToneMapping ? 0.95 : 1.0;
     forceAllMaterialsNeedsUpdate = true;
   }
 
@@ -268,9 +268,9 @@ export function applyGraphicsToEngine(
     scene.fog = null;
   } else if (!scene.fog) {
     const mode = (engine.state as { drillMode?: string }).drillMode;
-    if (mode === 'DUST2_BOMB_5V5') {
-      scene.fog = new THREE.FogExp2(0xdccbb1, 0.0038);
-    } else if (mode === 'ASSAULT_BOMB_5V5' || mode === 'INDUSTRIA_BOMB_5V5' || mode === 'HANGAR_BOMB_5V5' || mode === 'EASTERN_CITY_BOMB_5V5' || mode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+    if (mode === 'DUST2_BOMB_5V5' || mode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+      scene.fog = new THREE.FogExp2(0xdccbb1, 0.0032);
+    } else if (mode === 'ASSAULT_BOMB_5V5' || mode === 'INDUSTRIA_BOMB_5V5' || mode === 'HANGAR_BOMB_5V5' || mode === 'EASTERN_CITY_BOMB_5V5') {
       scene.fog = new THREE.FogExp2(0xcbd5e1, 0.0036);
     } else if (mode === 'YARD_BOMB_5V5') {
       scene.fog = new THREE.FogExp2(0xcbd5e1, 0.0052);

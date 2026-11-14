@@ -7,6 +7,7 @@ import {
   subscribeOnlineRoom,
 } from '../multiplayer/onlineRoomService';
 import { OnlineRoomState } from '../multiplayer/onlineTypes';
+import { getPlayerInventoryState } from '../progression/loadoutSystem';
 import { DrillMode, WeaponId } from '../types/game';
 import { CompetitiveRanksModal } from './CompetitiveRanksModal';
 import { FactionFlagCanvas } from './FactionFlagCanvas';
@@ -277,7 +278,10 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
         {/* COLUNA CENTRAL: OPERADOR 3D (.GLB) DESTACADO NA FRENTE DA BANDEIRA AZUL 3D */}
         <div className="col-span-4 h-full min-h-0 relative flex flex-col items-center justify-end">
           <div className="w-full h-full relative z-20">
-            <RankedOperator3DCanvas activeWeapon={activeWeapon} />
+            <RankedOperator3DCanvas
+              activeWeapon={activeWeapon}
+              operatorClass={getPlayerInventoryState().selectedClass}
+            />
           </div>
           <span className="pointer-events-none text-[8px] font-mono uppercase tracking-[0.2em] text-sky-300/65 pb-0.5">
             ARRASTE PARA GIRAR O OPERADOR 3D

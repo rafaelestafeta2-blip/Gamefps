@@ -56,10 +56,11 @@ export function buildMirageAnubisLevel(
   const targets: TacticalTargetEntity[] = [];
   const collider = new Dust2TriangleCollider();
 
-  const hemi = new THREE.HemisphereLight(0xdbeafe, 0x4b5563, 0.85);
+  // Match Dust2 warm desert fill — cool blue hemi + hot sun was washing WebP sandstone white.
+  const hemi = new THREE.HemisphereLight(0xfff7e6, 0x6e5944, 0.55);
   levelGroup.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xfff1e0, 1.15);
+  const sun = new THREE.DirectionalLight(0xffeed8, 0.95);
   sun.position.set(40, 55, -25);
   sun.target.position.set(20, 2, 0);
   sun.castShadow = false;
@@ -146,9 +147,14 @@ export async function loadMirageAnubisMapGeometry(
           std.map.anisotropy = isSoftwareGl ? 1 : 4;
           std.map.needsUpdate = true;
         }
-        std.roughness = Math.max(0.55, std.roughness ?? 0.72);
-        std.metalness = Math.min(0.35, std.metalness ?? 0.08);
-        std.envMapIntensity = 0.75;
+        std.roughness = Math.max(0.62, std.roughness ?? 0.78);
+        std.metalness = Math.min(0.22, std.metalness ?? 0.06);
+        // Lower IBL so RoomEnvironment + ACES don't bleach midtones.
+        std.envMapIntensity = 0.38;
+        // Keep albedo grit; slight darken if authoring left maps near-white.
+        if (std.color) {
+          std.color.multiplyScalar(0.92);
+        }
         std.side = THREE.FrontSide;
         const n = (child.name || '').toLowerCase();
         const matName = (std.name || '').toLowerCase();

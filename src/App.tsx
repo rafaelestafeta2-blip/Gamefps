@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useRef, useState } from 'react';
 // startTransition is only used for same-screen HUD ticks — never for screen changes.
 import { applyAudioSettings, initAudioSystem } from './audio/audioSettings';
 import { AuthLoginScreen } from './components/AuthLoginScreen';
@@ -137,6 +137,16 @@ export default function App() {
     void prefetchMapAssetsForMode(targetMode);
     setMatchmakingTargetMode(targetMode);
   };
+
+  // Stable prepare callback — inline lambdas recreated every App render and
+  // restarted YardMatchLoadingModal's effect mid-download (stuck VS / 0%).
+  const prepareMapForMatch = useCallback(
+    (targetMode: DrillMode, onProg: (pct: number, statusLabel: string) => void) =>
+      engineRef.current
+        ? engineRef.current.prepareMapForMatch(targetMode, onProg)
+        : Promise.resolve(),
+    []
+  );
 
   const handleSelectWeapon = (weaponId: WeaponId) => {
     if (!engineRef.current) return;
@@ -292,11 +302,7 @@ export default function App() {
       {loadingBombMode && (
         <YardMatchLoadingModal
           mode={loadingBombMode}
-          onPrepareMap={(targetMode, onProg) =>
-            engineRef.current
-              ? engineRef.current.prepareMapForMatch(targetMode, onProg)
-              : Promise.resolve()
-          }
+          onPrepareMap={prepareMapForMatch}
           onComplete={() => {
             const targetMode = loadingBombMode;
             // Enter PLAYING first, then dismiss loading — avoids MAIN_MENU flash.

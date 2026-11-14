@@ -56,12 +56,16 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
     }
   }, [externalRotateSignal]);
 
+  // Remount key when WebGL context is lost (thumbnail studios used to steal the slot).
+  const [contextEpoch, setContextEpoch] = useState(0);
+
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
 
     let disposed = false;
     let frameId = 0;
+    setIsLoaded(false);
 
     const isSoftwareGl = (() => {
       const gl = document.createElement('canvas').getContext('webgl2');
@@ -85,6 +89,8 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       antialias: !isSoftwareGl,
       alpha: true,
       powerPreference: 'high-performance',
+      // Never let inventory weapon/grenade thumbnail studios evict this canvas.
+      pinned: true,
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -102,6 +108,16 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
 
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
+
+    const onContextLost = (e: Event) => {
+      e.preventDefault();
+      if (disposed) return;
+      disposed = true;
+      window.setTimeout(() => {
+        setContextEpoch((n) => n + 1);
+      }, 50);
+    };
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost, false);
 
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     const envTex = pmremGenerator.fromScene(new RoomEnvironment(), 0.028).texture;
@@ -242,17 +258,26 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       rHandBone = null;
       lHandBone = null;
 
-      modelRoot.scale.setScalar(1.02);
+      modelRoot.scale.setScalar(avatarKind === 'VANGUARD_MEDICO' ? 1.0 : 1.02);
       modelRoot.position.set(0, 0, 0);
 
       modelRoot.traverse((child) => {
         if (child.name === 'mixamorigRightHand') rHandBone = child;
         else if (child.name === 'mixamorigLeftHand') lHandBone = child;
 
+        if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
+          const sk = child as THREE.SkinnedMesh;
+          sk.frustumCulled = false;
+          sk.skeleton?.bones.forEach((b) => {
+            b.matrixAutoUpdate = true;
+          });
+        }
+
         if ((child as THREE.Mesh).isMesh) {
           const m = child as THREE.Mesh;
           m.castShadow = !isSoftwareGl;
           m.receiveShadow = false;
+          m.frustumCulled = false;
           const mats = Array.isArray(m.material) ? m.material : [m.material];
           for (let mi = 0; mi < mats.length; mi++) {
             const std = mats[mi] as THREE.MeshStandardMaterial;
@@ -276,7 +301,11 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
               customMat.needsUpdate = true;
               mats[mi] = customMat;
             } else {
-              std.envMapIntensity = Math.max(std.envMapIntensity || 0, 1.2);
+              std.color?.setHex(0xffffff);
+              std.envMapIntensity = Math.max(std.envMapIntensity || 0, 1.25);
+              std.roughness = Math.min(0.78, Math.max(0.32, std.roughness ?? 0.55));
+              std.metalness = Math.min(0.35, Math.max(0.05, std.metalness ?? 0.12));
+              std.side = THREE.FrontSide;
               if (std.map) {
                 std.map.anisotropy = 16;
                 std.map.colorSpace = THREE.SRGBColorSpace;
@@ -293,6 +322,13 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
           else m.material = mats[0];
         }
       });
+
+      // Plant feet on pedestal (Tripo medic bind can leave a tiny Y offset).
+      modelRoot.updateMatrixWorld(true);
+      const footBox = new THREE.Box3().setFromObject(modelRoot);
+      if (Number.isFinite(footBox.min.y)) {
+        modelRoot.position.y -= footBox.min.y;
+      }
 
       operatorPivot.add(modelRoot);
 
@@ -424,6 +460,7 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       swapSelectionRef.current = null;
       nudgeYawRef.current = null;
       cancelAnimationFrame(frameId);
+      domElem.removeEventListener('webglcontextlost', onContextLost);
       domElem.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
@@ -438,7 +475,7 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       innerDiscMat.dispose();
       disposeSecondaryWebGLRenderer(renderer);
     };
-  }, [team]);
+  }, [team, contextEpoch]);
 
   return (
     <div className="relative w-full h-full flex items-center justify-center">

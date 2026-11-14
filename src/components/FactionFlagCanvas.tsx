@@ -56,6 +56,7 @@ export const FactionFlagCanvas: React.FC<FactionFlagCanvasProps> = ({
     camera.position.set(0, 0, 5.2);
 
     const renderer = createSecondaryWebGLRenderer({
+      pinned: true,
       antialias: !isSoftwareGl,
       alpha: true,
       powerPreference: isLowPowerMobile ? 'low-power' : 'high-performance',

@@ -408,8 +408,12 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
         engine.state.activeWeapon === 'SNIPER_TACTICAL') &&
       !engine.state.cantedActive &&
       engine.state.adsAlpha > 0.82;
-    const holdingClassKit = Boolean(engine.classKitProps?.isHolding?.());
-    const holdingC4Plant = Boolean(engine.c4PlantView?.isHolding?.());
+    const holdingClassKit =
+      Boolean(engine.classKitProps?.isHolding?.()) ||
+      Boolean(engine.classSupport?.kitChannelActive);
+    const holdingC4Plant =
+      Boolean(engine.c4PlantView?.isHolding?.()) ||
+      engine.yardBombSystem?.info?.bombStatus === 'PLANTING';
     engine.weaponRig.root.visible =
       !engine.isPlayerDying &&
       !engine.playerDeathTp?.isActive() &&
