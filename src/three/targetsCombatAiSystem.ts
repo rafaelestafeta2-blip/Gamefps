@@ -8,6 +8,7 @@ import { soundEngine } from '../audio/soundEngine';
 import { mobileHardware } from '../mobile/nativeHardware';
 import { isOnlineMatchActive } from '../multiplayer/onlineRoomService';
 import { addPlayerCash } from '../progression/ranks';
+import { canGrantMatchProgressionRewards } from '../progression/matchProgressionGate';
 import {
   alertBotsToPlayerCombat,
   updateSmartBotNavigation,
@@ -193,7 +194,9 @@ export function updateTargetsAndCombatAI(engine: any, dt: number): void {
                         : 'ESQUADRÃO VANGUARD NEUTRALIZADO EM COMBATE!',
                       (xp: number, cash: number) => {
                         engine.addPlayerXp(xp);
-                        addPlayerCash(cash);
+                        if (canGrantMatchProgressionRewards() && cash > 0) {
+                          addPlayerCash(cash);
+                        }
                         engine.state.score += xp;
                       }
                     );

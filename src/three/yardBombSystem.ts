@@ -14,6 +14,7 @@ import {
   getPlayerCallsign,
   recordCombatTelemetryDelta,
 } from '../firebase/playerCloudSync';
+import { canGrantMatchProgressionRewards } from '../progression/matchProgressionGate';
 import { mobileHardware } from '../mobile/nativeHardware';
 import { DrillMode, SquadOperatorStats, WeaponId, YardBombHudInfo } from '../types/game';
 import { BallisticsFXPool } from './ballisticsPool';
@@ -185,8 +186,9 @@ export class YardBombSystem {
     if (winner === 'VANGUARD') this.info.vanguardScore += 1;
     else this.info.blackthornScore += 1;
 
-    let roundXp = winner === 'VANGUARD' ? 180 : 75;
-    let roundCash = winner === 'VANGUARD' ? 400 : 150;
+    const progressionOk = canGrantMatchProgressionRewards();
+    let roundXp = progressionOk ? (winner === 'VANGUARD' ? 180 : 75) : 0;
+    let roundCash = progressionOk ? (winner === 'VANGUARD' ? 400 : 150) : 0;
 
     const roundsPlayed = this.info.vanguardScore + this.info.blackthornScore;
     const hasMajorityClinch = this.info.vanguardScore >= 4 || this.info.blackthornScore >= 4;
@@ -203,17 +205,22 @@ export class YardBombSystem {
       this.info.isSpectating = false;
       this.info.roundTransitionSec = 0;
 
-      const matchBonusXp = matchWinner === 'VANGUARD' ? 450 : 180;
-      const matchBonusCash = matchWinner === 'VANGUARD' ? 1200 : 450;
-      roundXp += matchBonusXp;
-      roundCash += matchBonusCash;
+      if (progressionOk) {
+        const matchBonusXp = matchWinner === 'VANGUARD' ? 450 : 180;
+        const matchBonusCash = matchWinner === 'VANGUARD' ? 1200 : 450;
+        roundXp += matchBonusXp;
+        roundCash += matchBonusCash;
+        recordCombatTelemetryDelta({
+          matchesPlayed: 1,
+          matchesWon: matchWinner === 'VANGUARD' ? 1 : 0,
+        });
+      }
 
       this.info.lastRoundXp = roundXp;
       this.info.lastRoundCash = roundCash;
       this.info.totalMatchXp += roundXp;
       this.info.totalMatchCash += roundCash;
 
-      recordCombatTelemetryDelta({ matchesPlayed: 1, matchesWon: matchWinner === 'VANGUARD' ? 1 : 0 });
       playMatchEndFanfare(matchWinner === 'VANGUARD');
       onReward(roundXp, roundCash, true);
     } else {

@@ -1,6 +1,7 @@
 import { collection, deleteField, doc, getDoc, getDocs, limit, onSnapshot, query, setDoc, Unsubscribe, updateDoc, where } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase/firebaseClient';
 import { getCloudSyncState } from '../firebase/playerCloudSync';
+import { registerMatchProgressionGate } from '../progression/matchProgressionGate';
 import { DrillMode, WeaponId } from '../types/game';
 import { applyIncomingPlayerState } from './combatNetcode';
 import {
@@ -544,6 +545,28 @@ export function getLocalOnlinePlayerState(): OnlinePlayerState | null {
 export function isOnlineMatchActive(): boolean {
   return activeRoom !== null;
 }
+
+/** Other human players currently in the active online room (excludes local). */
+export function countOtherHumanPlayersInRoom(): number {
+  const local = getLocalOnlinePlayerState();
+  if (!activeRoom || !local) return 0;
+  let n = 0;
+  for (const uid of Object.keys(activeRoom.players)) {
+    if (uid && uid !== local.uid) n += 1;
+  }
+  return n;
+}
+
+/**
+ * XP / cash / rank unlocks / combat profile telemetry may only come from
+ * real online matches with at least one other human. Bot / offline / solo
+ * practice modes grant none.
+ */
+export function canGrantMatchProgressionRewards(): boolean {
+  return isOnlineMatchActive() && countOtherHumanPlayersInRoom() >= 1;
+}
+
+registerMatchProgressionGate(canGrantMatchProgressionRewards);
 
 export function subscribeOnlineRoom(fn: RoomSubscriber): () => void {
   roomSubscribers.add(fn);

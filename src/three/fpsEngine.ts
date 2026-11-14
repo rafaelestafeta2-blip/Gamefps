@@ -41,6 +41,7 @@ import {
   loadSavedPlayerXp,
   savePlayerXp,
 } from '../progression/ranks';
+import { canGrantMatchProgressionRewards } from '../progression/matchProgressionGate';
 import { getClassCombatModifiers } from '../progression/loadoutSystem';
 import { BallisticsFXPool } from './ballisticsPool';
 import { TacticalGrenadeSystem } from './grenadeSystem';
@@ -1060,8 +1061,14 @@ export class TacticalFPSEngine {
   }
 
   public addPlayerXp(amount: number): void {
-    // Regra estrita: O stand de tiro NÃO pode conceder XP (apenas partidas oficiais)
-    if (this.state.drillMode === 'FREE_RANGE' || amount <= 0) return;
+    // Strict: XP / rank unlocks only from online matches with other humans.
+    // FREE_RANGE, offline bomb vs AI, killhouse, and solo rooms grant 0.
+    if (amount <= 0) return;
+    if (this.state.drillMode === 'FREE_RANGE') return;
+    if (!canGrantMatchProgressionRewards()) {
+      this.state.lastXpGained = 0;
+      return;
+    }
     const oldLevel = this.state.rankLevel;
     this.state.playerXp += amount;
     this.state.lastXpGained = amount;
@@ -2940,7 +2947,9 @@ export class TacticalFPSEngine {
         this.fxPool,
         (xp, cash) => {
           this.addPlayerXp(xp);
-          addPlayerCash(cash);
+          if (canGrantMatchProgressionRewards() && cash > 0) {
+            addPlayerCash(cash);
+          }
           this.state.score += xp;
           this.emitHud();
         },
