@@ -1,11 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import {
-  getAuth,
-  GoogleAuthProvider,
-  indexedDBLocalPersistence,
-  initializeAuth,
-  browserLocalPersistence,
-} from 'firebase/auth';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -40,18 +34,7 @@ export interface FirestoreErrorInfo {
 // Inicializa o Firebase SDK com a configuração provisionada
 const app = initializeApp(firebaseConfig);
 export { firebaseConfig };
-
-// Persist auth across Capacitor process death / Activity recreate (Android OAuth).
-function createAuth() {
-  try {
-    return initializeAuth(app, {
-      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-    });
-  } catch {
-    return getAuth(app);
-  }
-}
-export const auth = createAuth();
+export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 export const googleProvider = new GoogleAuthProvider();
