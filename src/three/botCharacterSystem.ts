@@ -8,6 +8,11 @@ import { BotAnimController, BotAnimState, BotClipMap, buildProRiflePackClips, se
 import { createBotThirdPersonWeaponMesh } from './botWeaponProps';
 import { TacticalTargetEntity } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
+import {
+  applyAnimPackOverlayToBotClips,
+  applyPistolLocoToBotClips,
+  preloadMixamoAnimPack,
+} from './mixamoAnimPackLoader';
 
 const PRO_RIFLE_LOCAL_URL = '/models/characters/pro_rifle_pack.glb';
 const PRO_RIFLE_FALLBACK_URL = 'https://github.com/rafaelestafeta2-blip/Gamesfps/releases/download/V1/Pro.Rifle.Pack.glb';
@@ -153,6 +158,17 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
       templateScene = root;
     };
 
+    const applyPackOverlays = () => {
+      if (sharedClips) sharedClips = applyAnimPackOverlayToBotClips(sharedClips);
+      if (sniperClips) sniperClips = applyAnimPackOverlayToBotClips(sniperClips);
+      if (vanguardRiflemanClips) {
+        vanguardRiflemanClips = applyAnimPackOverlayToBotClips(vanguardRiflemanClips);
+      }
+      if (vanguardEngineerClips) {
+        vanguardEngineerClips = applyAnimPackOverlayToBotClips(vanguardEngineerClips);
+      }
+    };
+
     const loadCustomOperatorModel = async (
       url: string,
       allyTintHex: number,
@@ -238,6 +254,10 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
         loadCustomOperatorModel(SNIPER_OPERATOR_LOCAL_URL, 0xdce8f8, 'SniperOperatorCharacter'),
         loadCustomOperatorModel(VANGUARD_RIFLEMAN_LOCAL_URL, 0xffffff, 'VanguardRiflemanCharacter'),
         loadCustomOperatorModel(VANGUARD_ENGINEER_LOCAL_URL, 0xffffff, 'VanguardEngineerCharacter'),
+        preloadMixamoAnimPack(loadingManager).catch((err) => {
+          console.warn('Mixamo Animaçao pack load failed:', err);
+          return null;
+        }),
       ]);
       if (sniperRes) {
         sniperTemplateScene = sniperRes.root;
@@ -260,6 +280,7 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
         vanguardEngineerAllyMatMap = engineerRes.aMap;
         vanguardEngineerEnemyMatMap = engineerRes.eMap;
       }
+      applyPackOverlays();
     } finally {
       dracoLoader.dispose();
     }
@@ -464,13 +485,16 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
       : useVanguardFuzileiro
         ? vanguardRiflemanTemplateScene!
         : templateScene;
-  const activeClips = useSniper
+  let activeClips = useSniper
     ? sniperClips!
     : useVanguardEngineer
       ? vanguardEngineerClips!
       : useVanguardFuzileiro
         ? vanguardRiflemanClips!
-        : sharedClips;
+        : sharedClips!;
+  if (chosenWeapon === 'P50_PISTOL') {
+    activeClips = applyPistolLocoToBotClips(activeClips);
+  }
   const matPalette = useSniper
     ? (bot.isAlly ? sniperAllyMatMap! : sniperEnemyMatMap!)
     : useVanguardEngineer

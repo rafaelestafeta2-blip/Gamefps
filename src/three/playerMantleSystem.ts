@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { soundEngine } from '../audio/soundEngine';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { ColliderBox } from './levelBuilder';
+import { getMantleClip } from './mixamoAnimPackLoader';
 
 export interface MantleState {
   active: boolean;
@@ -162,6 +163,11 @@ export function tryStartMantle(engine: any): boolean {
   engine.cameraFovPunch = Math.min((engine.cameraFovPunch || 0) + 3.2, 8);
   engine.landingDipVel = Math.min(engine.landingDipVel || 0, -0.08);
   soundEngine.playPlayerJump();
+  // Prefer Mixamo braced-hang clip timing when Animaçao pack is loaded.
+  const mantleClip = getMantleClip();
+  if (mantleClip?.duration) {
+    mantle.duration = THREE.MathUtils.clamp(mantleClip.duration * 0.42, 0.38, 0.85);
+  }
   return true;
 }
 

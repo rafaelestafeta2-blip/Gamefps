@@ -40,6 +40,7 @@ export interface ClassSupportRuntime {
   reviveCharge: number;
   reviveTargetId: string | null;
   holdingSupport: boolean;
+  cprGestureStarted: boolean;
 }
 
 const _toAlly = new THREE.Vector3();
@@ -70,6 +71,7 @@ export function createClassSupportRuntime(
     reviveCharge: 0,
     reviveTargetId: null,
     holdingSupport: false,
+    cprGestureStarted: false,
   };
 }
 
@@ -366,6 +368,7 @@ export function setClassSupportHeld(engine: any, held: boolean): void {
   if (!held) {
     cs.reviveCharge = 0;
     cs.reviveTargetId = null;
+    cs.cprGestureStarted = false;
     engine.state.reviveChargeProgress = 0;
     if (engine.state.supportPrompt === 'MANTENHA PARA DESFIBRILAR') {
       engine.state.supportPrompt = '';
@@ -472,9 +475,17 @@ export function updateClassSupport(engine: any, dt: number): void {
         engine.state.supportPrompt = '';
         engine.state.supportCooldownSec = cs.cooldownSec;
         // Revive does not spend a medkit charge (Warface defibrillator is separate).
+      } else if (!cs.cprGestureStarted && cs.reviveCharge > 0.05) {
+        cs.cprGestureStarted = true;
+        try {
+          engine.playerGesture?.playCpr?.(target.root.position, engine.yaw);
+        } catch {
+          /* optional */
+        }
       }
     } else {
       cs.reviveCharge = 0;
+      cs.cprGestureStarted = false;
       engine.state.reviveChargeProgress = 0;
       if (!nearestDownedAlly(engine, REVIVE_RANGE_M)) {
         cs.holdingSupport = false;
