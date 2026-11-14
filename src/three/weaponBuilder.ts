@@ -2126,6 +2126,71 @@ export function buildTacticalWeaponRig(
 
   let sniperBoltHandTimer = 0;
   let shotgunPumpTimer = 0;
+  /** Last AK loco donor action name — stop when switching weapons / becoming busy. */
+  let akLocoDonorKey: string | null = null;
+
+  /**
+   * Weapons that may borrow AK-47 Walk/Run/Idle_Aim as a *motion donor*
+   * (sample SKEL_AK_47_Rifle deltas → weaponMotionAnchor). True clip retarget
+   * is impossible: AK uses UE5 DEF-* bones; other packs use unrelated hierarchies.
+   */
+  const AK_LOCO_DONOR_ELIGIBLE: ReadonlySet<WeaponId> = new Set([
+    'P50_PISTOL',
+    'SMG_45',
+    'M4_CARBINE',
+    'CARBINE_AR',
+    'AK12_RIFLE',
+    'L49_LMG',
+    'SNIPER_BOLT',
+    'SNIPER_TACTICAL',
+  ]);
+
+  const packHasNativeWalkRun = (
+    entry: AnimatedWeaponPackEntry | undefined
+  ): boolean => {
+    if (!entry?.loaded) return false;
+    const a = entry.actions;
+    return !!(
+      a['RIG_UE5_Comando_AK_Walk'] ||
+      a['RIG_UE5_Comando_AK__Run'] ||
+      a['Walk'] ||
+      a['Run'] ||
+      a['Walk_Aim'] ||
+      a['Sprint']
+    );
+  };
+
+  const stopAkLocoDonor = (akEntry: AnimatedWeaponPackEntry): void => {
+    if (!akLocoDonorKey) return;
+    const act = akEntry.actions[akLocoDonorKey];
+    if (act?.isRunning()) {
+      act.weight = 0;
+      act.stop();
+    }
+    akLocoDonorKey = null;
+  };
+
+  const pickAkLocoDonorKey = (isMoving: boolean, isAds: boolean): string | null => {
+    const ak = weaponPacks.AK47_RIFLE?.actions;
+    if (!ak) return null;
+    const walk = ak['RIG_UE5_Comando_AK_Walk'] ? 'RIG_UE5_Comando_AK_Walk' : null;
+    const walkAim = ak['RIG_UE5_Comando_AK_Walk_Aim']
+      ? 'RIG_UE5_Comando_AK_Walk_Aim'
+      : null;
+    const run = ak['RIG_UE5_Comando_AK__Run'] ? 'RIG_UE5_Comando_AK__Run' : null;
+    const idle = ak['RIG_UE5_Comando_AK_Idle']
+      ? 'RIG_UE5_Comando_AK_Idle'
+      : ak['RIG_UE5_Comando_AK_Hold']
+        ? 'RIG_UE5_Comando_AK_Hold'
+        : null;
+    const idleAim = ak['RIG_UE5_Comando_AK_Idle_Aim']
+      ? 'RIG_UE5_Comando_AK_Idle_Aim'
+      : null;
+    if (isMoving && isAds) return walkAim || walk || idleAim || idle;
+    if (isMoving) return run || walk || idle;
+    if (isAds) return idleAim || idle;
+    return idle;
+  };
 
   const triggerFireAnimation = (isAds = false) => {
     const activeEntry = weaponPacks[activeWeapon];
@@ -2200,6 +2265,7 @@ export function buildTacticalWeaponRig(
     animElapsed += dt;
 
     const activeEntry = weaponPacks[activeWeapon];
+    const akEntry = weaponPacks.AK47_RIFLE;
     if (
       activeWeapon === 'M4_CARBINE' &&
       activeEntry &&
@@ -2210,108 +2276,194 @@ export function buildTacticalWeaponRig(
         activeEntry.builtInOpticNodes[i].visible = showBuiltIn;
       }
     }
+
+    const busy =
+      !!activeEntry?.loaded &&
+      !!(
+        activeEntry.actions['Fire']?.isRunning() ||
+        activeEntry.actions['Reload']?.isRunning() ||
+        activeEntry.actions['Reload_Empty']?.isRunning() ||
+        activeEntry.actions['Draw']?.isRunning() ||
+        activeEntry.actions['Shoot']?.isRunning()
+      );
+    const nativeLoco = packHasNativeWalkRun(activeEntry);
+    const useAkDonor =
+      !nativeLoco &&
+      !busy &&
+      reloadPhase === 'IDLE' &&
+      AK_LOCO_DONOR_ELIGIBLE.has(activeWeapon) &&
+      !!akEntry?.loaded &&
+      !!akEntry.mixer &&
+      !!akEntry.mainBoneNode &&
+      !!akEntry.mainBoneRestPos;
+
     if (activeEntry && activeEntry.loaded && activeEntry.mixer) {
-      // Prefer real locomotion clips when the GLB has them; otherwise idle loops only.
-      // AK-47: full Walk/Run/Idle_Aim. AK-12: Idle. Others: Draw/Fire/Reload only → procedural bob.
-      if (reloadPhase === 'IDLE') {
-        const busy =
-          activeEntry.actions['Fire']?.isRunning() ||
-          activeEntry.actions['Reload']?.isRunning() ||
-          activeEntry.actions['Reload_Empty']?.isRunning() ||
-          activeEntry.actions['Draw']?.isRunning() ||
-          activeEntry.actions['Shoot']?.isRunning();
-        if (!busy) {
-          const acts = activeEntry.actions;
-          const walk =
-            acts['RIG_UE5_Comando_AK_Walk'] ||
-            acts['Walk'] ||
-            acts['walk'];
-          const walkAim =
-            acts['RIG_UE5_Comando_AK_Walk_Aim'] ||
-            acts['Walk_Aim'] ||
-            acts['walk_aim'];
-          const run =
-            acts['RIG_UE5_Comando_AK__Run'] ||
-            acts['Run'] ||
-            acts['run'] ||
-            acts['Sprint'];
-          const idle =
-            acts['RIG_UE5_Comando_AK_Idle'] ||
-            acts['Idle'] ||
-            acts['idle'] ||
-            acts['RIG_UE5_Comando_AK_Hold'] ||
-            acts['Hold'];
-          const idleAim =
-            acts['RIG_UE5_Comando_AK_Idle_Aim'] ||
-            acts['Idle_Aim'] ||
-            acts['idle_aim'];
+      // Native loco (AK-47 today): play Walk/Run/Idle_Aim on the active mixer.
+      if (reloadPhase === 'IDLE' && nativeLoco && !busy) {
+        const acts = activeEntry.actions;
+        const walk =
+          acts['RIG_UE5_Comando_AK_Walk'] || acts['Walk'] || acts['walk'];
+        const walkAim =
+          acts['RIG_UE5_Comando_AK_Walk_Aim'] ||
+          acts['Walk_Aim'] ||
+          acts['walk_aim'];
+        const run =
+          acts['RIG_UE5_Comando_AK__Run'] ||
+          acts['Run'] ||
+          acts['run'] ||
+          acts['Sprint'];
+        const idle =
+          acts['RIG_UE5_Comando_AK_Idle'] ||
+          acts['Idle'] ||
+          acts['idle'] ||
+          acts['RIG_UE5_Comando_AK_Hold'] ||
+          acts['Hold'];
+        const idleAim =
+          acts['RIG_UE5_Comando_AK_Idle_Aim'] ||
+          acts['Idle_Aim'] ||
+          acts['idle_aim'];
 
-          let loco: THREE.AnimationAction | undefined;
-          if (isMoving && isAds) loco = walkAim || walk || idleAim || idle;
-          else if (isMoving) loco = run || walk || idle;
-          else if (isAds) loco = idleAim || idle;
-          else loco = idle;
+        let loco: THREE.AnimationAction | undefined;
+        if (isMoving && isAds) loco = walkAim || walk || idleAim || idle;
+        else if (isMoving) loco = run || walk || idle;
+        else if (isAds) loco = idleAim || idle;
+        else loco = idle;
 
-          // Only loop real idle/loco clips — never force Fire/Reload into LoopRepeat.
-          if (loco && (loco === idle || loco === idleAim || loco === walk || loco === walkAim || loco === run)) {
-            Object.entries(acts).forEach(([, act]) => {
-              if (act !== loco && act.loop === THREE.LoopRepeat) {
-                act.weight = 0;
-                act.stop();
-              }
-            });
-            if (!loco.isRunning() || loco.loop !== THREE.LoopRepeat) {
-              loco.setLoop(THREE.LoopRepeat, Infinity);
-              loco.clampWhenFinished = false;
-              loco.weight = 1;
-              loco.reset();
-              loco.play();
-            } else {
-              loco.weight = 1;
+        if (
+          loco &&
+          (loco === idle ||
+            loco === idleAim ||
+            loco === walk ||
+            loco === walkAim ||
+            loco === run)
+        ) {
+          Object.entries(acts).forEach(([, act]) => {
+            if (act !== loco && act.loop === THREE.LoopRepeat) {
+              act.weight = 0;
+              act.stop();
             }
-            loco.timeScale = isMoving
-              ? isAds
-                ? 0.95
-                : run && loco === run
-                  ? 1.2
-                  : 1.1
-              : 1.0;
+          });
+          if (!loco.isRunning() || loco.loop !== THREE.LoopRepeat) {
+            loco.setLoop(THREE.LoopRepeat, Infinity);
+            loco.clampWhenFinished = false;
+            loco.weight = 1;
+            loco.reset();
+            loco.play();
+          } else {
+            loco.weight = 1;
           }
+          loco.timeScale = isMoving
+            ? isAds
+              ? 0.95
+              : run && loco === run
+                ? 1.2
+                : 1.1
+            : 1.0;
+        }
+      }
+
+      // AK-12 Idle only: keep Idle looping when standing (no Walk/Run in pack).
+      if (
+        reloadPhase === 'IDLE' &&
+        !nativeLoco &&
+        !busy &&
+        activeWeapon === 'AK12_RIFLE' &&
+        activeEntry.actions['Idle'] &&
+        !useAkDonor
+      ) {
+        const idle = activeEntry.actions['Idle'];
+        if (!idle.isRunning() || idle.loop !== THREE.LoopRepeat) {
+          idle.setLoop(THREE.LoopRepeat, Infinity);
+          idle.clampWhenFinished = false;
+          idle.weight = 1;
+          idle.reset().play();
         }
       }
 
       activeEntry.mixer.update(dt);
+    }
 
-      if (activeEntry.mainBoneNode && activeEntry.mainBoneRestPos) {
-        const b = activeEntry.mainBoneNode;
-        const r = activeEntry.mainBoneRestPos;
-        const s = activeEntry.mainBoneScale;
-        const sign = activeEntry.invertZ ? -1 : 1;
-        const targetX = THREE.MathUtils.clamp(sign * (b.position.x - r.x) * s, -0.04, 0.04);
-        const targetY = THREE.MathUtils.clamp((b.position.y - r.y) * s, -0.04, 0.04);
-        const targetZ = THREE.MathUtils.clamp(sign * (b.position.z - r.z) * s, -0.04, 0.04);
-        weaponMotionAnchor.position.x = THREE.MathUtils.damp(
-          weaponMotionAnchor.position.x,
-          targetX,
-          24,
-          dt
-        );
-        weaponMotionAnchor.position.y = THREE.MathUtils.damp(
-          weaponMotionAnchor.position.y,
-          targetY,
-          24,
-          dt
-        );
-        weaponMotionAnchor.position.z = THREE.MathUtils.damp(
-          weaponMotionAnchor.position.z,
-          targetZ,
-          24,
-          dt
-        );
-      } else {
-        weaponMotionAnchor.position.set(0, 0, 0);
-        weaponMotionAnchor.quaternion.identity();
+    // AK loco motion donor: play Walk/Run/Idle_Aim on the hidden AK mixer and
+    // copy SKEL_AK_47_Rifle deltas onto weaponMotionAnchor for other 1P packs.
+    if (useAkDonor && akEntry) {
+      const key = pickAkLocoDonorKey(isMoving, isAds);
+      if (key && akEntry.actions[key]) {
+        if (akLocoDonorKey && akLocoDonorKey !== key) {
+          const prev = akEntry.actions[akLocoDonorKey];
+          if (prev?.isRunning()) {
+            prev.weight = 0;
+            prev.stop();
+          }
+        }
+        const loco = akEntry.actions[key];
+        if (!loco.isRunning() || loco.loop !== THREE.LoopRepeat || akLocoDonorKey !== key) {
+          // Stop other AK repeat loops (don't interrupt if somehow firing — AK is hidden).
+          Object.entries(akEntry.actions).forEach(([n, act]) => {
+            if (n !== key && act.loop === THREE.LoopRepeat && act.isRunning()) {
+              act.weight = 0;
+              act.stop();
+            }
+          });
+          loco.setLoop(THREE.LoopRepeat, Infinity);
+          loco.clampWhenFinished = false;
+          loco.weight = 1;
+          loco.reset();
+          loco.play();
+          akLocoDonorKey = key;
+        } else {
+          loco.weight = 1;
+        }
+        loco.timeScale = isMoving
+          ? isAds
+            ? 0.95
+            : key.includes('Run')
+              ? 1.2
+              : 1.1
+          : 1.0;
+        akEntry.mixer!.update(dt);
       }
+    } else if (akEntry?.loaded && activeWeapon !== 'AK47_RIFLE') {
+      stopAkLocoDonor(akEntry);
+    } else if (activeWeapon === 'AK47_RIFLE') {
+      // Native AK loco owns the mixer — clear donor bookkeeping.
+      akLocoDonorKey = null;
+    }
+
+    const applyBoneMotion = (
+      entry: AnimatedWeaponPackEntry,
+      damp = 24
+    ): void => {
+      const b = entry.mainBoneNode!;
+      const r = entry.mainBoneRestPos!;
+      const s = entry.mainBoneScale;
+      const sign = entry.invertZ ? -1 : 1;
+      const targetX = THREE.MathUtils.clamp(sign * (b.position.x - r.x) * s, -0.04, 0.04);
+      const targetY = THREE.MathUtils.clamp((b.position.y - r.y) * s, -0.04, 0.04);
+      const targetZ = THREE.MathUtils.clamp(sign * (b.position.z - r.z) * s, -0.04, 0.04);
+      weaponMotionAnchor.position.x = THREE.MathUtils.damp(
+        weaponMotionAnchor.position.x,
+        targetX,
+        damp,
+        dt
+      );
+      weaponMotionAnchor.position.y = THREE.MathUtils.damp(
+        weaponMotionAnchor.position.y,
+        targetY,
+        damp,
+        dt
+      );
+      weaponMotionAnchor.position.z = THREE.MathUtils.damp(
+        weaponMotionAnchor.position.z,
+        targetZ,
+        damp,
+        dt
+      );
+    };
+
+    if (useAkDonor && akEntry?.mainBoneNode && akEntry.mainBoneRestPos) {
+      applyBoneMotion(akEntry, 20);
+    } else if (activeEntry?.loaded && activeEntry.mainBoneNode && activeEntry.mainBoneRestPos) {
+      applyBoneMotion(activeEntry, 24);
     } else {
       weaponMotionAnchor.position.set(0, 0, 0);
       weaponMotionAnchor.quaternion.identity();
@@ -2403,17 +2555,15 @@ export function buildTacticalWeaponRig(
   };
 
   const activePackHasWalkRunClips = (): boolean => {
-    const entry = weaponPacks[activeWeapon];
-    if (!entry?.loaded) return false;
-    const a = entry.actions;
-    return !!(
-      a['RIG_UE5_Comando_AK_Walk'] ||
-      a['RIG_UE5_Comando_AK__Run'] ||
-      a['Walk'] ||
-      a['Run'] ||
-      a['Walk_Aim'] ||
-      a['Sprint']
-    );
+    if (packHasNativeWalkRun(weaponPacks[activeWeapon])) return true;
+    // Donor counts as "has loco" so kinematics softens procedural bob boost.
+    if (
+      AK_LOCO_DONOR_ELIGIBLE.has(activeWeapon) &&
+      packHasNativeWalkRun(weaponPacks.AK47_RIFLE)
+    ) {
+      return true;
+    }
+    return false;
   };
 
   return {
