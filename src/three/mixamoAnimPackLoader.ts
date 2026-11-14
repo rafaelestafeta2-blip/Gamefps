@@ -196,11 +196,18 @@ export function applyAnimPackOverlayToBotClips(base: BotClipMap): BotClipMap {
     'RIFLE_AIM',
     'RIFLE_CROUCH',
     'RIFLE_SPRINT',
+    'RIFLE_JUMP',
+    'RIFLE_RELOAD_3P',
   ];
   for (const k of overlayKeys) {
     const c = packCache.get(k);
     if (c) next[k] = c;
   }
+  // AnimPackKey uses same names for jump/reload extras.
+  const jumpClip = packCache.get('RIFLE_JUMP');
+  if (jumpClip) next.RIFLE_JUMP = jumpClip;
+  const reloadClip = packCache.get('RIFLE_RELOAD_3P');
+  if (reloadClip) next.RIFLE_RELOAD_3P = reloadClip;
   // Sprint: reuse rifle_run if no dedicated sprint in pack
   if (packCache.get('RIFLE_RUN')) {
     next.RIFLE_SPRINT = packCache.get('RIFLE_RUN')!;

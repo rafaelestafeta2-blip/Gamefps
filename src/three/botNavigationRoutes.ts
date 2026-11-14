@@ -38,6 +38,8 @@ export interface BotNavData {
   avoidAngle: number;
   avoidTimer: number;
   verticalVel: number;
+  /** Cooldown before another hop / step-up jump. */
+  jumpCooldown: number;
   plantOrDefuseTimer: number;
   lastKeypadDigit: number;
   visionRange: number;
@@ -284,13 +286,17 @@ export function moveBotWithPhysics(
 ): void {
   const bPos = bot.root.position;
   const botRadius = 0.34;
+  if (nav.jumpCooldown == null) nav.jumpCooldown = 0;
+  nav.jumpCooldown = Math.max(0, nav.jumpCooldown - dt);
 
   if (nav.avoidTimer > 0) nav.avoidTimer = Math.max(0, nav.avoidTimer - dt);
 
+  let horizDist = 0;
   if (moveSpeed > 0.05) {
     _navDir.subVectors(moveTarget, bPos);
     _navDir.y = 0;
     const dist = _navDir.length();
+    horizDist = dist;
     if (dist > 0.1) {
       _navDir.normalize();
 
@@ -362,13 +368,27 @@ export function moveBotWithPhysics(
       ? activeGlbCollider.getGroundHeight(bPos.x, bPos.y + 0.35, bPos.z)
       : 0;
 
-  if (bPos.y <= floorY + 0.52 && bPos.y >= floorY - 0.6) {
+  const grounded =
+    bPos.y <= floorY + 0.14 && Math.abs(nav.verticalVel) < 0.35;
+  // Step-up toward higher waypoint / hop when stuck on a lip.
+  if (grounded && nav.jumpCooldown <= 0 && moveSpeed > 0.05) {
+    const heightDelta = moveTarget.y - floorY;
+    const wantStepUp = heightDelta > 0.55 && horizDist < 3.2 && horizDist > 0.25;
+    const wantStuckHop = nav.stuckTimer > 0.22 && heightDelta > -0.2;
+    if (wantStepUp || wantStuckHop) {
+      nav.verticalVel = wantStepUp ? 6.4 : 5.2;
+      nav.jumpCooldown = 0.9;
+      bot.root.userData.botJumpPulse = true;
+    }
+  }
+
+  if (bPos.y <= floorY + 0.52 && bPos.y >= floorY - 0.6 && nav.verticalVel <= 0.05) {
     bPos.y = THREE.MathUtils.damp(bPos.y, floorY, 18, dt);
     nav.verticalVel = 0;
-  } else if (bPos.y > floorY) {
+  } else if (nav.verticalVel > 0.05 || bPos.y > floorY + 0.02) {
     nav.verticalVel = Math.max(-18.0, nav.verticalVel - 15.5 * dt);
     bPos.y = Math.max(floorY, bPos.y + nav.verticalVel * dt);
-    if (bPos.y <= floorY + 0.02) {
+    if (bPos.y <= floorY + 0.02 && nav.verticalVel <= 0) {
       bPos.y = floorY;
       nav.verticalVel = 0;
     }

@@ -619,6 +619,8 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
       stateKey === 'RIFLE_FIRE' ||
       stateKey === 'RIFLE_THROW' ||
       stateKey === 'RIFLE_HIT' ||
+      stateKey === 'RIFLE_JUMP' ||
+      stateKey === 'RIFLE_RELOAD_3P' ||
       stateKey.startsWith('RIFLE_DEATH')
     ) {
       action.setLoop(THREE.LoopOnce, 1);
@@ -642,11 +644,14 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
     actions,
     currentState: initialState,
     prevX: bot.root.position.x,
+    prevY: bot.root.position.y,
     prevZ: bot.root.position.z,
     smoothedSpeed: 0,
     hitReactTimer: 0,
     fireAnimTimer: 0,
     throwAnimTimer: 0,
+    jumpAnimTimer: 0,
+    reloadAnimTimer: 0,
     deathElapsed: 0,
     lodAccumDt: 0,
     tacticalTimer: (bot.patrolOffset || 0) * 1.5,
@@ -656,6 +661,9 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
   bot.root.userData = bot.root.userData || {};
   bot.root.userData.botAnimCtrl = ctrl;
   bot.root.userData.hasSkeletalCharacter = true;
+  if (typeof bot.root.userData.magRounds !== 'number') {
+    bot.root.userData.magRounds = magCapacityForBotWeapon(chosenWeapon);
+  }
 
   // Ensure Mixamo skeleton is never left with matrixAutoUpdate=false (T-pose lock).
   cloned.traverse((child) => {
@@ -666,11 +674,68 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
   bot.root.matrixAutoUpdate = true;
 }
 
+function magCapacityForBotWeapon(weaponId?: WeaponId | null): number {
+  if (weaponId === 'SNIPER_BOLT' || weaponId === 'SNIPER_TACTICAL') return 5;
+  if (weaponId === 'P50_PISTOL') return 12;
+  if (weaponId === 'SMG_45' || weaponId === 'SMG_MP5') return 30;
+  if (weaponId === 'L49_LMG') return 60;
+  return 30;
+}
+
+export function isBotReloading(bot: TacticalTargetEntity): boolean {
+  const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
+  return Boolean(ctrl && ctrl.reloadAnimTimer > 0);
+}
+
+export function triggerBotReloadAnimation(bot: TacticalTargetEntity): void {
+  const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
+  if (!ctrl || bot.isDown) return;
+  if (ctrl.reloadAnimTimer > 0) return;
+  const clip = ctrl.actions.RIFLE_RELOAD_3P?.getClip();
+  const dur = Math.max(1.15, Math.min(2.8, clip?.duration || 1.85));
+  ctrl.reloadAnimTimer = dur;
+  ctrl.fireAnimTimer = 0;
+  if (!ctrl.currentState.startsWith('RIFLE_DEATH')) {
+    transitionBotAnim(ctrl, 'RIFLE_RELOAD_3P', 0.08);
+  }
+}
+
+export function triggerBotJumpAnimation(bot: TacticalTargetEntity): void {
+  const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
+  if (!ctrl || bot.isDown) return;
+  if (ctrl.reloadAnimTimer > 0) return;
+  const clip = ctrl.actions.RIFLE_JUMP?.getClip();
+  const dur = Math.max(0.55, Math.min(1.35, clip?.duration || 0.85));
+  ctrl.jumpAnimTimer = dur;
+  if (
+    !ctrl.currentState.startsWith('RIFLE_DEATH') &&
+    ctrl.currentState !== 'RIFLE_THROW' &&
+    ctrl.currentState !== 'RIFLE_RELOAD_3P'
+  ) {
+    transitionBotAnim(ctrl, 'RIFLE_JUMP', 0.06);
+  }
+}
+
 export function triggerBotFireAnimation(bot: TacticalTargetEntity): void {
   const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
   if (!ctrl || bot.isDown) return;
+  if (ctrl.reloadAnimTimer > 0) return;
+
+  const yard = bot as YardBotEntity;
+  const cap = magCapacityForBotWeapon(yard.weaponId);
+  let mag =
+    typeof bot.root.userData.magRounds === 'number'
+      ? bot.root.userData.magRounds
+      : cap;
+  if (mag <= 0) {
+    triggerBotReloadAnimation(bot);
+    return;
+  }
+  mag -= 1;
+  bot.root.userData.magRounds = mag;
+
   // Soft ammo pool for Fuzileiro ally-need indicators.
-  if ((bot as YardBotEntity).isAlly) {
+  if (yard.isAlly) {
     const cur =
       typeof bot.root.userData.ammoReserve === 'number'
         ? bot.root.userData.ammoReserve
@@ -682,9 +747,16 @@ export function triggerBotFireAnimation(bot: TacticalTargetEntity): void {
   if (
     ctrl.currentState !== 'RIFLE_DEATH' &&
     ctrl.currentState !== 'RIFLE_THROW' &&
+    ctrl.currentState !== 'RIFLE_JUMP' &&
+    ctrl.currentState !== 'RIFLE_RELOAD_3P' &&
     ctrl.currentState !== 'RIFLE_FIRE'
   ) {
     transitionBotAnim(ctrl, 'RIFLE_FIRE', 0.04);
+  }
+
+  // Empty after this shot → start reload so RIFLE_RELOAD_3P can play.
+  if (mag <= 0) {
+    triggerBotReloadAnimation(bot);
   }
 }
 
@@ -782,9 +854,17 @@ export function updateAllBotCharacters(
     }
     t.pivotGroup.rotation.x = 0;
 
+    // Nav hop pulse → jump one-shot.
+    if (t.root.userData.botJumpPulse) {
+      t.root.userData.botJumpPulse = false;
+      triggerBotJumpAnimation(t);
+    }
+
     const dx = t.root.position.x - ctrl.prevX;
+    const dy = t.root.position.y - ctrl.prevY;
     const dz = t.root.position.z - ctrl.prevZ;
     ctrl.prevX = t.root.position.x;
+    ctrl.prevY = t.root.position.y;
     ctrl.prevZ = t.root.position.z;
     const rawSpeed = dt > 0.0001 ? Math.hypot(dx, dz) / dt : 0;
     ctrl.smoothedSpeed = THREE.MathUtils.damp(ctrl.smoothedSpeed, rawSpeed, 11, dt);
@@ -800,7 +880,40 @@ export function updateAllBotCharacters(
     const wantTacticalCrouch =
       speed <= 0.18 && (ctrl.crouchStance || (t.isTelegraphing && Math.sin(ctrl.tacticalTimer * 1.4) > 0.45));
 
-    if (ctrl.throwAnimTimer > 0) {
+    const nav = t.root.userData?.navData as { verticalVel?: number } | undefined;
+    const airborne =
+      (nav?.verticalVel != null && nav.verticalVel > 0.45) ||
+      (dt > 0.0001 && dy / dt > 1.2);
+
+    if (ctrl.reloadAnimTimer > 0) {
+      ctrl.reloadAnimTimer -= dt;
+      if (ctrl.reloadAnimTimer <= 0) {
+        ctrl.reloadAnimTimer = 0;
+        const cap = magCapacityForBotWeapon(t.weaponId);
+        t.root.userData.magRounds = cap;
+        if (t.isAlly) {
+          t.root.userData.ammoReserve = Math.max(
+            typeof t.root.userData.ammoReserve === 'number'
+              ? t.root.userData.ammoReserve
+              : 0,
+            40
+          );
+        }
+        transitionBotAnim(ctrl, t.isTelegraphing ? 'RIFLE_AIM' : 'RIFLE_IDLE', 0.12);
+      } else {
+        transitionBotAnim(ctrl, 'RIFLE_RELOAD_3P', 0.08);
+      }
+    } else if (ctrl.jumpAnimTimer > 0 || airborne) {
+      if (ctrl.jumpAnimTimer > 0) ctrl.jumpAnimTimer -= dt;
+      if (airborne && ctrl.jumpAnimTimer <= 0) {
+        triggerBotJumpAnimation(t);
+      } else if (ctrl.currentState !== 'RIFLE_JUMP' && ctrl.jumpAnimTimer > 0) {
+        transitionBotAnim(ctrl, 'RIFLE_JUMP', 0.06);
+      }
+      if (ctrl.jumpAnimTimer <= 0 && !airborne) {
+        ctrl.jumpAnimTimer = 0;
+      }
+    } else if (ctrl.throwAnimTimer > 0) {
       ctrl.throwAnimTimer -= dt;
     } else if (ctrl.hitReactTimer > 0) {
       ctrl.hitReactTimer -= dt;

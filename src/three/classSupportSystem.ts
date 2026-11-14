@@ -299,6 +299,8 @@ export function drainAllyAmmoReserve(bot: YardBotEntity, rounds = 1): void {
 function resupplyAllyAmmo(bot: YardBotEntity): void {
   bot.root.userData.ammoResuppliedAt = performance.now();
   bot.root.userData.ammoReserve = ALLY_AMMO_FULL;
+  // Refill soft magazine so bot exits empty→reload loop after crate use.
+  bot.root.userData.magRounds = 30;
 }
 
 function healTarget(engine: any, bot: YardBotEntity | null, amount: number): void {

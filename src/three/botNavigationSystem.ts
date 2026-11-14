@@ -5,7 +5,12 @@ import { playBulletSnapAndWhizz, playSpatialBotGunshot } from '../audio/spatialC
 import { triggerTacticalRadioCallout } from '../audio/tacticalImmersionAudio';
 import { DrillMode, WeaponId } from '../types/game';
 import { BallisticsFXPool } from './ballisticsPool';
-import { triggerBotFireAnimation, triggerBotGrenadeAnimation, triggerBotHitAnimation } from './botCharacterSystem';
+import {
+  isBotReloading,
+  triggerBotFireAnimation,
+  triggerBotGrenadeAnimation,
+  triggerBotHitAnimation,
+} from './botCharacterSystem';
 import { BotNavData, checkBotLineOfSight, getMapRoutes, getWaypointTowardPlantedSite, isTargetInFieldOfView, moveBotWithPhysics } from './botNavigationRoutes';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { TacticalGrenadeSystem } from './grenadeSystem';
@@ -30,6 +35,7 @@ function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): Bo
   if (existing && existing.waypoints && existing.waypoints.length > 0) {
     if (existing.acquireTimer == null) existing.acquireTimer = 0;
     if (existing.flankTimer == null) existing.flankTimer = 0;
+    if (existing.jumpCooldown == null) existing.jumpCooldown = 0;
     return existing;
   }
 
@@ -46,7 +52,7 @@ function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): Bo
     grenadeCooldown: 14.0 + Math.random() * 12.0, grenadesLeft: index % 3 === 0 ? 1 : 0,
     coverTimer: 0, peekTimer: 0, coverSide: Math.random() > 0.5 ? 1 : -1,
     strafeTimer: 0, strafeDir: Math.random() > 0.5 ? 1 : -1, stuckTimer: 0,
-    avoidAngle: 0, avoidTimer: 0, verticalVel: 0, plantOrDefuseTimer: 0, lastKeypadDigit: -1,
+    avoidAngle: 0, avoidTimer: 0, verticalVel: 0, jumpCooldown: 0, plantOrDefuseTimer: 0, lastKeypadDigit: -1,
     visionRange: 40.0, fieldOfView: 130.0,
     acquireTimer: 0, flankTimer: 0,
   };
@@ -480,7 +486,7 @@ export function updateSmartBotNavigation(
       visibleEnemyPos &&
       (nav.acquireTimer || 0) >= (isVisibleTargetPlayer ? 0.22 : 0.08);
 
-    if (canFireAtVisible && visibleEnemyPos) {
+    if (canFireAtVisible && visibleEnemyPos && !isBotReloading(bot)) {
       if (nav.burstShotsLeft <= 0 && nav.fireCooldown <= 0) {
         nav.burstShotsLeft = isSniper ? 1 : 2 + Math.floor(Math.random() * 3);
         nav.burstShotTimer = 0;
@@ -492,7 +498,12 @@ export function updateSmartBotNavigation(
         if (nav.burstShotTimer <= 0) {
           nav.burstShotsLeft -= 1;
           nav.burstShotTimer = isSniper ? 0.52 : 0.1 + Math.random() * 0.025;
+          // Empty mag starts RIFLE_RELOAD_3P inside triggerBotFireAnimation.
           triggerBotFireAnimation(bot);
+          if (isBotReloading(bot)) {
+            nav.burstShotsLeft = 0;
+            continue;
+          }
           _botHead.set(bPos.x, bPos.y + 1.45, bPos.z);
           const spread = isSniper ? 0.12 : 0.32;
           _targetEye.set(

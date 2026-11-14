@@ -18,6 +18,8 @@ export type BotAnimState =
   | 'RIFLE_CROUCH'
   | 'RIFLE_CROUCH_WALK'
   | 'RIFLE_HIT'
+  | 'RIFLE_JUMP'
+  | 'RIFLE_RELOAD_3P'
   | 'RIFLE_DEATH'
   | 'RIFLE_DEATH_HEADSHOT'
   | 'RIFLE_DEATH_BACK'
@@ -36,11 +38,14 @@ export interface BotAnimController {
   actions: Record<BotAnimState, THREE.AnimationAction>;
   currentState: BotAnimState;
   prevX: number;
+  prevY: number;
   prevZ: number;
   smoothedSpeed: number;
   hitReactTimer: number;
   fireAnimTimer: number;
   throwAnimTimer: number;
+  jumpAnimTimer: number;
+  reloadAnimTimer: number;
   deathElapsed: number;
   lodAccumDt: number;
   tacticalTimer: number;
@@ -188,6 +193,8 @@ export function buildProRiflePackClips(
   const fire = byName.get('RIFLE_FIRE') || buildDerivedImpulseClip(aim, 'RIFLE_FIRE', 0.2, 0.08, false);
   const hit = byName.get('RIFLE_HIT') || buildDerivedImpulseClip(aim, 'RIFLE_HIT', 0.28, 0.16, false);
   const throwClip = byName.get('RIFLE_THROW') || buildDerivedImpulseClip(aim, 'RIFLE_THROW', 0.58, 0.1, true);
+  const jump = byName.get('RIFLE_JUMP') || aim;
+  const reload3p = byName.get('RIFLE_RELOAD_3P') || aim;
 
   return {
     RIFLE_IDLE: idle,
@@ -205,6 +212,8 @@ export function buildProRiflePackClips(
     RIFLE_FIRE: fire,
     RIFLE_THROW: throwClip,
     RIFLE_HIT: hit,
+    RIFLE_JUMP: jump,
+    RIFLE_RELOAD_3P: reload3p,
     RIFLE_DEATH: death,
     RIFLE_DEATH_HEADSHOT: deathHeadshot,
     RIFLE_DEATH_BACK: deathBack,
@@ -249,6 +258,8 @@ export function transitionBotAnim(
     nextState === 'RIFLE_FIRE' ||
     nextState === 'RIFLE_THROW' ||
     nextState === 'RIFLE_HIT' ||
+    nextState === 'RIFLE_JUMP' ||
+    nextState === 'RIFLE_RELOAD_3P' ||
     nextState.startsWith('RIFLE_DEATH');
 
   if (isOneShot || !nextAction.isRunning()) {
