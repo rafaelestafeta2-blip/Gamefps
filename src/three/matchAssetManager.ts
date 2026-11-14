@@ -146,7 +146,7 @@ export async function prepareMatchArena(
       `COLISORES BOX3 (${assaultLevelData.collider.boundingBoxes.length}) E ${assaultLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
     );
   } else if (isFreeRange) {
-    reportProgress(12, 'BAIXANDO ARENA 3D STANDER_TIRO.GLB VIA GLTFLOADER + DRACO...');
+    reportProgress(12, 'BAIXANDO ARENA 3D SHOOTING_RANGE_2K.GLB VIA GLTFLOADER + DRACO...');
     await loadStanderTiroMapGeometry(
       standerTiroLevelData as StanderTiroBundle,
       isSoftwareGl,

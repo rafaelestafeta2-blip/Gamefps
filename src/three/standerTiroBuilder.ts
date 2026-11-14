@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { WeaponId } from '../types/game';
 import {
   ColliderBox,
   TacticalLevelData,
@@ -9,15 +8,17 @@ import {
 } from './levelBuilder';
 import { populateStanderTiroTargetsAndArmory } from './paperTargetBuilder';
 import { buildStanderObstacleHall } from './standerObstacleHallBuilder';
-import { applyDarkTacticalMaterialsToStanderGlb } from './standerRangeTextures';
 
-const STANDER_TIRO_LOCAL_URL = '/models/maps/stander_tiro.glb';
-const STANDER_TIRO_FALLBACK_URL =
-  'https://raw.githubusercontent.com/rafaelestafeta2-blip/Gamesfps/8ba3c98c7d38867616940c3f9bc3ac39e73988e6/Mapas/ImageToStl.com_Stander_tiro.glb';
+/** Optimized V5 FAB shooting range (2K JPEG + Draco). */
+const STANDER_TIRO_LOCAL_URL = '/models/maps/shooting_range_2k.glb';
 const DRACO_DECODER_PATH =
   'https://www.gstatic.com/draco/versioned/decoders/1.5.7/';
 
-export const STANDER_TIRO_SPAWN = new THREE.Vector3(-6.2, 0, 2.8);
+/** Lift so floor planes (~y=-1.16) sit at world y=0. */
+export const STANDER_FLOOR_Y_LIFT = 1.164;
+
+/** Spawn in lane 3 booth, facing downrange (-Z). */
+export const STANDER_TIRO_SPAWN = new THREE.Vector3(2.1, 0, -4.15);
 export const STANDER_TIRO_SPAWN_YAW = 0;
 
 export interface StanderTiroBundle extends TacticalLevelData {
@@ -26,45 +27,8 @@ export interface StanderTiroBundle extends TacticalLevelData {
 }
 
 /**
- * Widens the existing doorway cutout in `Range_44` at Z = -1.37m from X = [-8.03, -7.08]
- * to X = [-8.75, -7.08] so the player can walk/sprint smoothly into the Obstacle Hall.
- */
-function widenStanderGlbSideDoorway(mesh: THREE.Mesh): void {
-  const geom = mesh.geometry;
-  const posAttr = geom?.attributes?.position as THREE.BufferAttribute | undefined;
-  if (!posAttr) return;
-
-  mesh.updateWorldMatrix(true, false);
-  const worldMat = mesh.matrixWorld;
-  const invWorldMat = worldMat.clone().invert();
-  const v = new THREE.Vector3();
-
-  let modified = false;
-  for (let i = 0; i < posAttr.count; i++) {
-    v.fromBufferAttribute(posAttr, i).applyMatrix4(worldMat);
-    if (
-      v.z < -1.1 &&
-      v.z > -1.65 &&
-      v.y < 2.22 &&
-      v.x >= -8.72 &&
-      v.x <= -7.85
-    ) {
-      v.x = -8.75;
-      v.applyMatrix4(invWorldMat);
-      posAttr.setXYZ(i, v.x, v.y, v.z);
-      modified = true;
-    }
-  }
-
-  if (modified) {
-    posAttr.needsUpdate = true;
-    geom.computeVertexNormals();
-  }
-}
-
-/**
- * Builds the Stander de Tiro (`ImageToStl.com_Stander_tiro.glb`) level bundle,
- * optimized for 60 FPS mobile performance (zero PointLight shader loops, shared geometry).
+ * Builds FREE_RANGE around the optimized `shooting_range_2k.glb` footprint:
+ * X ≈ [-4.1, 12.3], Z ≈ [-37.7, 1.9] after floor lift.
  */
 export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle {
   const levelGroup = new THREE.Group();
@@ -78,8 +42,8 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
   const targets: TacticalTargetEntity[] = [];
   const shootableMeshes: THREE.Mesh[] = [];
   const wallStandPositions: THREE.Vector3[] = [
-    new THREE.Vector3(-6.2, 0, 6.4),
-    new THREE.Vector3(-11.4, 0, 3.0),
+    new THREE.Vector3(0.4, 0, -3.6),
+    new THREE.Vector3(5.6, 0, -3.6),
   ];
 
   const addCollider = (
@@ -93,58 +57,60 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
     colliders.push({ minX, maxX, minY, maxY, minZ, maxZ });
   };
 
-  // 1. Room Perimeter Walls & Firing Line Counter Colliders
-  addCollider(-12.2, -8.75, 0, 3.2, -1.65, -1.22);
-  addCollider(-7.0, 26.2, 0, 3.2, -1.65, -1.22);
+  // Perimeter walls (left / right / back / downrange backstop).
+  addCollider(-4.2, -3.85, 0, 4.2, -37.8, 1.95);
+  addCollider(12.0, 12.35, 0, 4.2, -37.8, 1.95);
+  addCollider(-4.2, 12.35, 0, 4.2, 1.72, 2.05);
+  addCollider(-4.2, 12.35, 0, 4.2, -37.85, -36.65);
 
-  addCollider(-12.2, 26.2, 0, 3.2, 6.68, 7.1);
-  addCollider(-12.2, -11.72, 0, 3.2, -1.6, 7.0);
-  addCollider(25.5, 26.2, 0, 3.2, -1.6, 7.0);
+  // Side wall segment with exit doorway gap at z ≈ [-2.56, -1.33].
+  addCollider(-4.2, -3.85, 0, 4.2, -37.8, -2.6);
+  addCollider(-4.2, -3.85, 0, 4.2, -1.3, 1.95);
+  // Door lintel
+  addCollider(-4.2, -3.85, 2.35, 4.2, -2.6, -1.3);
 
-  // Firing Line Counter across the 5 Shooting Booths (X = -4.52 to -4.18)
-  addCollider(-4.52, -4.18, 0, 2.6, -1.35, 6.8);
-
-  // 6 Thin Booth Dividers
-  const boothDividerZs = [-0.97, 0.53, 2.02, 3.52, 5.02, 6.54];
-  boothDividerZs.forEach((zPos) => {
-    addCollider(-5.08, -4.2, 0, 2.4, zPos - 0.05, zPos + 0.05);
+  // Booth divider walls (7 lanes / 8 dividers).
+  const boothXs = [
+    -2.21, -0.46, 1.29, 3.04, 4.79, 6.54, 8.29, 9.99,
+  ];
+  boothXs.forEach((x) => {
+    addCollider(x - 0.09, x + 0.09, 0, 2.2, -7.2, -4.7);
   });
 
-  // Prep Room Tables & Glass Partition
-  addCollider(-8.88, -7.9, 0, 0.85, 1.48, 3.94);
-  addCollider(-8.88, -7.9, 0, 0.85, 4.15, 6.6);
-  addCollider(-9.08, -8.92, 0, 2.3, 1.32, 4.12);
-  addCollider(-10.1, -9.1, 0, 0.85, 1.42, 3.9);
+  // Firing-line counter / shooting place front edge.
+  addCollider(-3.1, 10.2, 0, 1.15, -4.85, -4.55);
 
-  // Invisible raycast floor & backstop
+  // Prep-room wooden table.
+  addCollider(-3.3, 1.9, 0, 0.9, 0.3, 1.5);
+
+  // Weapon display wall (thin).
+  addCollider(2.1, 7.4, 0, 2.4, 1.68, 1.82);
+
+  // Invisible raycast floor covering the range + booths.
   const floorRayMesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(40, 10),
+    new THREE.PlaneGeometry(18, 42),
     new THREE.MeshBasicMaterial({ visible: false })
   );
   floorRayMesh.rotation.x = -Math.PI / 2;
-  floorRayMesh.position.set(7.0, 0.01, 2.75);
+  floorRayMesh.position.set(4.0, 0.01, -18.0);
   floorRayMesh.userData.isEnvironment = true;
   levelGroup.add(floorRayMesh);
   shootableMeshes.push(floorRayMesh);
 
-  // 2. Iluminação Natural Equilibrada para Valorizar as Texturas e Vidros Originais do GLB
   const rangeHemiFill = new THREE.HemisphereLight(0xf8fafc, 0x64748b, 1.05);
-  rangeHemiFill.position.set(0, 3.5, 0);
+  rangeHemiFill.position.set(4, 3.5, -10);
   levelGroup.add(rangeHemiFill);
 
-  // Luz principal de teto sobre as baias e bancadas de madeira/vidro
   const overheadLight = new THREE.DirectionalLight(0xfffbeb, 0.95);
-  overheadLight.position.set(-6, 3.8, 3.0);
+  overheadLight.position.set(4, 6.5, -2);
   overheadLight.castShadow = false;
   levelGroup.add(overheadLight);
 
-  // Iluminação uniforme ao longo das raias até o fundo do estande
   const downrangeLight = new THREE.DirectionalLight(0xe2e8f0, 0.85);
-  downrangeLight.position.set(12, 3.8, 3.0);
+  downrangeLight.position.set(4, 6.0, -28);
   downrangeLight.castShadow = false;
   levelGroup.add(downrangeLight);
 
-  // 3. Populate Hanging Paper Bullseye Targets (Static + Moving) & Quick Armory Rack
   populateStanderTiroTargetsAndArmory(
     levelGroup,
     targets,
@@ -152,7 +118,6 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
     isSoftwareGl
   );
 
-  // 4. Build Connected Obstacle Course Hall (Jump, Crouch, Slide) via Left Doorway
   buildStanderObstacleHall(
     levelGroup,
     colliders,
@@ -173,8 +138,7 @@ export function buildStanderTiroLevel(isSoftwareGl: boolean): StanderTiroBundle 
 }
 
 /**
- * Loads `/models/maps/stander_tiro.glb` (with GitHub raw fallback), hides the 13,860-vertex
- * static ceiling rails (`targ1_46`), applies shared fast tactical materials, and tags weapon plaques.
+ * Loads optimized `shooting_range_2k.glb` (Draco). Meter-scale; lift floor to y=0.
  */
 export async function loadStanderTiroMapGeometry(
   bundle: StanderTiroBundle,
@@ -203,59 +167,37 @@ export async function loadStanderTiroMapGeometry(
   let gltfScene: THREE.Group;
   try {
     gltfScene = await loadFromUrl(STANDER_TIRO_LOCAL_URL);
-  } catch {
-    gltfScene = await loadFromUrl(STANDER_TIRO_FALLBACK_URL);
   } finally {
     dracoLoader.dispose();
   }
 
-  gltfScene.scale.setScalar(100);
-  gltfScene.rotation.y = Math.PI;
-  gltfScene.position.set(4.9, -0.19, -0.26);
+  gltfScene.scale.setScalar(1);
+  gltfScene.rotation.set(0, 0, 0);
+  gltfScene.position.set(0, STANDER_FLOOR_Y_LIFT, 0);
   gltfScene.updateMatrixWorld(true);
-
-  applyDarkTacticalMaterialsToStanderGlb(gltfScene);
-
-  const wallPlaqueWeapons: Record<string, WeaponId> = {
-    WeaponImage01_4__1__2: 'AK47_RIFLE',
-    WeaponImage01_3__1__7: 'SNIPER_BOLT',
-    WeaponImage01_2_4: 'M4_CARBINE',
-    WeaponImage01_1_36: 'CARBINE_AR',
-    WeaponImage01_3_50: 'SNIPER_TACTICAL',
-    WeaponImage01_5_8: 'SMG_45',
-    WeaponImage01_5__1__38: 'L49_LMG',
-    WeaponImage01_7_28: 'P50_PISTOL',
-    WeaponImage01_6_37: 'KNIFE_TACTICAL',
-    WeaponImage01_7__1__32: 'P50_PISTOL',
-    WeaponImage01_6__1__6: 'KNIFE_TACTICAL',
-  };
 
   gltfScene.traverse((child) => {
     if (!(child as THREE.Mesh).isMesh) return;
     const mesh = child as THREE.Mesh;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
+    mesh.frustumCulled = true;
 
-    // Hide interior doors (`Door02*`) and the heavy 13,860-vertex static target rail mesh (`targ1_46`)
-    if (mesh.name.startsWith('Door02') || mesh.name.startsWith('targ1')) {
-      mesh.visible = false;
-      return;
-    }
-
-    if (mesh.name === 'Range_44') {
-      widenStanderGlbSideDoorway(mesh);
-    }
-
-    const mappedWeapon = wallPlaqueWeapons[mesh.name];
-    if (mappedWeapon) {
-      mesh.userData.wallWeaponId = mappedWeapon;
-      bundle.shootableMeshes.push(mesh);
-    } else if (
-      mesh.name.startsWith('Range') ||
-      mesh.name.startsWith('StandPlace') ||
-      mesh.name.startsWith('Borders')
+    const name = mesh.name || '';
+    // Built-in paper/rail targets stay visual; gameplay uses paperTargetBuilder hits.
+    if (
+      name.includes('Floor') ||
+      name.includes('Wall') ||
+      name.includes('BulletTrap') ||
+      name.includes('ShootingPlace') ||
+      name.includes('Concrete')
     ) {
       mesh.userData.isEnvironment = true;
+      bundle.shootableMeshes.push(mesh);
+    }
+
+    if (name.includes('WeaponWall')) {
+      mesh.userData.wallWeaponId = 'M4_CARBINE';
       bundle.shootableMeshes.push(mesh);
     }
   });

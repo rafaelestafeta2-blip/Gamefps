@@ -57,8 +57,8 @@ function createInstructionSign(
 
 /**
  * Builds the connected "Salão Tático de Obstáculos (Pular, Agachar, Deslizar)"
- * accessed through the open doorway at X = [-8.75, -7.00], Z = -1.37m.
- * Optimized with shared unit BoxGeometry, Lambert materials, and zero PointLights.
+ * accessed through the west exit doorway of shooting_range_2k (x≈-4.0, z≈-1.9).
+ * Hall content is offset west of the range left wall.
  */
 export function buildStanderObstacleHall(
   levelGroup: THREE.Group,
@@ -69,6 +69,10 @@ export function buildStanderObstacleHall(
 ): void {
   const hallGroup = new THREE.Group();
   hallGroup.name = 'StanderObstacleHall';
+  // Shift old hall layout so the portal aligns with the new west exit.
+  const hallOffsetX = 4.0;
+  const hallOffsetZ = -0.55;
+  hallGroup.position.set(hallOffsetX, 0, hallOffsetZ);
   levelGroup.add(hallGroup);
 
   if (!sharedUnitBoxGeo) {
@@ -112,7 +116,14 @@ export function buildStanderObstacleHall(
     minZ: number,
     maxZ: number
   ) => {
-    colliders.push({ minX, maxX, minY, maxY, minZ, maxZ });
+    colliders.push({
+      minX: minX + hallOffsetX,
+      maxX: maxX + hallOffsetX,
+      minY,
+      maxY,
+      minZ: minZ + hallOffsetZ,
+      maxZ: maxZ + hallOffsetZ,
+    });
   };
 
   const addEnvBox = (

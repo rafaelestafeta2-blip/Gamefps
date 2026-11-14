@@ -235,12 +235,14 @@ export function buildStanderArmoryWallRack(
     const col = idx % 3;
     const row = Math.floor(idx / 3);
 
-    const posX = -7.1 + col * 0.72;
-    const posY = 1.85 - row * 0.34;
-    const posZ = 6.64;
+    // Mount on the GLB weapon wall (z ≈ 1.72), facing into the prep room (-Z).
+    const posX = 2.4 + col * 0.95;
+    const posY = 1.55 - row * 0.38;
+    const posZ = 1.62;
 
     const slotGroup = new THREE.Group();
     slotGroup.position.set(posX, posY, posZ);
+    slotGroup.rotation.y = Math.PI; // face into prep room (-Z)
     rackGroup.add(slotGroup);
 
     // 1. Placa de fundo metálica de suporte
