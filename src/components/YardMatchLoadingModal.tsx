@@ -172,12 +172,15 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   const isDust2 = mode === 'DUST2_BOMB_5V5';
   const isAssault = mode === 'ASSAULT_BOMB_5V5';
   const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
+  const isHangar = mode === 'HANGAR_BOMB_5V5';
   const mapCodeLabel =
     mode === 'DUST2_BOMB_5V5'
       ? 'DE_DUST2'
       : mode === 'INDUSTRIA_BOMB_5V5'
         ? 'INDUSTRIA'
-        : mode === 'ASSAULT_BOMB_5V5'
+        : mode === 'HANGAR_BOMB_5V5'
+          ? 'HANGAR'
+          : mode === 'ASSAULT_BOMB_5V5'
           ? 'CS_ASSAULT'
           : mode === 'FREE_RANGE'
             ? 'ESTANDE DE TIRO'
@@ -186,7 +189,7 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
               : mode === 'TACTICAL_WAVE'
                 ? 'CONTRA IA'
                 : 'YARD';
-  const bgScreenshot = isDust2 ? DUST2_BG_SCREENSHOT : isAssault || isIndustria ? ASSAULT_BG_SCREENSHOT : YARD_BG_SCREENSHOT;
+  const bgScreenshot = isDust2 ? DUST2_BG_SCREENSHOT : isAssault || isIndustria || isHangar ? ASSAULT_BG_SCREENSHOT : YARD_BG_SCREENSHOT;
   const isOnline = isOnlineMatchActive();
 
   const finishLoading = () => {

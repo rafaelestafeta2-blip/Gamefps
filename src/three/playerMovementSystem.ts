@@ -57,7 +57,9 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
             ? engine.assaultLevelData.collider
             : engine.state.drillMode === 'INDUSTRIA_BOMB_5V5'
               ? engine.industriaLevelData.collider
-              : null;
+              : engine.state.drillMode === 'HANGAR_BOMB_5V5'
+                ? engine.hangarLevelData.collider
+                : null;
 
       const activeColliders =
         engine.state.drillMode === 'YARD_BOMB_5V5'
@@ -106,6 +108,12 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
       );
     } else if (engine.state.drillMode === 'INDUSTRIA_BOMB_5V5') {
       lowCeilingAbove = engine.industriaLevelData.collider.hasLowCeiling(
+        engine.playerPos.x,
+        engine.playerPos.y,
+        engine.playerPos.z
+      );
+    } else if (engine.state.drillMode === 'HANGAR_BOMB_5V5') {
+      lowCeilingAbove = engine.hangarLevelData.collider.hasLowCeiling(
         engine.playerPos.x,
         engine.playerPos.y,
         engine.playerPos.z
@@ -298,13 +306,16 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     const isDust2 = engine.state.drillMode === 'DUST2_BOMB_5V5';
     const isAssault = engine.state.drillMode === 'ASSAULT_BOMB_5V5';
     const isIndustria = engine.state.drillMode === 'INDUSTRIA_BOMB_5V5';
+    const isHangar = engine.state.drillMode === 'HANGAR_BOMB_5V5';
     const activeGlbCollider = isDust2
       ? engine.dust2LevelData.collider
       : isAssault
         ? engine.assaultLevelData.collider
         : isIndustria
           ? engine.industriaLevelData.collider
-          : null;
+          : isHangar
+            ? engine.hangarLevelData.collider
+            : null;
 
     const activeLadder = activeGlbCollider
       ? activeGlbCollider.getActiveLadder(

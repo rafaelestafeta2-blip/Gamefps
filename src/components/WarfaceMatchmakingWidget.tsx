@@ -92,7 +92,9 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
       ? 'CS_ASSAULT'
       : selectedMode === 'INDUSTRIA_BOMB_5V5'
         ? 'INDUSTRIA'
-        : 'DE_DUST2';
+        : selectedMode === 'HANGAR_BOMB_5V5'
+          ? 'HANGAR'
+          : 'DE_DUST2';
 
   const handleCancel = async () => {
     soundEngine.playMenuSelect();
@@ -153,7 +155,9 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
                     ? 'ASSAULT_BOMB_5V5'
                     : selectedMode === 'ASSAULT_BOMB_5V5'
                       ? 'INDUSTRIA_BOMB_5V5'
-                      : 'DUST2_BOMB_5V5'
+                      : selectedMode === 'INDUSTRIA_BOMB_5V5'
+                        ? 'HANGAR_BOMB_5V5'
+                        : 'DUST2_BOMB_5V5'
                 );
               }}
               title="Alternar mapa da fila"

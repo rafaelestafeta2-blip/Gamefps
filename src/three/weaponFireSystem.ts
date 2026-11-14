@@ -158,7 +158,9 @@ export function executeSingleShot(engine: any): void {
             ? engine.assaultLevelData.collider
             : engine.state.drillMode === 'INDUSTRIA_BOMB_5V5'
               ? engine.industriaLevelData.collider
-              : null;
+              : engine.state.drillMode === 'HANGAR_BOMB_5V5'
+                ? engine.hangarLevelData.collider
+                : null;
       const hit = raycastCombatShot(
         engine.raycaster,
         engine.shootableMeshes,

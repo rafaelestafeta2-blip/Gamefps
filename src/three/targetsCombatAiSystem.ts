@@ -86,7 +86,8 @@ export function updateTargetsAndCombatAI(engine: any, dt: number): void {
       engine.state.drillMode === 'YARD_BOMB_5V5' ||
       engine.state.drillMode === 'DUST2_BOMB_5V5' ||
       engine.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-      engine.state.drillMode === 'INDUSTRIA_BOMB_5V5';
+      engine.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      engine.state.drillMode === 'HANGAR_BOMB_5V5';
 
     if (engine.state.drillMode !== 'FREE_RANGE' && engine.targets.length > 0) {
       if (isOnlineMatchActive()) {
@@ -253,7 +254,9 @@ export function updateTargetsAndCombatAI(engine: any, dt: number): void {
             ? engine.assaultLevelData.collider
             : engine.state.drillMode === 'INDUSTRIA_BOMB_5V5'
               ? engine.industriaLevelData.collider
-              : null;
+              : engine.state.drillMode === 'HANGAR_BOMB_5V5'
+                ? engine.hangarLevelData.collider
+                : null;
       updateSpatialBotFootstepsAndHeartbeat(
         engine.targets,
         _worldPos,

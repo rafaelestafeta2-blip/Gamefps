@@ -40,8 +40,9 @@ export class TacticalSkySystem {
     const isDust2 = mode === 'DUST2_BOMB_5V5';
     const isAssault = mode === 'ASSAULT_BOMB_5V5';
     const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
+    const isHangar = mode === 'HANGAR_BOMB_5V5';
     const isYard = mode === 'YARD_BOMB_5V5';
-    this.isOutdoor = isDust2 || isAssault || isIndustria || isYard;
+    this.isOutdoor = isDust2 || isAssault || isIndustria || isHangar || isYard;
 
     this.sky.visible = this.isOutdoor;
     const uniforms = this.sky.material.uniforms;
@@ -78,7 +79,7 @@ export class TacticalSkySystem {
       this.keyLight.color.setHex(0xfff7e6);
       this.keyLight.intensity = 2.15;
       this.updateShadowFrustum(68, 175);
-    } else if (isAssault || isIndustria || isYard) {
+    } else if (isAssault || isIndustria || isHangar || isYard) {
       // Elevação solar de 38° e azimute de 52° para mapas urbanos industriais
       const phi = THREE.MathUtils.degToRad(90 - 38);
       const theta = THREE.MathUtils.degToRad(52);
@@ -97,27 +98,27 @@ export class TacticalSkySystem {
       if (uniforms.cloudDensity) uniforms.cloudDensity.value = 0.5;
       if (uniforms.cloudElevation) uniforms.cloudElevation.value = 0.48;
 
-      const industrialSky = isAssault || isIndustria;
+      const industrialSky = isAssault || isIndustria || isHangar;
       this.outdoorFallbackBg.setHex(industrialSky ? 0x1e293b : 0xcbd5e1);
       this.scene.background = this.outdoorFallbackBg;
       this.scene.fog = fogEnabled
         ? new THREE.FogExp2(
             industrialSky ? 0x1e293b : 0xcbd5e1,
-            isIndustria ? 0.0009 : isAssault ? 0.0011 : 0.0048
+            isHangar ? 0.0014 : isIndustria ? 0.0009 : isAssault ? 0.0011 : 0.0048
           )
         : null;
 
       this.keyLightTarget.position.set(
-        isIndustria ? 20 : isAssault ? -18 : 0,
-        isIndustria ? 2 : 0,
-        isIndustria ? 0 : isAssault ? 18 : 0
+        isHangar ? 0 : isIndustria ? 20 : isAssault ? -18 : 0,
+        isHangar ? 4 : isIndustria ? 2 : 0,
+        isHangar ? 0 : isIndustria ? 0 : isAssault ? 18 : 0
       );
       this.keyLight.position
         .copy(this.keyLightTarget.position)
         .addScaledVector(this.sunDirection, 80);
       this.keyLight.color.setHex(0xfffbeb);
       this.keyLight.intensity = industrialSky ? 1.55 : 1.95;
-      this.updateShadowFrustum(isIndustria ? 90 : isAssault ? 65 : 52, 165);
+      this.updateShadowFrustum(isHangar ? 55 : isIndustria ? 90 : isAssault ? 65 : 52, 165);
     } else {
       this.indoorBgColor.setHex(0x070a10);
       this.scene.background = this.indoorBgColor;

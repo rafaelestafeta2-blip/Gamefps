@@ -255,7 +255,8 @@ export function updateSmartBotNavigation(
     mode === 'YARD_BOMB_5V5' ||
     mode === 'DUST2_BOMB_5V5' ||
     mode === 'ASSAULT_BOMB_5V5' ||
-    mode === 'INDUSTRIA_BOMB_5V5';
+    mode === 'INDUSTRIA_BOMB_5V5' ||
+    mode === 'HANGAR_BOMB_5V5';
   const isC4Planted = isBombMode && yardBomb.info.bombStatus === 'PLANTED';
   const plantedSite: 'A' | 'B' = yardBomb.info.plantedSite === 'B' ? 'B' : 'A';
   const plantedSitePos = plantedSite === 'A' ? routes.siteA : routes.siteB;

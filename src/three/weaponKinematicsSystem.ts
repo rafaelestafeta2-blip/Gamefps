@@ -69,6 +69,8 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
           ? engine.assaultLevelData.collider
           : engine.state.drillMode === 'INDUSTRIA_BOMB_5V5'
             ? engine.industriaLevelData.collider
+            : engine.state.drillMode === 'HANGAR_BOMB_5V5'
+              ? engine.hangarLevelData.collider
             : null;
 
     const aimInterval = getAimRaycastIntervalSec({

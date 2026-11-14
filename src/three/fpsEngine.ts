@@ -75,6 +75,12 @@ import {
   loadIndustriaMapGeometry,
 } from './industriaLevelBuilder';
 import {
+  HANGAR_ATTACKER_SPAWN,
+  HANGAR_SPAWN_YAW,
+  buildHangarLevel,
+  loadHangarMapGeometry,
+} from './hangarLevelBuilder';
+import {
   buildDust2Level,
   Dust2LevelBundle,
   DUST2_T_SPAWN,
@@ -215,6 +221,7 @@ export class TacticalFPSEngine {
   private dust2LevelData: Dust2LevelBundle;
   private assaultLevelData: Dust2LevelBundle;
   private industriaLevelData: Dust2LevelBundle;
+  private hangarLevelData: Dust2LevelBundle;
   private yardBombSystem: YardBombSystem;
   private colliders: ColliderBox[] = [];
   private targets: TacticalTargetEntity[] = [];
@@ -611,6 +618,10 @@ export class TacticalFPSEngine {
     this.industriaLevelData.levelGroup.visible = false;
     this.scene.add(this.industriaLevelData.levelGroup);
 
+    this.hangarLevelData = buildHangarLevel(this.isSoftwareGl);
+    this.hangarLevelData.levelGroup.visible = false;
+    this.scene.add(this.hangarLevelData.levelGroup);
+
     this.yardBombSystem = new YardBombSystem(this.scene);
 
     this.colliders = standerData.colliders;
@@ -713,6 +724,7 @@ export class TacticalFPSEngine {
       dust2LevelData: this.dust2LevelData,
       assaultLevelData: this.assaultLevelData,
       industriaLevelData: this.industriaLevelData,
+      hangarLevelData: this.hangarLevelData,
       skySystem: this.skySystem,
       grenadeSystem: this.grenadeSystem,
       onProgress,
@@ -732,6 +744,7 @@ export class TacticalFPSEngine {
       this.dust2LevelData,
       this.assaultLevelData,
       this.industriaLevelData,
+      this.hangarLevelData,
       this.grenadeSystem
     );
     this.colliders = this.standerTiroLevelData.colliders;
@@ -796,7 +809,8 @@ export class TacticalFPSEngine {
                 this.state.drillMode === 'YARD_BOMB_5V5' ||
                 this.state.drillMode === 'DUST2_BOMB_5V5' ||
                 this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-                this.state.drillMode === 'INDUSTRIA_BOMB_5V5';
+                this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5';
               if (bomb) {
                 const specBot = this.playerDeathTp.startSpectating(
                   this.targets as YardBotEntity[]
@@ -904,6 +918,9 @@ export class TacticalFPSEngine {
     if (this.state.drillMode === 'INDUSTRIA_BOMB_5V5') {
       return this.industriaLevelData.collider.getGroundHeight(x, y, z);
     }
+    if (this.state.drillMode === 'HANGAR_BOMB_5V5') {
+      return this.hangarLevelData.collider.getGroundHeight(x, y, z);
+    }
     let groundHeight = 0;
     const r = 0.15;
     for (let i = 0; i < this.colliders.length; i++) {
@@ -943,7 +960,8 @@ export class TacticalFPSEngine {
       (this.state.drillMode !== 'YARD_BOMB_5V5' &&
         this.state.drillMode !== 'DUST2_BOMB_5V5' &&
         this.state.drillMode !== 'ASSAULT_BOMB_5V5' &&
-        this.state.drillMode !== 'INDUSTRIA_BOMB_5V5')
+        this.state.drillMode !== 'INDUSTRIA_BOMB_5V5' &&
+        this.state.drillMode !== 'HANGAR_BOMB_5V5')
     ) {
       return;
     }
@@ -999,7 +1017,8 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'YARD_BOMB_5V5' ||
       this.state.drillMode === 'DUST2_BOMB_5V5' ||
       this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-      this.state.drillMode === 'INDUSTRIA_BOMB_5V5'
+      this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5'
     ) {
       this.yardBombSystem?.recordKillEvent(
         killerName,
@@ -1036,7 +1055,8 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'YARD_BOMB_5V5' ||
       this.state.drillMode === 'DUST2_BOMB_5V5' ||
       this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-      this.state.drillMode === 'INDUSTRIA_BOMB_5V5';
+      this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5';
     if (isBombMode) {
       markLocalPlayerDownForRevive(this as any);
     } else {
@@ -1616,7 +1636,8 @@ export class TacticalFPSEngine {
         this.state.drillMode === 'YARD_BOMB_5V5' ||
         this.state.drillMode === 'DUST2_BOMB_5V5' ||
         this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-        this.state.drillMode === 'INDUSTRIA_BOMB_5V5'
+        this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5'
       ) {
         const remaining = this.targets.filter(
           (t) =>
@@ -2016,8 +2037,9 @@ export class TacticalFPSEngine {
     const isDust2 = mode === 'DUST2_BOMB_5V5';
     const isAssault = mode === 'ASSAULT_BOMB_5V5';
     const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
+    const isHangar = mode === 'HANGAR_BOMB_5V5';
     const isFreeRange = mode === 'FREE_RANGE';
-    const isBombMode = isYard || isDust2 || isAssault || isIndustria;
+    const isBombMode = isYard || isDust2 || isAssault || isIndustria || isHangar;
 
     if (isFreeRange && !this.standerTiroLevelData.isLoaded) {
       void loadStanderTiroMapGeometry(
@@ -2032,6 +2054,7 @@ export class TacticalFPSEngine {
     this.dust2LevelData.levelGroup.visible = isDust2;
     this.assaultLevelData.levelGroup.visible = isAssault;
     this.industriaLevelData.levelGroup.visible = isIndustria;
+    this.hangarLevelData.levelGroup.visible = isHangar;
 
     const activeLevel = isDust2
       ? this.dust2LevelData
@@ -2039,11 +2062,13 @@ export class TacticalFPSEngine {
         ? this.assaultLevelData
         : isIndustria
           ? this.industriaLevelData
-          : isYard
-            ? this.yardLevelData
-            : isFreeRange
-              ? this.standerTiroLevelData
-              : this.facilityLevelData;
+          : isHangar
+            ? this.hangarLevelData
+            : isYard
+              ? this.yardLevelData
+              : isFreeRange
+                ? this.standerTiroLevelData
+                : this.facilityLevelData;
     this.colliders = activeLevel.colliders;
     this.targets = activeLevel.targets;
     this.targetMap.clear();
@@ -2155,6 +2180,40 @@ export class TacticalFPSEngine {
       this.yaw = INDUSTRIA_SPAWN_YAW;
       this.pitch = 0;
       this.yardBombSystem.resetRound('INDUSTRIA_BOMB_5V5', keepMatchScore);
+      this.state.yardBomb = { ...this.yardBombSystem.info };
+    } else if (isHangar) {
+      if (!this.hangarLevelData.isLoaded) {
+        void loadHangarMapGeometry(
+          this.hangarLevelData,
+          this.isSoftwareGl,
+          new THREE.LoadingManager()
+        ).then(() => {
+          if (this.state.drillMode === 'HANGAR_BOMB_5V5') {
+            this.playerPos.y = this.hangarLevelData.collider.getGroundHeight(
+              this.playerPos.x,
+              this.playerPos.y,
+              this.playerPos.z
+            );
+            this.playerVel.y = 0;
+            this.isGrounded = true;
+          }
+        });
+      }
+      const startY = this.hangarLevelData.collider.ready
+        ? this.hangarLevelData.collider.getGroundHeight(
+            HANGAR_ATTACKER_SPAWN.x,
+            HANGAR_ATTACKER_SPAWN.y,
+            HANGAR_ATTACKER_SPAWN.z
+          )
+        : HANGAR_ATTACKER_SPAWN.y;
+      this.playerPos.set(
+        HANGAR_ATTACKER_SPAWN.x,
+        startY,
+        HANGAR_ATTACKER_SPAWN.z
+      );
+      this.yaw = HANGAR_SPAWN_YAW;
+      this.pitch = 0;
+      this.yardBombSystem.resetRound('HANGAR_BOMB_5V5', keepMatchScore);
       this.state.yardBomb = { ...this.yardBombSystem.info };
     } else if (isYard) {
       this.playerPos.set(
@@ -2351,7 +2410,8 @@ export class TacticalFPSEngine {
           (this.state.drillMode === 'YARD_BOMB_5V5' ||
             this.state.drillMode === 'DUST2_BOMB_5V5' ||
             this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-            this.state.drillMode === 'INDUSTRIA_BOMB_5V5') &&
+            this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5') &&
           this.yardBombSystem.info.nearSite &&
           this.yardBombSystem.info.bombStatus === 'CARRIED'
         ) {
@@ -2363,7 +2423,8 @@ export class TacticalFPSEngine {
           (this.state.drillMode === 'YARD_BOMB_5V5' ||
             this.state.drillMode === 'DUST2_BOMB_5V5' ||
             this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-            this.state.drillMode === 'INDUSTRIA_BOMB_5V5') &&
+            this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5') &&
           this.yardBombSystem.info.nearSite &&
           this.yardBombSystem.info.bombStatus === 'CARRIED'
         ) {
@@ -2983,7 +3044,8 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'YARD_BOMB_5V5' ||
       this.state.drillMode === 'DUST2_BOMB_5V5' ||
       this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-      this.state.drillMode === 'INDUSTRIA_BOMB_5V5'
+      this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5'
     ) {
       this.state.courseTimerSec += dt;
     }
@@ -2992,7 +3054,8 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'YARD_BOMB_5V5' ||
       this.state.drillMode === 'DUST2_BOMB_5V5' ||
       this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-      this.state.drillMode === 'INDUSTRIA_BOMB_5V5'
+      this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5'
     ) {
       const playerAlive =
         this.state.health > 0 &&
@@ -3222,7 +3285,8 @@ export class TacticalFPSEngine {
       (this.state.drillMode === 'YARD_BOMB_5V5' ||
         this.state.drillMode === 'DUST2_BOMB_5V5' ||
         this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
-        this.state.drillMode === 'INDUSTRIA_BOMB_5V5') &&
+        this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5') &&
       this.yardBombSystem?.info.bombStatus === 'PLANTING';
     this.c4PlantView?.setPlanting(Boolean(planting));
     this.c4PlantView?.update(dt);
