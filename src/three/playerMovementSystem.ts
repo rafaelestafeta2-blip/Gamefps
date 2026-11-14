@@ -197,8 +197,45 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     if (engine.slideTimer > 0) {
       engine.slideTimer -= dt;
       engine.state.stance = 'SLIDE';
-      if (engine.slideTimer <= 0) {
-        // Exit slide: keep crouch only if player still wants low stance.
+
+      // COD-style slide cancels (fire / ADS / re-sprint) — jump cancel is below.
+      const fireCancel =
+        engine.touchFireHeld || engine.mouseButtonsHeld.has(0);
+      const adsCancel = Boolean(engine.state.isAds) || (engine.state.adsAlpha ?? 0) > 0.35;
+      // Ignore isCrouchingToggled (forced on during slide) — only block if crouch key still held.
+      const crouchKeyHeld =
+        engine.keysHeld.has('KeyC') || engine.keysHeld.has('ControlLeft');
+      const sprintCancel =
+        engine.slideTimer < 0.48 &&
+        ((engine.keysHeld.has('ShiftLeft') && engine.keysHeld.has('KeyW')) ||
+          engine.touchSprinting) &&
+        !crouchKeyHeld &&
+        !engine.state.isAds;
+      if (fireCancel || adsCancel || sprintCancel) {
+        engine.slideTimer = 0;
+        if (sprintCancel) {
+          engine.state.isCrouchingToggled = false;
+          engine.slideForcedCrouch = false;
+          engine.state.stance = 'SPRINT';
+          // Keep some forward momentum into the sprint.
+          const spd = Math.hypot(engine.playerVel.x, engine.playerVel.z);
+          if (spd > 0.1) {
+            engine.playerVel.x *= 0.85;
+            engine.playerVel.z *= 0.85;
+          }
+        } else {
+          // Fire/ADS → settle into crouch.
+          engine.state.isCrouchingToggled = true;
+          engine.slideForcedCrouch = false;
+          engine.state.stance = 'CROUCH';
+          engine.playerVel.x *= 0.55;
+          engine.playerVel.z *= 0.55;
+        }
+        engine.cameraFovPunch = Math.min((engine.cameraFovPunch || 0) + 2.2, 6);
+      }
+
+      if (engine.slideTimer <= 0 && engine.state.stance === 'SLIDE') {
+        // Natural slide end: keep crouch only if player still wants low stance.
         const stillWantsCrouch =
           lowCeilingAbove ||
           engine.keysHeld.has('KeyC') ||
@@ -220,7 +257,7 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
       engine.state.stance = 'STAND';
     }
 
-    // 2. Q / E Tactical Corner Leaning (Keyboard + Mobile Touch Toggle)
+    // 2. Q / E shoulder peek (snappier when ADS — COD corner lean)
     if (engine.keysHeld.has('KeyQ') && !engine.keysHeld.has('KeyE')) {
       engine.leanTarget = -1;
     } else if (engine.keysHeld.has('KeyE') && !engine.keysHeld.has('KeyQ')) {
@@ -228,11 +265,21 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     } else {
       engine.leanTarget = engine.touchLeanToggle;
     }
+    // No lean while sliding / prone / sprinting hard.
+    if (
+      engine.slideTimer > 0 ||
+      engine.state.stance === 'PRONE' ||
+      (engine.state.stance === 'SPRINT' && (engine.state.adsAlpha ?? 0) < 0.1)
+    ) {
+      engine.leanTarget = 0;
+    }
     engine.state.leanDirection = engine.leanTarget;
+    const leanLambda =
+      (engine.state.adsAlpha ?? 0) > 0.35 || engine.state.isAds ? 20 : 15;
     engine.leanCurrent = THREE.MathUtils.damp(
       engine.leanCurrent,
       engine.leanTarget,
-      14,
+      leanLambda,
       dt
     );
 
@@ -281,20 +328,32 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
         .addScaledVector(_right, rightInput);
       if (_moveVec.lengthSq() > 1) _moveVec.normalize();
 
-      // Slight top-speed trim (~6%) — keep accel / slide / ADS mult / camera feel.
+      // Slight top-speed trim (~6%) kept from sprint tune.
       let maxSpeed = 4.55;
       if (engine.state.stance === 'SPRINT') maxSpeed = 6.7;
       else if (engine.state.stance === 'CROUCH') maxSpeed = 2.55;
       else if (engine.state.stance === 'PRONE') maxSpeed = 1.2;
-      if (engine.state.isAds) maxSpeed *= 0.62;
 
-      // Asymmetric feel: snappy accel, heavier stop (COD weight).
+      // Sticky ADS walk: slower top speed + heavier accel/decel (scales with adsAlpha).
+      const adsA = Math.max(
+        engine.state.adsAlpha ?? 0,
+        engine.state.isAds ? 1 : 0
+      );
+      if (adsA > 0.04) {
+        maxSpeed *= THREE.MathUtils.lerp(1, 0.42, adsA);
+      }
+
+      // Asymmetric feel: snappy accel, heavier stop (COD weight); stickier when ADS.
       const hasInput = _moveVec.lengthSq() > 0.01;
       const accelLambda = hasInput
         ? engine.state.stance === 'SPRINT'
           ? 20
-          : 17
-        : 9;
+          : adsA > 0.25
+            ? 11
+            : 17
+        : adsA > 0.25
+          ? 15
+          : 9;
 
       engine.playerVel.x = THREE.MathUtils.damp(
         engine.playerVel.x,
@@ -588,8 +647,24 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
       dt
     );
 
-    // Apply Yaw, Pitch, Lean Offset & Camera Roll
-    const leanOffsetDist = engine.leanCurrent * 0.42;
+    // Apply Yaw, Pitch, Lean Offset & Camera Roll — ADS shoulder peek reaches farther.
+    const adsLeanBoost =
+      (engine.state.adsAlpha ?? 0) > 0.2 || engine.state.isAds ? 1.12 : 1;
+    let leanOffsetDist = engine.leanCurrent * 0.52 * adsLeanBoost;
+    // Collision-safe lean: shrink offset if shoulder would clip into world.
+    if (Math.abs(leanOffsetDist) > 0.04) {
+      const probeX = engine.playerPos.x + _right.x * leanOffsetDist;
+      const probeZ = engine.playerPos.z + _right.z * leanOffsetDist;
+      const blocked = engine.checkHorizontalCollision?.(
+        probeX,
+        probeZ,
+        engine.playerPos.y,
+        0.22
+      );
+      if (blocked) {
+        leanOffsetDist *= 0.35;
+      }
+    }
     const leanWorldX = engine.playerPos.x + _right.x * leanOffsetDist;
     const leanWorldZ = engine.playerPos.z + _right.z * leanOffsetDist;
 
@@ -597,12 +672,23 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     const shakePitch = engine.cameraShake > 0.0001 ? Math.sin(engine.elapsedTime * 42) * engine.cameraShake : 0;
     const shakeYaw = engine.cameraShake > 0.0001 ? Math.cos(engine.elapsedTime * 34) * engine.cameraShake * 0.5 : 0;
 
+    // Mantle camera pitch kick (pull-up look).
+    if (typeof engine.mantleCamPitch === 'number' && engine.mantleCamPitch !== 0) {
+      engine.mantleCamPitch = THREE.MathUtils.damp(engine.mantleCamPitch, 0, 9, dt);
+      if (Math.abs(engine.mantleCamPitch) < 0.0004) engine.mantleCamPitch = 0;
+    } else {
+      engine.mantleCamPitch = 0;
+    }
+
     // Head bob / slide roll applied after walkBobPhase advances in weapon kinematics;
     // stash base pose here, kinematics finishes camera polish.
     const slideProgress =
       engine.slideTimer > 0 ? Math.min(1, engine.slideTimer / 0.72) : 0;
     const slideRoll = slideProgress > 0 ? -0.14 * (0.35 + 0.65 * slideProgress) : 0;
-    engine.cameraBaseRoll = -engine.leanCurrent * 0.24 + slideRoll;
+    // Stronger lean roll when ADS (reads as shoulder peek).
+    const leanRollAmt =
+      ((engine.state.adsAlpha ?? 0) > 0.35 ? 0.3 : 0.24) * engine.leanCurrent;
+    engine.cameraBaseRoll = -leanRollAmt + slideRoll;
     engine.camera.rotation.z = engine.cameraBaseRoll;
 
     engine.yawObject.position.set(
@@ -611,7 +697,8 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
       leanWorldZ
     );
     engine.yawObject.rotation.y = engine.yaw + shakeYaw;
-    engine.pitchObject.rotation.x = engine.pitch + shakePitch;
+    engine.pitchObject.rotation.x =
+      engine.pitch + shakePitch + (engine.mantleCamPitch || 0);
 
     engine.cameraShake = THREE.MathUtils.damp(engine.cameraShake, 0, 24, dt);
     if (typeof engine.cameraFovPunch === 'number' && engine.cameraFovPunch > 0) {

@@ -95,13 +95,25 @@ export class PlayerGestureThirdPerson {
     const action = this.mixer.clipAction(clip);
     action.setLoop(THREE.LoopOnce, 1);
     action.clampWhenFinished = true;
+    // Time-scale clip to match vault duration so hang→pull reads in-world.
+    const rawDur = clip.duration || durationSec;
+    action.timeScale = rawDur / Math.max(0.35, durationSec);
     action.reset().play();
     this.root.position.copy(pos);
     this.root.rotation.set(0, yaw + Math.PI, 0);
     this.root.visible = true;
     this.active = true;
     this.elapsed = 0;
-    this.duration = Math.max(0.35, Math.min(durationSec, clip.duration || durationSec));
+    this.duration = Math.max(0.35, durationSec);
+  }
+
+  /** Keep gesture body under the local player during an active mantle. */
+  public setWorldPose(pos: THREE.Vector3, yaw?: number): void {
+    if (!this.active) return;
+    this.root.position.copy(pos);
+    if (typeof yaw === 'number') {
+      this.root.rotation.set(0, yaw + Math.PI, 0);
+    }
   }
 
   public playCpr(pos: THREE.Vector3, yaw: number): void {

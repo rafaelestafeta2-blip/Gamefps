@@ -1,6 +1,7 @@
 /**
  * Code-only mantle / vault (COD-style ledge climb).
- * No dedicated mantle GLB anim — uses physics lerp + camera punch.
+ * Uses Mixamo braced-hang clip for duration + 3P gesture when available;
+ * 1P feel comes from camera pitch kick, FOV punch, and two-phase ease.
  * Works with Dust2/Assault triangle ground height and Yard AABB colliders.
  */
 
@@ -164,7 +165,7 @@ export function tryStartMantle(engine: any): boolean {
 
   mantle.active = true;
   mantle.t = 0;
-  mantle.duration = 0.38 + Math.min(0.18, rise * 0.12);
+  mantle.duration = 0.4 + Math.min(0.22, rise * 0.14);
   mantle.start.copy(engine.playerPos);
   mantle.end.set(endX, landY, endZ);
 
@@ -172,14 +173,29 @@ export function tryStartMantle(engine: any): boolean {
   engine.slideTimer = 0;
   engine.jumpBufferTimer = 0;
   engine.isGrounded = false;
-  engine.cameraFovPunch = Math.min((engine.cameraFovPunch || 0) + 3.2, 8);
-  engine.landingDipVel = Math.min(engine.landingDipVel || 0, -0.08);
+  engine.cameraFovPunch = Math.min((engine.cameraFovPunch || 0) + 4.2, 9);
+  engine.landingDipVel = Math.min(engine.landingDipVel || 0, -0.12);
+  // Look slightly up into the ledge, then settle during vault.
+  engine.mantleCamPitch = -0.11;
   soundEngine.playPlayerJump();
+
   // Prefer Mixamo braced-hang clip timing when Animaçao pack is loaded.
   const mantleClip = getMantleClip();
   if (mantleClip?.duration) {
-    mantle.duration = THREE.MathUtils.clamp(mantleClip.duration * 0.42, 0.38, 0.85);
+    mantle.duration = THREE.MathUtils.clamp(mantleClip.duration * 0.45, 0.4, 0.92);
   }
+
+  // 3P gesture body (spectate / world) — clip sells hang→pull when pack is warm.
+  try {
+    engine.playerGesture?.playMantle?.(
+      engine.playerPos.clone(),
+      engine.yaw,
+      mantle.duration
+    );
+  } catch {
+    /* gesture optional */
+  }
+
   return true;
 }
 
@@ -190,25 +206,60 @@ export function updateMantle(engine: any, dt: number): boolean {
 
   mantle.t += dt;
   const u = Math.min(1, mantle.t / mantle.duration);
-  // Ease: pull up fast, settle forward.
-  const ease = u < 0.55 ? u / 0.55 : 1;
-  const upBlend = Math.sin(Math.min(1, u / 0.55) * Math.PI * 0.5);
-  const midY = mantle.start.y + (mantle.end.y - mantle.start.y) * upBlend + Math.sin(upBlend * Math.PI) * 0.12;
 
-  engine.playerPos.x = THREE.MathUtils.lerp(mantle.start.x, mantle.end.x, ease);
-  engine.playerPos.z = THREE.MathUtils.lerp(mantle.start.z, mantle.end.z, ease);
+  // Two-phase vault: (1) pull-up + hang arc, (2) forward settle onto ledge.
+  const pullEnd = 0.58;
+  let easeXz: number;
+  let upBlend: number;
+  if (u < pullEnd) {
+    const p = u / pullEnd;
+    // Smoothstep pull
+    const s = p * p * (3 - 2 * p);
+    easeXz = s * 0.42;
+    upBlend = Math.sin(s * Math.PI * 0.5);
+    // Pitch kick peaks mid-pull then eases.
+    engine.mantleCamPitch = THREE.MathUtils.lerp(
+      engine.mantleCamPitch ?? -0.11,
+      -0.06,
+      p
+    );
+  } else {
+    const p = (u - pullEnd) / (1 - pullEnd);
+    const s = p * p * (3 - 2 * p);
+    easeXz = 0.42 + s * 0.58;
+    upBlend = 1;
+    engine.mantleCamPitch = THREE.MathUtils.lerp(
+      engine.mantleCamPitch ?? -0.06,
+      0.04,
+      s
+    );
+  }
+
+  const riseArc = Math.sin(Math.min(1, upBlend) * Math.PI) * 0.14;
+  const midY =
+    mantle.start.y + (mantle.end.y - mantle.start.y) * upBlend + riseArc;
+
+  engine.playerPos.x = THREE.MathUtils.lerp(mantle.start.x, mantle.end.x, easeXz);
+  engine.playerPos.z = THREE.MathUtils.lerp(mantle.start.z, mantle.end.z, easeXz);
   engine.playerPos.y = midY;
   engine.playerVel.set(0, 0, 0);
   engine.touchFireHeld = false;
+
+  // Keep 3P gesture rooted under player during vault.
+  if (engine.playerGesture?.isActive?.() && engine.playerGesture?.setWorldPose) {
+    _probe.set(engine.playerPos.x, mantle.start.y, engine.playerPos.z);
+    engine.playerGesture.setWorldPose(_probe, engine.yaw);
+  }
 
   if (u >= 1) {
     mantle.active = false;
     engine.playerPos.copy(mantle.end);
     engine.isGrounded = true;
-    engine.playerVel.x = -Math.sin(engine.yaw) * 2.4;
-    engine.playerVel.z = -Math.cos(engine.yaw) * 2.4;
-    engine.landingDipVel = -0.1;
-    engine.cameraFovPunch = Math.min((engine.cameraFovPunch || 0) + 1.5, 7);
+    engine.playerVel.x = -Math.sin(engine.yaw) * 2.65;
+    engine.playerVel.z = -Math.cos(engine.yaw) * 2.65;
+    engine.landingDipVel = -0.14;
+    engine.cameraFovPunch = Math.min((engine.cameraFovPunch || 0) + 2.2, 8);
+    engine.mantleCamPitch = 0.02;
     soundEngine.playFootstep(true, false);
   }
   return true;

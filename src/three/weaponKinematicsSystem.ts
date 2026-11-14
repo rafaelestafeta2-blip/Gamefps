@@ -256,16 +256,23 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
       engine.state.activeWeapon
     );
 
-    const basePosX = THREE.MathUtils.lerp(
-      hipPos.x,
-      adsTransform.pos.x,
-      engine.state.adsAlpha
-    );
-    const basePosY = THREE.MathUtils.lerp(
-      hipPos.y,
-      adsTransform.pos.y,
-      engine.state.adsAlpha
-    );
+    // Shoulder-peek: shift viewmodel opposite lean so gun clears the corner.
+    const leanAmt = typeof engine.leanCurrent === 'number' ? engine.leanCurrent : 0;
+    const leanWeaponX = leanAmt * THREE.MathUtils.lerp(0.028, 0.045, engine.state.adsAlpha);
+    const leanWeaponY = Math.abs(leanAmt) * 0.006 * (1 - engine.state.adsAlpha * 0.5);
+
+    const basePosX =
+      THREE.MathUtils.lerp(
+        hipPos.x,
+        adsTransform.pos.x,
+        engine.state.adsAlpha
+      ) + leanWeaponX;
+    const basePosY =
+      THREE.MathUtils.lerp(
+        hipPos.y,
+        adsTransform.pos.y,
+        engine.state.adsAlpha
+      ) + leanWeaponY;
     const basePosZ = THREE.MathUtils.lerp(
       hipPos.z,
       adsTransform.pos.z,

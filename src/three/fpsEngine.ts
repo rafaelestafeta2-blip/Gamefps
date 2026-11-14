@@ -1847,6 +1847,20 @@ export class TacticalFPSEngine {
 
   public toggleCrouchOrSlide(): void {
     if (this.state.screen !== 'PLAYING') return;
+
+    // Mid-slide crouch tap = slide cancel into crouch (COD).
+    if (this.slideTimer > 0) {
+      this.slideTimer = 0;
+      this.state.isCrouchingToggled = true;
+      this.slideForcedCrouch = false;
+      this.state.stance = 'CROUCH';
+      this.playerVel.x *= 0.5;
+      this.playerVel.z *= 0.5;
+      this.cameraFovPunch = Math.min((this.cameraFovPunch || 0) + 2.0, 6);
+      this.emitHud();
+      return;
+    }
+
     const isMovingForwardFast =
       (this.touchSprinting ||
         (this.keysHeld.has('ShiftLeft') && this.keysHeld.has('KeyW')) ||
