@@ -2,6 +2,7 @@ import { collection, deleteField, doc, getDoc, getDocs, limit, onSnapshot, query
 import { auth, db, handleFirestoreError, OperationType } from '../firebase/firebaseClient';
 import { getCloudSyncState } from '../firebase/playerCloudSync';
 import { DrillMode, WeaponId } from '../types/game';
+import { applyIncomingPlayerState } from './combatNetcode';
 import {
   persistRoomMatchMeta,
   publishRoomCombatHit,
@@ -134,8 +135,22 @@ function connectWebSocketForRoom(room: OnlineRoomState, player: OnlinePlayerStat
           plantedSite?: OnlineRoomState['plantedSite'];
         };
         if (!activeRoom) return;
-        if (msg.type === 'PLAYER_STATE' && msg.player?.uid) {
-          activeRoom.players[msg.player.uid] = msg.player;
+        if (msg.type === 'PLAYER_STATE') {
+          const wire = msg as {
+            type?: string;
+            uid?: string;
+            player?: OnlinePlayerState;
+            t?: import('./combatNetcode').CompactTransformWire['t'];
+          };
+          const uid = wire.player?.uid || wire.uid;
+          if (!uid) return;
+          const expanded = applyIncomingPlayerState(activeRoom.players[uid], {
+            player: wire.player,
+            t: wire.t,
+            uid,
+          });
+          if (!expanded) return;
+          activeRoom.players[uid] = expanded;
           // Transform packets are high-frequency — skip React lobby subscribers
           // during PLAYING; combat loop reads activeRoom directly.
           if (activeRoom.status !== 'PLAYING') emitRoomState();

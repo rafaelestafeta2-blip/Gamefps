@@ -18,3 +18,10 @@ export {
 } from './shadowUpdateBudget';
 export { emitHudIfChanged } from './hudBridge';
 export { updateDynamicResolutionGovernor } from './dynamicResolutionGovernor';
+export {
+  attemptFireWeapon,
+  executeSingleShot,
+} from './weaponFireSystem';
+export { handleTargetHit } from './weaponHitSystem';
+export { applyLookDelta } from './engineLookInput';
+export type { LookInputState } from './engineLookInput';

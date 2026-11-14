@@ -160,6 +160,15 @@ export function detectDeviceCapability(): DeviceCapability {
     tier = 'LOW';
   }
 
+  // Mobile mid-range phones often report optimistic GPU names but thermal-throttle hard.
+  // Prefer stable 40–60 FPS over brief ULTRA spikes.
+  if (isMobile) {
+    if (tier === 'ULTRA') tier = 'HIGH';
+    if (tier === 'HIGH' && (memoryGb <= 4 || cpuCores <= 6)) tier = 'MEDIUM';
+    if (tier === 'MEDIUM' && (memoryGb <= 3 || cpuCores <= 4)) tier = 'LOW';
+    // Common low Adreno/Mali already LOW; keep.
+  }
+
   return {
     gpuVendor,
     gpuRenderer,
@@ -176,7 +185,8 @@ export function getPresetSettings(
   switch (tier) {
     case 'LOW':
       return {
-        resolution: 'SCALE_65',
+        // Weak phones: prioritize frame time over resolution.
+        resolution: 'SCALE_50',
         shadows: 'OFF',
         textures: 'LOW',
         viewDistance: 'NEAR',
@@ -188,20 +198,20 @@ export function getPresetSettings(
       };
     case 'MEDIUM':
       return {
-        resolution: 'AUTO_BALANCED',
-        shadows: 'MEDIUM',
+        resolution: 'AUTO_ECO',
+        shadows: 'LOW',
         textures: 'MEDIUM',
         viewDistance: 'MEDIUM',
         fog: true,
-        pbrReflections: true,
-        muzzleLight: true,
+        pbrReflections: false,
+        muzzleLight: false,
         acesToneMapping: true,
         fpsLimit: 60,
       };
     case 'HIGH':
       return {
-        resolution: 'AUTO_MAX',
-        shadows: 'HIGH',
+        resolution: 'AUTO_BALANCED',
+        shadows: 'MEDIUM',
         textures: 'HIGH',
         viewDistance: 'FAR',
         fog: true,
@@ -212,8 +222,8 @@ export function getPresetSettings(
       };
     case 'ULTRA':
       return {
-        resolution: 'SCALE_100',
-        shadows: 'ULTRA',
+        resolution: 'AUTO_MAX',
+        shadows: 'HIGH',
         textures: 'ULTRA',
         viewDistance: 'ULTRA',
         fog: true,
