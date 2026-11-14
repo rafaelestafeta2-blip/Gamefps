@@ -39,6 +39,7 @@ export interface CloudSyncState {
   profile: PlayerCloudProfile;
   authReady: boolean;
   isGoogleLinked: boolean;
+  isGuestSession: boolean;
   isSyncing: boolean;
   lastSyncedAt: string | null;
   syncError: string | null;

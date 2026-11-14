@@ -26,6 +26,8 @@ export interface ControlSettings {
   adsSensitivity: number; // 0.2..3.0
   gyroMode: GyroMode;
   gyroSensitivity: number; // 0.2..3.0
+  /** Soft rotational aim assist 0..1 (never expands hitboxes). */
+  aimAssistStrength: number;
   leftFireButtonEnabled: boolean;
   layoutPreset: HudLayoutPresetId | 'CUSTOM';
   hudLayout: CustomHudLayout;
@@ -90,6 +92,7 @@ export function getDefaultControlSettings(): ControlSettings {
     adsSensitivity: 1.0,
     gyroMode: 'OFF',
     gyroSensitivity: 1.0,
+    aimAssistStrength: 0.45,
     leftFireButtonEnabled: true,
     layoutPreset: 'TWO_THUMBS',
     hudLayout: getPresetHudLayout('TWO_THUMBS'),
@@ -160,6 +163,10 @@ export function loadControlSettings(): ControlSettings {
         typeof raw.gyroSensitivity === 'number'
           ? Math.max(0.2, Math.min(3.0, raw.gyroSensitivity))
           : def.gyroSensitivity,
+      aimAssistStrength:
+        typeof raw.aimAssistStrength === 'number'
+          ? Math.max(0, Math.min(1, raw.aimAssistStrength))
+          : def.aimAssistStrength,
       leftFireButtonEnabled:
         typeof raw.leftFireButtonEnabled === 'boolean'
           ? raw.leftFireButtonEnabled

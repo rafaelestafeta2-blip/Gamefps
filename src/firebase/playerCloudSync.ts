@@ -1,6 +1,7 @@
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, onSnapshot, setDoc, Unsubscribe } from 'firebase/firestore';
 import { evaluateUnlockedAchievements } from '../progression/achievementsData';
+import { canGrantMatchProgressionRewards } from '../progression/matchProgressionGate';
 import {
   getRankForXp,
   registerCloudCashSpendHook,
@@ -31,6 +32,7 @@ let state: CloudSyncState = {
   profile: loadLocalProfileFallback(),
   authReady: false,
   isGoogleLinked: false,
+  isGuestSession: false,
   isSyncing: false,
   lastSyncedAt: null,
   syncError: null,
@@ -100,6 +102,7 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
 
+  state.isGuestSession = false;
   state.isGoogleLinked = true;
   state.isSyncing = true;
   emitState();
@@ -161,6 +164,14 @@ export function subscribePlayerProfile(listener: SyncListener): () => void {
   };
 }
 
+export function enterAsGuest(): void {
+  state.isGuestSession = true;
+  state.authReady = true;
+  state.isSyncing = false;
+  state.syncError = null;
+  emitState();
+}
+
 export async function signInWithGoogleAccount(): Promise<boolean> {
   state.syncError = null;
   state.isSyncing = true;
@@ -182,6 +193,7 @@ export async function signOutGoogleAccount(): Promise<void> {
   }
   await performGoogleSignOut();
   state.isGoogleLinked = false;
+  state.isGuestSession = false;
   emitState();
 }
 
@@ -237,6 +249,9 @@ export function recordCombatTelemetryDelta(delta: {
   kills?: number; deaths?: number; assists?: number; headshots?: number;
   matchesPlayed?: number; matchesWon?: number; bombsPlanted?: number; activeWeapon?: WeaponId;
 }): void {
+  // Profile combat / match / MMR progression only from online human matches.
+  if (!canGrantMatchProgressionRewards()) return;
+
   const p = state.profile;
   const totalKills = p.totalKills + (delta.kills || 0);
   const totalDeaths = p.totalDeaths + (delta.deaths || 0);

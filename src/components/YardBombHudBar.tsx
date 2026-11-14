@@ -2,6 +2,7 @@ import React from 'react';
 import { YardBombHudInfo } from '../types/game';
 import { bindTap } from './hudTapUtils';
 import { PostMatchSummaryOverlay } from './PostMatchSummaryOverlay';
+import { PreRoundEquipOverlay } from './PreRoundEquipOverlay';
 import { BlackthornTeamEmblem, VanguardTeamEmblem } from './WarfaceClassIcons';
 
 interface YardBombHudBarProps {
@@ -23,6 +24,21 @@ export const YardBombHudBar: React.FC<YardBombHudBarProps> = ({
         yardBomb={yardBomb}
         onCloseToMenu={onReturnToMenu}
       />
+    );
+  }
+
+  if (yardBomb.roundState === 'EQUIP') {
+    return (
+      <>
+        <PreRoundEquipOverlay yardBomb={yardBomb} />
+        {/* Keep scoreboard visible under the equip curtain */}
+        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-45 pointer-events-none select-none">
+          <div className="flex items-center gap-2 bg-[#070b12]/92 border border-amber-400/40 rounded-xl px-3 py-1 shadow-xl font-mono text-[10px] text-amber-200">
+            EQUIP · RODADA {yardBomb.currentRound}/{yardBomb.maxRounds} ·{' '}
+            {yardBomb.vanguardScore}–{yardBomb.blackthornScore}
+          </div>
+        </div>
+      </>
     );
   }
 

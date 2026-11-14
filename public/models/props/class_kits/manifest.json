@@ -1,0 +1,9 @@
+{
+  "source": "Gamesfps@a873a080/Acessorio/Armas/Operador",
+  "kits": {
+    "AMMO": { "file": "ammo_crate.glb", "class": "FUZILEIRO", "sourceFile": "ammo_box (1).glb" },
+    "HEAL": { "file": "medkit.glb", "class": "MEDICO", "sourceFile": "medikit_scifi_prop.glb", "compactAlt": "medkit_compact.glb" },
+    "ARMOR": { "file": "armor_plate.glb", "class": "ENGENHEIRO", "sourceFile": "armor_plate.glb", "note": "webp-optimized; ignored duplicate armor_plate (1).glb" }
+  },
+  "ignored": ["Bhd", "armor_plate (1).glb", "medkit.zip (also as medkit_compact.glb)"]
+}

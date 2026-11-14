@@ -168,15 +168,24 @@ export async function loadDust2MapGeometry(
           return;
         }
 
-        child.castShadow = !isSoftwareGl;
+        // Receive shadows on most surfaces; only larger props cast (mobile shadow budget).
         child.receiveShadow = !isSoftwareGl;
+        child.castShadow = false;
         child.userData.isEnvironment = true;
+
+        if (!isSoftwareGl && child.geometry) {
+          if (!child.geometry.boundingSphere) child.geometry.computeBoundingSphere();
+          const radius = child.geometry.boundingSphere?.radius ?? 0;
+          // World scale on Dust2 root is ~0.025 — cast only meaningful chunks.
+          child.castShadow = radius > 8;
+        }
 
         mats.forEach((m) => {
           const std = m as THREE.MeshStandardMaterial;
           if (std && std.map) {
             std.map.colorSpace = THREE.SRGBColorSpace;
-            std.map.anisotropy = isSoftwareGl ? 1 : 16;
+            // Cap anisotropy here; graphics settings can raise later if needed.
+            std.map.anisotropy = isSoftwareGl ? 1 : 4;
             std.map.minFilter = THREE.LinearMipmapLinearFilter;
             std.map.magFilter = THREE.LinearFilter;
             std.map.generateMipmaps = true;
@@ -186,8 +195,11 @@ export async function loadDust2MapGeometry(
             std.roughness = 0.74;
             std.metalness = 0.04;
             std.envMapIntensity = 0.8;
-            std.side = THREE.DoubleSide;
-            if (std.name === 'material_15' || std.name === 'material_25') {
+            // FrontSide halves fill rate vs DoubleSide; keep DoubleSide only for z-fight fixes.
+            const needsDouble =
+              std.name === 'material_15' || std.name === 'material_25';
+            std.side = needsDouble ? THREE.DoubleSide : THREE.FrontSide;
+            if (needsDouble) {
               std.polygonOffset = true;
               std.polygonOffsetFactor = -1;
               std.polygonOffsetUnits = -1;
@@ -195,7 +207,8 @@ export async function loadDust2MapGeometry(
           }
         });
 
-        bundle.shootableMeshes.push(child);
+        // World bullets use Dust2TriangleCollider — do NOT register every GLB mesh
+        // into Three.js raycast lists (major mobile CPU win). Bots still register.
       }
     });
 

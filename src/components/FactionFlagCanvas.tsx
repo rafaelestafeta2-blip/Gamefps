@@ -1,6 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import {
+  createSecondaryWebGLRenderer,
+  disposeSecondaryWebGLRenderer,
+} from '../three/webglContextGuard';
+import {
   createFactionBannerAlphaMap,
   createFactionBannerTexture,
   FactionBannerTeam,
@@ -51,15 +55,16 @@ export const FactionFlagCanvas: React.FC<FactionFlagCanvasProps> = ({
     const camera = new THREE.PerspectiveCamera(36, width / height, 0.1, 30);
     camera.position.set(0, 0, 5.2);
 
-    const renderer = new THREE.WebGLRenderer({
+    const renderer = createSecondaryWebGLRenderer({
+      pinned: true,
       antialias: !isSoftwareGl,
       alpha: true,
-      powerPreference: 'high-performance',
+      powerPreference: isLowPowerMobile ? 'low-power' : 'high-performance',
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, isLowPowerMobile ? 1.5 : 2));
+    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, isLowPowerMobile ? 1.25 : 1.5));
     renderer.setSize(width, height);
     renderer.setClearColor(0x000000, 0);
 
@@ -279,7 +284,7 @@ export const FactionFlagCanvas: React.FC<FactionFlagCanvasProps> = ({
       finialGeo.dispose();
       ringGeo.dispose();
       poleMat.dispose();
-      renderer.dispose();
+      disposeSecondaryWebGLRenderer(renderer);
     };
   }, [team, layoutMode]);
 

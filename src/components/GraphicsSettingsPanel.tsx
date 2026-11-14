@@ -265,6 +265,7 @@ export const GraphicsSettingsPanel: React.FC<GraphicsSettingsPanelProps> = ({
                 <SettingsToggle label="Reflexos PBR Ambiente" description="Reflexos metálicos nas armas 3D" value={settings.pbrReflections} onChange={(v) => update({ pbrReflections: v, preset: 'CUSTOM' })} />
                 <SettingsToggle label="Luz Dinâmica do Disparo" description="Iluminação do flash nos arredores" value={settings.muzzleLight} onChange={(v) => update({ muzzleLight: v, preset: 'CUSTOM' })} />
                 <SettingsToggle label="ACES Filmic Tonemapping" description="Curva de contraste cinematográfica" value={settings.acesToneMapping} onChange={(v) => update({ acesToneMapping: v, preset: 'CUSTOM' })} />
+                <SettingsToggle label="Pós-processo Tático" description="Sharpen + bloom leve + vinheta de dano (GPU)" value={settings.tacticalPostFx} onChange={(v) => update({ tacticalPostFx: v, preset: 'CUSTOM' })} />
               </div>
             </div>
           )}

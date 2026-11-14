@@ -21,6 +21,7 @@ interface HudBottomWeaponDockProps {
   onInspectWeapon: () => void;
   onCycleFireMode: () => void;
   onResupply: () => void;
+  onSupportHeld?: (held: boolean) => void;
   onThrowGrenade: (type: GrenadeType) => void;
 }
 
@@ -61,6 +62,7 @@ export const HudBottomWeaponDock: React.FC<HudBottomWeaponDockProps> = ({
   onInspectWeapon,
   onCycleFireMode,
   onResupply,
+  onSupportHeld,
   onThrowGrenade,
 }) => {
   const reserveAmmo = hud.magazines.reduce((acc, r) => acc + r, 0);
@@ -269,58 +271,141 @@ export const HudBottomWeaponDock: React.FC<HudBottomWeaponDockProps> = ({
           </span>
         </button>
 
-        {/* Right Utility Box: Resupply Ammo & Grenades Crate Icon */}
-        <button
-          type="button"
-          {...bindTap(onResupply)}
-          aria-label="Reabastecer munição e granadas"
-          title="Reabastecer Munição e Granadas [U]"
-          className="w-10 h-11 bg-black/75 hover:bg-black/90 border border-white/35 text-amber-300 flex items-center justify-center active:scale-95 transition-transform cursor-pointer"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M12 5V19M5 12H19"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
+        {/* Right Utility: class support kit (ammo / med / armor) [U] */}
+        <ClassSupportButton
+          hud={hud}
+          onResupply={onResupply}
+          onSupportHeld={onSupportHeld}
+        />
       </div>
 
-      {/* Bottom Military Vitality (HP) & Reload Progress Bar */}
-      <div className="w-72 sm:w-84 h-5 bg-black/85 border border-white/20 px-2 flex items-center gap-2 shadow-lg rounded-sm">
-        <div className="flex items-center gap-1">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" className={hud.health < 35 ? 'text-red-500 animate-pulse' : hud.health < 65 ? 'text-amber-400' : 'text-emerald-400'}>
-            <path d="M19 10.5h-5.5V5c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v5.5H5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h5.5V19c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-5.5H19c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z" />
-          </svg>
-          <span className={`text-[10px] font-mono font-black tabular-nums tracking-tighter ${hud.health < 35 ? 'text-red-400 animate-pulse' : hud.health < 65 ? 'text-amber-300' : 'text-emerald-300'}`}>
-            {Math.round(hud.health)}
-          </span>
+      {hud.supportPrompt ? (
+        <div className="text-[9px] font-mono font-bold tracking-wide text-amber-200/90 bg-black/70 border border-white/15 px-2 py-0.5 rounded-sm max-w-[20rem] text-center truncate">
+          {hud.supportPrompt}
         </div>
-        <div className="flex-1 h-2 bg-white/10 rounded-xs overflow-hidden relative border border-white/10">
-          <div
-            className={`h-full transition-all duration-200 ${
-              hud.health < 35
-                ? 'bg-gradient-to-r from-red-600 to-rose-500 animate-pulse'
-                : hud.health < 65
-                  ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
-                  : 'bg-gradient-to-r from-emerald-500 to-teal-400'
-            }`}
-            style={{ width: `${Math.max(0, Math.min(100, hud.health))}%` }}
-          />
-          {/* Subtle tactical tick mark at 50% */}
-          <div className="absolute top-0 bottom-0 left-1/2 w-px bg-black/40 pointer-events-none" />
-        </div>
-        {hud.reloadPhase !== 'IDLE' && (
-          <div className="w-16 h-2 bg-amber-500/20 border border-amber-500/30 rounded-xs overflow-hidden">
+      ) : null}
+
+      {/* Bottom Military Vitality (HP + Armor) & Reload Progress Bar */}
+      <div className="w-72 sm:w-84 h-7 bg-black/85 border border-white/20 px-2 flex flex-col justify-center gap-0.5 shadow-lg rounded-sm">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 min-w-[2.2rem]">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" className={hud.health < 35 ? 'text-red-500 animate-pulse' : hud.health < 65 ? 'text-amber-400' : 'text-emerald-400'}>
+              <path d="M19 10.5h-5.5V5c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v5.5H5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h5.5V19c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-5.5H19c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z" />
+            </svg>
+            <span className={`text-[10px] font-mono font-black tabular-nums tracking-tighter ${hud.health < 35 ? 'text-red-400 animate-pulse' : hud.health < 65 ? 'text-amber-300' : 'text-emerald-300'}`}>
+              {Math.round(hud.health)}
+            </span>
+          </div>
+          <div className="flex-1 h-1.5 bg-white/10 rounded-xs overflow-hidden relative border border-white/10">
             <div
-              className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-75"
-              style={{ width: `${Math.round(hud.reloadProgress * 100)}%` }}
+              className={`h-full transition-all duration-200 ${
+                hud.health < 35
+                  ? 'bg-gradient-to-r from-red-600 to-rose-500 animate-pulse'
+                  : hud.health < 65
+                    ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
+                    : 'bg-gradient-to-r from-emerald-500 to-teal-400'
+              }`}
+              style={{
+                width: `${Math.max(0, Math.min(100, (hud.health / Math.max(1, hud.maxHealth)) * 100))}%`,
+              }}
             />
           </div>
-        )}
+          {hud.reloadPhase !== 'IDLE' && (
+            <div className="w-14 h-1.5 bg-amber-500/20 border border-amber-500/30 rounded-xs overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-75"
+                style={{ width: `${Math.round(hud.reloadProgress * 100)}%` }}
+              />
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 min-w-[2.2rem]">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" className="text-sky-400">
+              <path d="M12 2L4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4z" />
+            </svg>
+            <span className="text-[9px] font-mono font-bold tabular-nums text-sky-300">
+              {Math.round(hud.armor || 0)}
+            </span>
+          </div>
+          <div className="flex-1 h-1 bg-white/10 rounded-xs overflow-hidden border border-white/10">
+            <div
+              className="h-full bg-gradient-to-r from-sky-600 to-sky-300 transition-all duration-200"
+              style={{
+                width: `${Math.max(0, Math.min(100, ((hud.armor || 0) / Math.max(1, hud.maxArmor || 1)) * 100))}%`,
+              }}
+            />
+          </div>
+        </div>
       </div>
     </div>
+  );
+};
+
+const ClassSupportButton: React.FC<{
+  hud: HudState;
+  onResupply: () => void;
+  onSupportHeld?: (held: boolean) => void;
+}> = ({ hud, onResupply, onSupportHeld }) => {
+  const kind = hud.supportKind || 'NONE';
+  const charges = hud.supportCharges ?? 0;
+  const cooling = (hud.supportCooldownSec || 0) > 0.05;
+  const accent =
+    kind === 'HEAL'
+      ? 'text-emerald-300 border-emerald-400/50'
+      : kind === 'ARMOR'
+        ? 'text-sky-300 border-sky-400/50'
+        : kind === 'AMMO'
+          ? 'text-amber-300 border-amber-400/50'
+          : 'text-white/40 border-white/20';
+  const title =
+    kind === 'HEAL'
+      ? 'Kit médico / desfibrilador [U]'
+      : kind === 'ARMOR'
+        ? 'Kit de blindagem [U]'
+        : kind === 'AMMO'
+          ? 'Caixa de munição [U]'
+          : 'Sem kit de suporte';
+
+  return (
+    <button
+      type="button"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onResupply();
+        onSupportHeld?.(true);
+      }}
+      onPointerUp={(e) => {
+        e.stopPropagation();
+        onSupportHeld?.(false);
+      }}
+      onPointerCancel={() => onSupportHeld?.(false)}
+      onPointerLeave={() => onSupportHeld?.(false)}
+      aria-label={title}
+      title={title}
+      className={`relative w-10 h-11 bg-black/75 hover:bg-black/90 border ${accent} flex flex-col items-center justify-center gap-0.5 active:scale-95 transition-transform cursor-pointer ${
+        cooling || (charges <= 0 && kind !== 'HEAL') ? 'opacity-55' : ''
+      }`}
+    >
+      {kind === 'HEAL' ? (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M11 3h2v8h8v2h-8v8h-2v-8H3v-2h8V3z" />
+        </svg>
+      ) : kind === 'ARMOR' ? (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2L4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4z" />
+        </svg>
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="7" width="18" height="12" rx="1.5" stroke="currentColor" strokeWidth="2" />
+          <path d="M8 7V5h8v2" stroke="currentColor" strokeWidth="2" />
+          <path d="M12 11v5M9.5 13.5h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      )}
+      <span className="text-[8px] font-bold leading-none tabular-nums">
+        {kind === 'NONE' ? '—' : `x${charges}`}
+      </span>
+    </button>
   );
 };

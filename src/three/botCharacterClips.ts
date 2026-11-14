@@ -11,12 +11,15 @@ export type BotAnimState =
   | 'RIFLE_RUN'
   | 'RIFLE_RUN_LEFT'
   | 'RIFLE_RUN_RIGHT'
+  | 'RIFLE_SPRINT'
   | 'RIFLE_AIM'
   | 'RIFLE_FIRE'
   | 'RIFLE_THROW'
   | 'RIFLE_CROUCH'
   | 'RIFLE_CROUCH_WALK'
   | 'RIFLE_HIT'
+  | 'RIFLE_JUMP'
+  | 'RIFLE_RELOAD_3P'
   | 'RIFLE_DEATH'
   | 'RIFLE_DEATH_HEADSHOT'
   | 'RIFLE_DEATH_BACK'
@@ -35,11 +38,14 @@ export interface BotAnimController {
   actions: Record<BotAnimState, THREE.AnimationAction>;
   currentState: BotAnimState;
   prevX: number;
+  prevY: number;
   prevZ: number;
   smoothedSpeed: number;
   hitReactTimer: number;
   fireAnimTimer: number;
   throwAnimTimer: number;
+  jumpAnimTimer: number;
+  reloadAnimTimer: number;
   deathElapsed: number;
   lodAccumDt: number;
   tacticalTimer: number;
@@ -55,6 +61,39 @@ function normalizeMixamoClip(clip: THREE.AnimationClip): THREE.AnimationClip {
     }
   }
   return cloned;
+}
+
+/**
+ * Tripo medic IBM ≠ rifleman/Mixamo bind — position tracks explode the mesh.
+ * Keep quaternion (+ hips Y only) so menu/inventory idle looks correct.
+ */
+export function retargetClipsRotationOnly(clips: BotClipMap): BotClipMap {
+  const next = { ...clips };
+  (Object.keys(next) as BotAnimState[]).forEach((key) => {
+    const src = next[key];
+    if (!src) return;
+    const tracks: THREE.KeyframeTrack[] = [];
+    for (let i = 0; i < src.tracks.length; i++) {
+      const t = src.tracks[i];
+      const name = t.name.includes(':') ? t.name.replace(/:/g, '') : t.name;
+      if (name.endsWith('.quaternion')) {
+        const qt = t.clone();
+        qt.name = name;
+        tracks.push(qt);
+      } else if (name === 'mixamorigHips.position') {
+        // Keep vertical root motion only — zero XZ drift from foreign bind.
+        const vals = new Float32Array(t.values.length);
+        for (let s = 0; s < t.values.length; s += 3) {
+          vals[s] = 0;
+          vals[s + 1] = t.values[s + 1];
+          vals[s + 2] = 0;
+        }
+        tracks.push(new THREE.VectorKeyframeTrack(name, t.times, vals));
+      }
+    }
+    next[key] = new THREE.AnimationClip(src.name, src.duration, tracks);
+  });
+  return next;
 }
 
 function buildDerivedImpulseClip(
@@ -171,7 +210,8 @@ export function buildProRiflePackClips(
   const walkLeft = byName.get('RIFLE_WALK_LEFT') || walk;
   const walkRight = byName.get('RIFLE_WALK_RIGHT') || walk;
   const walkBack = byName.get('RIFLE_WALK_BACK') || walk;
-  const run = byName.get('RIFLE_RUN') || byName.get('RIFLE_SPRINT') || walk;
+  const run = byName.get('RIFLE_RUN') || walk;
+  const sprint = byName.get('RIFLE_SPRINT') || run;
   const runLeft = byName.get('RIFLE_RUN_LEFT') || run;
   const runRight = byName.get('RIFLE_RUN_RIGHT') || run;
   const crouch = byName.get('RIFLE_CROUCH') || aim;
@@ -186,6 +226,8 @@ export function buildProRiflePackClips(
   const fire = byName.get('RIFLE_FIRE') || buildDerivedImpulseClip(aim, 'RIFLE_FIRE', 0.2, 0.08, false);
   const hit = byName.get('RIFLE_HIT') || buildDerivedImpulseClip(aim, 'RIFLE_HIT', 0.28, 0.16, false);
   const throwClip = byName.get('RIFLE_THROW') || buildDerivedImpulseClip(aim, 'RIFLE_THROW', 0.58, 0.1, true);
+  const jump = byName.get('RIFLE_JUMP') || aim;
+  const reload3p = byName.get('RIFLE_RELOAD_3P') || aim;
 
   return {
     RIFLE_IDLE: idle,
@@ -197,11 +239,14 @@ export function buildProRiflePackClips(
     RIFLE_RUN: run,
     RIFLE_RUN_LEFT: runLeft,
     RIFLE_RUN_RIGHT: runRight,
+    RIFLE_SPRINT: sprint,
     RIFLE_CROUCH: crouch,
     RIFLE_CROUCH_WALK: crouchWalk,
     RIFLE_FIRE: fire,
     RIFLE_THROW: throwClip,
     RIFLE_HIT: hit,
+    RIFLE_JUMP: jump,
+    RIFLE_RELOAD_3P: reload3p,
     RIFLE_DEATH: death,
     RIFLE_DEATH_HEADSHOT: deathHeadshot,
     RIFLE_DEATH_BACK: deathBack,
@@ -246,6 +291,8 @@ export function transitionBotAnim(
     nextState === 'RIFLE_FIRE' ||
     nextState === 'RIFLE_THROW' ||
     nextState === 'RIFLE_HIT' ||
+    nextState === 'RIFLE_JUMP' ||
+    nextState === 'RIFLE_RELOAD_3P' ||
     nextState.startsWith('RIFLE_DEATH');
 
   if (isOneShot || !nextAction.isRunning()) {
@@ -299,6 +346,7 @@ export function selectDirectionalDeathState(
     // Tiro veio pelas costas
     return isHeadshot ? 'RIFLE_DEATH_BACK_HEADSHOT' : 'RIFLE_DEATH_BACK';
   }
-  // Tiro veio de lado / flanco
+  // Flank: only RIGHT death clip exists in Pro Rifle Pack (no LEFT asset).
+  // Headshot from flank still uses RIGHT — no dedicated side-headshot clip on disk.
   return 'RIFLE_DEATH_RIGHT';
 }

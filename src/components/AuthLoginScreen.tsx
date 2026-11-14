@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
 import {
   CloudSyncState,
+  enterAsGuest,
   getCloudSyncState,
   signInWithGoogleAccount,
   signOutGoogleAccount,
@@ -44,6 +45,14 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
       soundEngine.playMenuSelect();
       onContinueToMenu();
     }
+  };
+
+  const handleGuestLogin = () => {
+    soundEngine.playMenuSelect();
+    soundEngine.playMenuMusic();
+    void mobileHardware.enterFullscreenLandscape();
+    enterAsGuest();
+    onContinueToMenu();
   };
 
   const handleEnterCommand = () => {
@@ -284,8 +293,16 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
                 </span>
               </button>
 
-              <div className="py-1 px-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-center font-mono text-[8.5px] font-bold text-amber-300 uppercase tracking-wider">
-                🔒 ACESSO EXCLUSIVO COM CONTA GOOGLE REAL
+              <button
+                type="button"
+                disabled={signingIn || isSyncing}
+                onClick={handleGuestLogin}
+                className="w-full py-2 px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/50 text-amber-100 font-display font-black text-[11px] sm:text-xs tracking-wider uppercase cursor-pointer disabled:opacity-60"
+              >
+                ENTRAR COMO CONVIDADO
+              </button>
+              <div className="py-1 px-2 rounded-md bg-white/[0.03] border border-white/10 text-center font-mono text-[8.5px] text-slate-400 uppercase tracking-wider">
+                Convidado fica neste celular e serve para testar os mapas. A conta Google salva o progresso na nuvem.
               </div>
             </div>
           )}

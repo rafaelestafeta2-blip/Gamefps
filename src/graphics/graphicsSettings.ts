@@ -38,6 +38,8 @@ export interface GameSettings {
   pbrReflections: boolean;
   muzzleLight: boolean;
   acesToneMapping: boolean;
+  /** Sharpen + soft bloom + GPU damage vignette (HIGH/ULTRA only recommended). */
+  tacticalPostFx: boolean;
   fpsLimit: FpsLimit;
   showFpsCounter: boolean;
   batterySaver: boolean;
@@ -160,6 +162,15 @@ export function detectDeviceCapability(): DeviceCapability {
     tier = 'LOW';
   }
 
+  // Mobile mid-range phones often report optimistic GPU names but thermal-throttle hard.
+  // Prefer stable 40–60 FPS over brief ULTRA spikes.
+  if (isMobile) {
+    if (tier === 'ULTRA') tier = 'HIGH';
+    if (tier === 'HIGH' && (memoryGb <= 4 || cpuCores <= 6)) tier = 'MEDIUM';
+    if (tier === 'MEDIUM' && (memoryGb <= 3 || cpuCores <= 4)) tier = 'LOW';
+    // Common low Adreno/Mali already LOW; keep.
+  }
+
   return {
     gpuVendor,
     gpuRenderer,
@@ -176,7 +187,8 @@ export function getPresetSettings(
   switch (tier) {
     case 'LOW':
       return {
-        resolution: 'SCALE_65',
+        // Weak phones: prioritize frame time over resolution.
+        resolution: 'SCALE_50',
         shadows: 'OFF',
         textures: 'LOW',
         viewDistance: 'NEAR',
@@ -188,20 +200,20 @@ export function getPresetSettings(
       };
     case 'MEDIUM':
       return {
-        resolution: 'AUTO_BALANCED',
-        shadows: 'MEDIUM',
+        resolution: 'AUTO_ECO',
+        shadows: 'LOW',
         textures: 'MEDIUM',
         viewDistance: 'MEDIUM',
         fog: true,
-        pbrReflections: true,
-        muzzleLight: true,
+        pbrReflections: false,
+        muzzleLight: false,
         acesToneMapping: true,
         fpsLimit: 60,
       };
     case 'HIGH':
       return {
-        resolution: 'AUTO_MAX',
-        shadows: 'HIGH',
+        resolution: 'AUTO_BALANCED',
+        shadows: 'MEDIUM',
         textures: 'HIGH',
         viewDistance: 'FAR',
         fog: true,
@@ -212,8 +224,8 @@ export function getPresetSettings(
       };
     case 'ULTRA':
       return {
-        resolution: 'SCALE_100',
-        shadows: 'ULTRA',
+        resolution: 'AUTO_MAX',
+        shadows: 'HIGH',
         textures: 'ULTRA',
         viewDistance: 'ULTRA',
         fog: true,
@@ -231,6 +243,7 @@ export function getDefaultGameSettings(): GameSettings {
   return {
     ...base,
     preset: 'AUTO',
+    tacticalPostFx: cap.tier === 'HIGH' || cap.tier === 'ULTRA',
     showFpsCounter: false,
     batterySaver: false,
     vibration: true,
@@ -297,6 +310,10 @@ export function validateSettings(s: unknown): GameSettings {
       typeof raw.acesToneMapping === 'boolean'
         ? raw.acesToneMapping
         : def.acesToneMapping,
+    tacticalPostFx:
+      typeof raw.tacticalPostFx === 'boolean'
+        ? raw.tacticalPostFx
+        : def.tacticalPostFx,
     fpsLimit: validFps.includes(raw.fpsLimit as FpsLimit)
       ? (raw.fpsLimit as FpsLimit)
       : def.fpsLimit,
@@ -366,6 +383,7 @@ export function applyPreset(
   return {
     ...current,
     ...graphicFields,
+    tacticalPostFx: resolvedTier === 'HIGH' || resolvedTier === 'ULTRA',
     preset,
   };
 }

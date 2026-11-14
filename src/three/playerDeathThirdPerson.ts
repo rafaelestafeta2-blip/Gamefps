@@ -158,10 +158,15 @@ export class PlayerDeathThirdPersonController {
       : isCrouched
         ? 'RIFLE_DEATH_CROUCH'
         : isHeadshot
-          ? 'RIFLE_DEATH_HEADSHOT'
-          : (['RIFLE_DEATH', 'RIFLE_DEATH_BACK', 'RIFLE_DEATH_RIGHT'] as BotAnimState[])[
-              this.deathCycle++ % 3
-            ];
+          ? (['RIFLE_DEATH_HEADSHOT', 'RIFLE_DEATH_BACK_HEADSHOT'] as BotAnimState[])[
+              this.deathCycle++ % 2
+            ]
+          : ([
+              'RIFLE_DEATH',
+              'RIFLE_DEATH_BACK',
+              'RIFLE_DEATH_RIGHT',
+              'RIFLE_DEATH_CROUCH',
+            ] as BotAnimState[])[this.deathCycle++ % 4];
 
     const action = this.actions[chosenState] || this.actions.RIFLE_DEATH;
     if (action) {
@@ -381,6 +386,12 @@ export class PlayerDeathThirdPersonController {
 
   public isActive(): boolean {
     return this.active;
+  }
+
+  /** Corpse world position for medic revive range checks. */
+  public getCorpsePosition(out?: THREE.Vector3): THREE.Vector3 {
+    const v = out || new THREE.Vector3();
+    return v.copy(this.rootGroup.position);
   }
 
   public stop(

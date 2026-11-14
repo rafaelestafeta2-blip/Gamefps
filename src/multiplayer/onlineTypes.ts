@@ -91,6 +91,34 @@ export function getTeamSpawnForArena(
     return { x: -2.3 + offsetX, y: 0.5, z: 6.9 - offsetZ, yaw: Math.PI };
   }
 
+  if (mode === 'INDUSTRIA_BOMB_5V5') {
+    if (team === 'VANGUARD') {
+      return { x: 12.0 + offsetX, y: 1.85, z: -40.0 + offsetZ, yaw: 0 };
+    }
+    return { x: -5.0 + offsetX, y: 2.0, z: 48.0 - offsetZ, yaw: Math.PI };
+  }
+
+  if (mode === 'HANGAR_BOMB_5V5') {
+    if (team === 'VANGUARD') {
+      return { x: 0.0 + offsetX, y: 0.15, z: -18.0 + offsetZ, yaw: 0 };
+    }
+    return { x: 0.0 + offsetX, y: 0.15, z: 12.0 - offsetZ, yaw: Math.PI };
+  }
+
+  if (mode === 'EASTERN_CITY_BOMB_5V5') {
+    if (team === 'VANGUARD') {
+      return { x: 0.0 + offsetX, y: 0.2, z: -48.0 + offsetZ, yaw: 0 };
+    }
+    return { x: -6.0 + offsetX, y: 0.2, z: 48.0 - offsetZ, yaw: Math.PI };
+  }
+
+  if (mode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+    if (team === 'VANGUARD') {
+      return { x: -33.0 + offsetX, y: 0.2, z: -72.0 + offsetZ, yaw: 0 };
+    }
+    return { x: -20.0 + offsetX, y: 0.2, z: 12.0 - offsetZ, yaw: Math.PI };
+  }
+
   // YARD_BOMB_5V5 default
   if (team === 'VANGUARD') {
     return { x: 0 + offsetX, y: 0, z: 34.5 + offsetZ, yaw: 0 };

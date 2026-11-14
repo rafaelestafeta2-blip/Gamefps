@@ -30,7 +30,8 @@ import {
   WarfaceClassIcon,
   WarfaceClassId,
 } from './WarfaceClassIcons';
-import { WeaponPreview3D } from './WeaponVisualCard';
+import { GrenadePreview3D, WeaponPreview3D } from './WeaponVisualCard';
+import { preloadGrenadeThumbnails3D } from '../three/grenadeThumbnail3D';
 
 interface InventoryLoadoutModalProps {
   playerXp: number;
@@ -180,10 +181,19 @@ export const InventoryLoadoutModal: React.FC<InventoryLoadoutModalProps> = ({
   });
 
   useEffect(() => {
-    preloadAllWeaponThumbnails3D([
-      ...(Object.keys(WEAPON_INVENTORY_CATALOG) as WeaponId[]),
-    ]);
-    return subscribePlayerInventory((next) => setInventory(next));
+    // Defer thumbnail studio warm so the left RankedOperator3DCanvas claims its
+    // pinned WebGL slot first (otherwise thumbs evict the operator on open).
+    const warmId = window.setTimeout(() => {
+      preloadAllWeaponThumbnails3D([
+        ...(Object.keys(WEAPON_INVENTORY_CATALOG) as WeaponId[]),
+      ]);
+      preloadGrenadeThumbnails3D();
+    }, 280);
+    const unsub = subscribePlayerInventory((next) => setInventory(next));
+    return () => {
+      window.clearTimeout(warmId);
+      unsub();
+    };
   }, []);
 
   const activeClass = inventory.selectedClass;
@@ -669,8 +679,8 @@ export const InventoryLoadoutModal: React.FC<InventoryLoadoutModalProps> = ({
                         x{modifiers.fragCount}
                       </span>
                     </div>
-                    <div className="h-8 flex items-center justify-center my-0.5">
-                      <GearIconSvg kind="frag" className="w-7 h-7" />
+                    <div className="h-10 flex items-center justify-center my-0.5">
+                      <GrenadePreview3D type="FRAG" className="w-12 h-10" alt="Frag M67" />
                     </div>
                     <div className="font-mono text-[9px] text-slate-300 truncate">
                       FRAG M67
@@ -688,8 +698,8 @@ export const InventoryLoadoutModal: React.FC<InventoryLoadoutModalProps> = ({
                         x{modifiers.smokeCount}
                       </span>
                     </div>
-                    <div className="h-8 flex items-center justify-center my-0.5">
-                      <GearIconSvg kind="smoke" className="w-7 h-7" />
+                    <div className="h-10 flex items-center justify-center my-0.5">
+                      <GrenadePreview3D type="SMOKE" className="w-12 h-10" alt="Fumaça M18" />
                     </div>
                     <div className="font-mono text-[9px] text-slate-300 truncate">
                       FUMAÇA M18
@@ -785,8 +795,9 @@ export const InventoryLoadoutModal: React.FC<InventoryLoadoutModalProps> = ({
                       {modifiers.fragCount}F / {modifiers.smokeCount}S
                     </span>
                   </div>
-                  <div className="h-11 flex items-center justify-center">
-                    <GearIconSvg kind="grenadePack" className="w-14 h-9" />
+                  <div className="h-14 flex items-center justify-center gap-3">
+                    <GrenadePreview3D type="FRAG" className="w-14 h-12" alt="Frag M67" />
+                    <GrenadePreview3D type="SMOKE" className="w-14 h-12" alt="Fumaça M18" />
                   </div>
                   <div className="font-mono text-[10px] text-slate-300">
                     M67 Fragmentação + M18 Fumaça
@@ -983,12 +994,19 @@ export const InventoryLoadoutModal: React.FC<InventoryLoadoutModalProps> = ({
                         </span>
                       </div>
 
-                      <div className="h-9 flex items-center justify-center">
-                        <GearIconSvg
-                          kind={gearKind}
-                          className="w-12 h-8"
-                          accent={isOwned ? '#e2e8f0' : '#64748b'}
-                        />
+                      <div className="h-10 flex items-center justify-center gap-2">
+                        {gear.slot === 'grenadePack' ? (
+                          <>
+                            <GrenadePreview3D type="FRAG" className="w-10 h-9" />
+                            <GrenadePreview3D type="SMOKE" className="w-10 h-9" />
+                          </>
+                        ) : (
+                          <GearIconSvg
+                            kind={gearKind}
+                            className="w-12 h-8"
+                            accent={isOwned ? '#e2e8f0' : '#64748b'}
+                          />
+                        )}
                       </div>
 
                       <div className="mt-1 flex items-center justify-between gap-2 text-[9px] font-mono">
@@ -1110,6 +1128,35 @@ export const InventoryLoadoutModal: React.FC<InventoryLoadoutModalProps> = ({
                     </div>
                   ))}
                 </div>
+              </div>
+            ) : selectedSlot === 'grenadePack' ? (
+              <div className="space-y-3">
+                <div className="relative rounded-[2px] border border-white/12 bg-[radial-gradient(ellipse_at_center,_#18202c_0%,_#0b0e14_100%)] p-3 flex items-center justify-center gap-6 h-28">
+                  <div className="flex flex-col items-center gap-1">
+                    <GrenadePreview3D type="FRAG" className="w-20 h-20" alt="Frag M67" />
+                    <span className="font-mono text-[9px] text-orange-300 font-bold">
+                      M67 ×{modifiers.fragCount}
+                    </span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1">
+                    <GrenadePreview3D type="SMOKE" className="w-20 h-20" alt="Fumaça M18" />
+                    <span className="font-mono text-[9px] text-sky-300 font-bold">
+                      M18 ×{modifiers.smokeCount}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="font-display font-black text-base sm:text-lg text-[#f97316] uppercase">
+                    Kit de Granadas Táticas
+                  </h3>
+                  <div className="text-[11px] font-mono text-slate-400">
+                    Modelos 3D reais · granada_frag.glb + m18_smoke_grenade.glb
+                  </div>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed border-t border-white/10 pt-2.5">
+                  Frag M67 para limpar cantos e sites. Fumaça M18 para cruzar corredores e cobrir plant/defuse.
+                  Contagem vem do kit da classe e do reabastecimento em partida.
+                </p>
               </div>
             ) : selectedSlot === 'specialGadget' ? (
               <div className="space-y-3">
