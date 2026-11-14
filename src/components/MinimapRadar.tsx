@@ -1,6 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 import { ASSAULT_BOMB_SITE_A, ASSAULT_BOMB_SITE_B } from '../three/assaultLevelBuilder';
 import { DUST2_BOMB_SITE_A, DUST2_BOMB_SITE_B } from '../three/dust2LevelBuilder';
+import {
+  INDUSTRIA_BOMB_SITE_A,
+  INDUSTRIA_BOMB_SITE_B,
+} from '../three/industriaLevelBuilder';
 import { YARD_BOMB_SITE_A, YARD_BOMB_SITE_B } from '../three/yardMapData';
 import { DrillMode } from '../types/game';
 
@@ -45,8 +49,9 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
       const isYard = drillMode === 'YARD_BOMB_5V5';
       const isDust2 = drillMode === 'DUST2_BOMB_5V5';
       const isAssault = drillMode === 'ASSAULT_BOMB_5V5';
-      const isBombMode = isYard || isDust2 || isAssault;
-      const scale = isDust2 || isAssault ? 1.05 : isYard ? 1.35 : 2.0;
+      const isIndustria = drillMode === 'INDUSTRIA_BOMB_5V5';
+      const isBombMode = isYard || isDust2 || isAssault || isIndustria;
+      const scale = isDust2 || isAssault || isIndustria ? 1.05 : isYard ? 1.35 : 2.0;
       const maxRange = center - 6;
 
       ctx.clearRect(0, 0, size, size);
@@ -122,12 +127,16 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
           ? DUST2_BOMB_SITE_A
           : isAssault
             ? ASSAULT_BOMB_SITE_A
-            : YARD_BOMB_SITE_A;
+            : isIndustria
+              ? INDUSTRIA_BOMB_SITE_A
+              : YARD_BOMB_SITE_A;
         const siteB = isDust2
           ? DUST2_BOMB_SITE_B
           : isAssault
             ? ASSAULT_BOMB_SITE_B
-            : YARD_BOMB_SITE_B;
+            : isIndustria
+              ? INDUSTRIA_BOMB_SITE_B
+              : YARD_BOMB_SITE_B;
         const drawSitePin = (sx: number, sz: number, label: string, color: string) => {
           let rx = (sx - playerX) * scale;
           let rz = (sz - playerZ) * scale;

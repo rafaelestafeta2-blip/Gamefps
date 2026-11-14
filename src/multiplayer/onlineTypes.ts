@@ -91,6 +91,13 @@ export function getTeamSpawnForArena(
     return { x: -2.3 + offsetX, y: 0.5, z: 6.9 - offsetZ, yaw: Math.PI };
   }
 
+  if (mode === 'INDUSTRIA_BOMB_5V5') {
+    if (team === 'VANGUARD') {
+      return { x: 12.0 + offsetX, y: 1.85, z: -40.0 + offsetZ, yaw: 0 };
+    }
+    return { x: -5.0 + offsetX, y: 2.0, z: 48.0 - offsetZ, yaw: Math.PI };
+  }
+
   // YARD_BOMB_5V5 default
   if (team === 'VANGUARD') {
     return { x: 0 + offsetX, y: 0, z: 34.5 + offsetZ, yaw: 0 };

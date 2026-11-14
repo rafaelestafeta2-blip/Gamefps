@@ -21,6 +21,7 @@ interface OnlineLobbyModalProps {
 const MAP_LABELS: Record<string, { title: string; subtitle: string }> = {
   DUST2_BOMB_5V5: { title: 'DE_DUST2', subtitle: 'Deserto Clássico • Bomb A / B' },
   ASSAULT_BOMB_5V5: { title: 'CS_ASSAULT', subtitle: 'Galpão Industrial • Bomb A / B' },
+  INDUSTRIA_BOMB_5V5: { title: 'INDUSTRIA', subtitle: 'Pátio Industrial • Bomb A / B' },
   YARD_BOMB_5V5: { title: 'YARD TÁTICO', subtitle: 'Pátio de Contêineres • Bomb A / B' },
 };
 
@@ -40,6 +41,7 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
   const arenaMode: DrillMode =
     selectedMapMode === 'DUST2_BOMB_5V5' ||
     selectedMapMode === 'ASSAULT_BOMB_5V5' ||
+    selectedMapMode === 'INDUSTRIA_BOMB_5V5' ||
     selectedMapMode === 'YARD_BOMB_5V5'
       ? selectedMapMode
       : 'DUST2_BOMB_5V5';
@@ -166,7 +168,7 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
                   1. SELECIONE O MAPA PARA A SALA PRIVADA (X1 / TREINO / CLÃ)
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['DUST2_BOMB_5V5', 'ASSAULT_BOMB_5V5', 'YARD_BOMB_5V5'] as DrillMode[]).map((mode) => {
+                  {(['DUST2_BOMB_5V5', 'ASSAULT_BOMB_5V5', 'INDUSTRIA_BOMB_5V5', 'YARD_BOMB_5V5'] as DrillMode[]).map((mode) => {
                     const active = arenaMode === mode;
                     const info = MAP_LABELS[mode];
                     return (

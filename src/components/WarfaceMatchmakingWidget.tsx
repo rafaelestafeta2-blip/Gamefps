@@ -87,8 +87,12 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
   const playersCount = activeRoom ? Object.keys(activeRoom.players || {}).length : 1;
   const mins = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
   const secs = String(elapsedSec % 60).padStart(2, '0');
-  const isAssault = selectedMode === 'ASSAULT_BOMB_5V5';
-  const mapLabel = isAssault ? 'CS_ASSAULT' : 'DE_DUST2';
+  const mapLabel =
+    selectedMode === 'ASSAULT_BOMB_5V5'
+      ? 'CS_ASSAULT'
+      : selectedMode === 'INDUSTRIA_BOMB_5V5'
+        ? 'INDUSTRIA'
+        : 'DE_DUST2';
 
   const handleCancel = async () => {
     soundEngine.playMenuSelect();
@@ -144,7 +148,13 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
               type="button"
               onClick={() => {
                 soundEngine.playMenuSelect();
-                onChangeMode(isAssault ? 'DUST2_BOMB_5V5' : 'ASSAULT_BOMB_5V5');
+                onChangeMode(
+                  selectedMode === 'DUST2_BOMB_5V5'
+                    ? 'ASSAULT_BOMB_5V5'
+                    : selectedMode === 'ASSAULT_BOMB_5V5'
+                      ? 'INDUSTRIA_BOMB_5V5'
+                      : 'DUST2_BOMB_5V5'
+                );
               }}
               title="Alternar mapa da fila"
               className="px-1.5 py-0.5 rounded bg-white/8 hover:bg-white/15 border border-white/10 text-[8px] font-mono font-bold text-cyan-300 uppercase cursor-pointer"

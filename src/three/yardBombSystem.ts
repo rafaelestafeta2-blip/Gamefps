@@ -21,6 +21,11 @@ import { BallisticsFXPool } from './ballisticsPool';
 import { triggerBotFireAnimation, triggerBotHitAnimation } from './botCharacterSystem';
 import { ASSAULT_BOMB_SITE_A, ASSAULT_BOMB_SITE_B, getAssaultCalloutForPos } from './assaultLevelBuilder';
 import { DUST2_BOMB_SITE_A, DUST2_BOMB_SITE_B, getDust2CalloutForPos } from './dust2LevelBuilder';
+import {
+  INDUSTRIA_BOMB_SITE_A,
+  INDUSTRIA_BOMB_SITE_B,
+  getIndustriaCalloutForPos,
+} from './industriaLevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
 import { getYardCalloutForPos, YARD_BOMB_SITE_A, YARD_BOMB_SITE_B } from './yardMapData';
 import { YardBotEntity } from './yardPropsBuilder';
@@ -104,7 +109,9 @@ export class YardBombSystem {
           ? 'BASE VANGUARD (TR SPAWN · SUL)'
           : mode === 'ASSAULT_BOMB_5V5'
             ? 'BASE VANGUARD (CT STREET SPAWN)'
-            : 'BASE VANGUARD (SUL · RUA DO HOTEL)',
+            : mode === 'INDUSTRIA_BOMB_5V5'
+              ? 'BASE VANGUARD (APRON SUL · INDUSTRIA)'
+              : 'BASE VANGUARD (SUL · RUA DO HOTEL)',
       currentRound: prevRound, maxRounds: 6, vanguardScore: prevVg, blackthornScore: prevBt,
       // Warface-style equip window before every round (including first).
       roundState: 'EQUIP',
@@ -284,14 +291,29 @@ export class YardBombSystem {
 
     const isDust2 = this.activeMode === 'DUST2_BOMB_5V5';
     const isAssault = this.activeMode === 'ASSAULT_BOMB_5V5';
-    const siteA = isDust2 ? DUST2_BOMB_SITE_A : isAssault ? ASSAULT_BOMB_SITE_A : YARD_BOMB_SITE_A;
-    const siteB = isDust2 ? DUST2_BOMB_SITE_B : isAssault ? ASSAULT_BOMB_SITE_B : YARD_BOMB_SITE_B;
+    const isIndustria = this.activeMode === 'INDUSTRIA_BOMB_5V5';
+    const siteA = isDust2
+      ? DUST2_BOMB_SITE_A
+      : isAssault
+        ? ASSAULT_BOMB_SITE_A
+        : isIndustria
+          ? INDUSTRIA_BOMB_SITE_A
+          : YARD_BOMB_SITE_A;
+    const siteB = isDust2
+      ? DUST2_BOMB_SITE_B
+      : isAssault
+        ? ASSAULT_BOMB_SITE_B
+        : isIndustria
+          ? INDUSTRIA_BOMB_SITE_B
+          : YARD_BOMB_SITE_B;
 
     this.info.calloutLabel = isDust2
       ? getDust2CalloutForPos(playerPos.x, playerPos.y, playerPos.z)
       : isAssault
         ? getAssaultCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
-        : getYardCalloutForPos(playerPos.x, playerPos.y, playerPos.z);
+        : isIndustria
+          ? getIndustriaCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
+          : getYardCalloutForPos(playerPos.x, playerPos.y, playerPos.z);
 
     let enemies = 0;
     let allies = playerAlive ? 1 : 0;

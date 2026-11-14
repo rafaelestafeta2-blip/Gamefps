@@ -147,7 +147,8 @@ export function handleTargetHit(engine: any, targetId: string, hitZone: 'HEAD' |
         engine.state.drillMode === 'TACTICAL_WAVE' ||
         engine.state.drillMode === 'YARD_BOMB_5V5' ||
         engine.state.drillMode === 'DUST2_BOMB_5V5' ||
-        engine.state.drillMode === 'ASSAULT_BOMB_5V5'
+        engine.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+        engine.state.drillMode === 'INDUSTRIA_BOMB_5V5'
       ) {
         const remaining = engine.targets.filter(
           (t: any) =>

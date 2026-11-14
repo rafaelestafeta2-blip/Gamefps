@@ -86,6 +86,7 @@ export const MainMenuPlayPanel: React.FC<MainMenuPlayPanelProps> = ({
     switch (selectedPlayMode) {
       case 'CASUAL_DUST2':
       case 'CASUAL_ASSAULT':
+      case 'CASUAL_INDUSTRIA':
         onStartMatchmaking(modeObj.arena || 'DUST2_BOMB_5V5');
         break;
       case 'RANKED':

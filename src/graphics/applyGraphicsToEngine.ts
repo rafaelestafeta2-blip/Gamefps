@@ -270,7 +270,7 @@ export function applyGraphicsToEngine(
     const mode = (engine.state as { drillMode?: string }).drillMode;
     if (mode === 'DUST2_BOMB_5V5') {
       scene.fog = new THREE.FogExp2(0xdccbb1, 0.0038);
-    } else if (mode === 'ASSAULT_BOMB_5V5') {
+    } else if (mode === 'ASSAULT_BOMB_5V5' || mode === 'INDUSTRIA_BOMB_5V5') {
       scene.fog = new THREE.FogExp2(0xcbd5e1, 0.0036);
     } else if (mode === 'YARD_BOMB_5V5') {
       scene.fog = new THREE.FogExp2(0xcbd5e1, 0.0052);

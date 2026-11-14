@@ -156,7 +156,9 @@ export function executeSingleShot(engine: any): void {
           ? engine.dust2LevelData.collider
           : engine.state.drillMode === 'ASSAULT_BOMB_5V5'
             ? engine.assaultLevelData.collider
-            : null;
+            : engine.state.drillMode === 'INDUSTRIA_BOMB_5V5'
+              ? engine.industriaLevelData.collider
+              : null;
       const hit = raycastCombatShot(
         engine.raycaster,
         engine.shootableMeshes,
@@ -400,7 +402,9 @@ export function executeSingleShot(engine: any): void {
             ? engine.dust2LevelData.collider
             : engine.state.drillMode === 'ASSAULT_BOMB_5V5'
               ? engine.assaultLevelData.collider
-              : null;
+              : engine.state.drillMode === 'INDUSTRIA_BOMB_5V5'
+                ? engine.industriaLevelData.collider
+                : null;
 
         const hit = raycastCombatShot(
           engine.raycaster,

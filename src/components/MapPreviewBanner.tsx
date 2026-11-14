@@ -256,7 +256,7 @@ export const MapPreviewBanner: React.FC<MapPreviewBannerProps> = ({
       return;
     }
 
-    if (modeId === 'CASUAL_ASSAULT') {
+    if (modeId === 'CASUAL_ASSAULT' || modeId === 'CASUAL_INDUSTRIA') {
       drawAssaultWarehouseScene(ctx, w, h);
     } else if (modeId === 'RANGE') {
       drawShootingRangeScene(ctx, w, h);

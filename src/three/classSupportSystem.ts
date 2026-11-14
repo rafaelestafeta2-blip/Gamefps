@@ -217,7 +217,8 @@ function isBombMode(mode: string): boolean {
   return (
     mode === 'YARD_BOMB_5V5' ||
     mode === 'DUST2_BOMB_5V5' ||
-    mode === 'ASSAULT_BOMB_5V5'
+    mode === 'ASSAULT_BOMB_5V5' ||
+    mode === 'INDUSTRIA_BOMB_5V5'
   );
 }
 

@@ -96,7 +96,7 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
           <div className="text-[9px] font-mono uppercase tracking-widest text-slate-400 mb-1">
             SELECIONAR MAPA DA OPERAÇÃO (.GLB):
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => {
@@ -136,6 +136,26 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
                 Deserto Tático · Clássico 5v5
               </div>
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playMechanicalSwitch(1.05);
+                setSelectedMap('INDUSTRIA_BOMB_5V5');
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                selectedMap === 'INDUSTRIA_BOMB_5V5'
+                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
+              }`}
+            >
+              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
+                INDUSTRIA
+              </div>
+              <div className="text-[8px] font-mono text-slate-300 truncate">
+                Pátio Industrial · 2K
+              </div>
+            </button>
           </div>
         </div>
 
@@ -144,7 +164,11 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
           <div className="flex items-center justify-between text-slate-300">
             <span>Mapa Selecionado:</span>
             <span className="font-bold text-amber-300">
-              {selectedMap === 'ASSAULT_BOMB_5V5' ? 'CS_ASSAULT (.GLB)' : 'DE_DUST2 (.GLB)'}
+              {selectedMap === 'ASSAULT_BOMB_5V5'
+                ? 'CS_ASSAULT (.GLB)'
+                : selectedMap === 'INDUSTRIA_BOMB_5V5'
+                  ? 'INDUSTRIA (.GLB)'
+                  : 'DE_DUST2 (.GLB)'}
             </span>
           </div>
           <div className="flex items-center justify-between text-slate-300">

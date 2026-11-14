@@ -41,7 +41,8 @@ export type DrillMode =
   | 'TACTICAL_WAVE'
   | 'YARD_BOMB_5V5'
   | 'DUST2_BOMB_5V5'
-  | 'ASSAULT_BOMB_5V5';
+  | 'ASSAULT_BOMB_5V5'
+  | 'INDUSTRIA_BOMB_5V5';
 export type QualityPreset = 'COMPETITIVE_120' | 'BALANCED_60' | 'ULTRA_PBR';
 export type GyroMode = 'OFF' | 'ADS_ONLY' | 'ALWAYS';
 
