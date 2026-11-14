@@ -41,6 +41,7 @@ import {
   loadSavedPlayerXp,
   savePlayerXp,
 } from '../progression/ranks';
+import { canGrantMatchProgressionRewards } from '../progression/matchProgressionGate';
 import { getClassCombatModifiers } from '../progression/loadoutSystem';
 import { BallisticsFXPool } from './ballisticsPool';
 import { TacticalGrenadeSystem } from './grenadeSystem';
@@ -68,6 +69,30 @@ import {
   loadAssaultMapGeometry,
 } from './assaultLevelBuilder';
 import {
+  INDUSTRIA_ATTACKER_SPAWN,
+  INDUSTRIA_SPAWN_YAW,
+  buildIndustriaLevel,
+  loadIndustriaMapGeometry,
+} from './industriaLevelBuilder';
+import {
+  HANGAR_ATTACKER_SPAWN,
+  HANGAR_SPAWN_YAW,
+  buildHangarLevel,
+  loadHangarMapGeometry,
+} from './hangarLevelBuilder';
+import {
+  EASTERN_CITY_ATTACKER_SPAWN,
+  EASTERN_CITY_SPAWN_YAW,
+  buildEasternCityLevel,
+  loadEasternCityMapGeometry,
+} from './easternCityLevelBuilder';
+import {
+  MIRAGE_ANUBIS_ATTACKER_SPAWN,
+  MIRAGE_ANUBIS_SPAWN_YAW,
+  buildMirageAnubisLevel,
+  loadMirageAnubisMapGeometry,
+} from './mirageAnubisLevelBuilder';
+import {
   buildDust2Level,
   Dust2LevelBundle,
   DUST2_T_SPAWN,
@@ -86,10 +111,6 @@ import {
 import { PlayerDeathThirdPersonController } from './playerDeathThirdPerson';
 import { PostMatchShowcase3D } from './postMatchShowcase3D';
 import {
-  alertBotsToPlayerCombat,
-  updateSmartBotNavigation,
-} from './botNavigationSystem';
-import {
   buildStanderTiroLevel,
   loadStanderTiroMapGeometry,
   STANDER_TIRO_SPAWN,
@@ -98,11 +119,13 @@ import {
 } from './standerTiroBuilder';
 import { TacticalSkySystem } from './skySystem';
 import {
+  getActiveOnlineRoom,
   getLocalOnlinePlayerState,
   isOnlineMatchActive,
   leaveActiveRoom,
   publishBombStateChange,
   publishCombatHit,
+  subscribeOnlineClassSupport,
   subscribeOnlineHitEvents,
 } from '../multiplayer/onlineRoomService';
 import {
@@ -111,26 +134,89 @@ import {
   hideAllBotsForOnlineMatch,
   syncOnlineMatchFrame,
 } from './onlineMatchSync';
+import {
+  createDrsRuntimeState,
+  DrsRuntimeState,
+  updateDynamicResolutionGovernor,
+} from './dynamicResolutionGovernor';
+import { emitHudIfChanged, HudRadarCacheEntry } from './hudBridge';
+import { clearSharedMaterialCache } from './scenePerfOptimizer';
+import { disposeAllSecondaryWebGLRenderers } from './webglContextGuard';
+import { CombatRayHit, raycastCombatShot } from './combatRaycast';
+import { attemptFireWeapon as runAttemptFireWeapon, executeSingleShot as runExecuteSingleShot } from './weaponFireSystem';
+import { handleTargetHit as runHandleTargetHit } from './weaponHitSystem';
+import { getWeaponFeel } from '../data/weaponFeel';
+import {
+  configureTacticalPostFx,
+  createTacticalPostFx,
+  disposeTacticalPostFx,
+  renderWithTacticalPostFx,
+  TacticalPostFxState,
+} from '../graphics/tacticalPostFx';
+import { applyAimAssistToLookDelta } from './aimAssist';
+import { applyLookDelta, type LookInputState } from './engineLookInput';
+import {
+  configureIntermittentShadows,
+  createShadowBudgetState,
+  followKeyLightShadowFrustum,
+  requestShadowRefresh,
+  ShadowBudgetState,
+  tickShadowBudget,
+} from './shadowUpdateBudget';
 
 // Pre-allocated math helpers outside the frame loop (Zero GC)
-const _resolvedHoriz = { x: 0, z: 0 };
-const _forward = new THREE.Vector3();
-const _right = new THREE.Vector3();
-const _up = new THREE.Vector3(0, 1, 0);
-const _moveVec = new THREE.Vector3();
-const _rayOrigin = new THREE.Vector3();
-const _rayDir = new THREE.Vector3();
-const _worldPos = new THREE.Vector3();
-const _worldPos2 = new THREE.Vector3();
-const _hitNormal = new THREE.Vector3();
-const _targetToPlayer = new THREE.Vector3();
-const _hipPosPistol = new THREE.Vector3(0.115, -0.062, -0.27);
-const _hipPosRifle = new THREE.Vector3(0.105, -0.068, -0.3);
+import {
+  _resolvedHoriz,
+  _forward,
+  _right,
+  _up,
+  _moveVec,
+  _rayOrigin,
+  _rayDir,
+  _worldPos,
+  _worldPos2,
+  _hitNormal,
+  _targetToPlayer,
+  _hipPosPistol,
+  _hipPosRifle,
+} from './engineMathTemps';
+import { updateReloadStateMachine as runReloadStateMachine } from './reloadStateMachine';
+import { updatePlayerMovementAndCollision as runPlayerMovement } from './playerMovementSystem';
+import { checkHorizontalCollision as runHorizontalCollision } from './playerCollisionSystem';
+import { updateWeaponKinematicsAndOptics as runWeaponKinematics } from './weaponKinematicsSystem';
+import { updateTargetsAndCombatAI as runTargetsCombatAI } from './targetsCombatAiSystem';
+import { createMantleState, MantleState } from './playerMantleSystem';
+import {
+  applyIncomingClassSupportToLocal,
+  applyPlayerCombatDamage,
+  createClassSupportRuntime,
+  isLocalPlayerPendingRevive,
+  markAllyDownForRevive,
+  markLocalPlayerDownForRevive,
+  resetClassSupportForRound,
+  setClassSupportHeld,
+  updateClassSupport,
+  useClassSupport,
+  ClassSupportRuntime,
+} from './classSupportSystem';
+import { PlayerGestureThirdPerson } from './playerGestureThirdPerson';
+import {
+  ClassKitPropSystem,
+  preloadClassKitProps,
+} from './classKitPropSystem';
+import { C4PlantViewmodel, preloadC4BombProp } from './c4BombProp';
+import { preloadMixamoAnimPack } from './mixamoAnimPackLoader';
 
 export class TacticalFPSEngine {
   private container: HTMLElement;
   private onHudUpdate: (state: HudState) => void;
   private unsubOnlineHits: (() => void) | null = null;
+  private unsubOnlineClassSupport: (() => void) | null = null;
+  /** Warface local-player revive window (bomb modes). */
+  private playerReviveUntilSec = 0;
+  private playerReviveExpired = false;
+  private playerCorpsePos: THREE.Vector3 | null = null;
+  private _allyReviveCharge = 0;
 
   public readonly isSoftwareGl: boolean;
   private renderer: THREE.WebGLRenderer;
@@ -146,6 +232,10 @@ export class TacticalFPSEngine {
   private yardLevelData: TacticalLevelData;
   private dust2LevelData: Dust2LevelBundle;
   private assaultLevelData: Dust2LevelBundle;
+  private industriaLevelData: Dust2LevelBundle;
+  private hangarLevelData: Dust2LevelBundle;
+  private easternCityLevelData: Dust2LevelBundle;
+  private mirageAnubisLevelData: Dust2LevelBundle;
   private yardBombSystem: YardBombSystem;
   private colliders: ColliderBox[] = [];
   private targets: TacticalTargetEntity[] = [];
@@ -157,6 +247,8 @@ export class TacticalFPSEngine {
   private raycaster = new THREE.Raycaster();
   private laserDotMesh: THREE.Mesh;
   private keyLight!: THREE.DirectionalLight;
+  private hemiLight!: THREE.HemisphereLight;
+  private rimLight!: THREE.DirectionalLight;
   private skySystem: TacticalSkySystem;
 
   // Loop, Timing & Dynamic Resolution Governor (DRS)
@@ -168,16 +260,28 @@ export class TacticalFPSEngine {
   private elapsedTime = 0;
   private hitstopTimer = 0;
   private hudSyncTimer = 0;
-  private drsAccumTime = 0;
-  private drsFrameCount = 0;
-  private currentRenderScale = 1.0;
-  private drsLowFpsStreak = 0;
-  private drsHighFpsStreak = 0;
-  private drsCooldownSec = 0;
+  private drsState: DrsRuntimeState = createDrsRuntimeState(1.0);
+  /** Mirrored for applyGraphicsToEngine / legacy field access. */
+  private get currentRenderScale(): number {
+    return this.drsState.currentRenderScale;
+  }
+  private set currentRenderScale(value: number) {
+    this.drsState.currentRenderScale = value;
+  }
+  private hudFingerprint = { value: '' };
+  private hudForceEmit = { value: true };
   private aimRaycastTimer = 0;
   private aimRaycastInitialized = false;
   private cachedAimHits: THREE.Intersection[] = [];
   private isWindowFocused = true;
+  private shadowBudget: ShadowBudgetState = createShadowBudgetState();
+  private readonly combatRayHit: CombatRayHit = {
+    distance: 0,
+    point: new THREE.Vector3(),
+    normal: new THREE.Vector3(),
+    object: null,
+    isEnvironment: false,
+  };
 
   // Input State (Separated Held vs Edge-Triggered + Mobile Touch Analog State)
   private keysHeld = new Set<string>();
@@ -212,6 +316,24 @@ export class TacticalFPSEngine {
   private sprintExhausted = false;
   private landingDip = 0;
   private landingDipVel = 0;
+  /** FOV punch from jump/land/slide exit — decays in movement loop. */
+  private cameraFovPunch = 0;
+  /** Base camera roll before head-bob polish in kinematics. */
+  private cameraBaseRoll = 0;
+  /** True when slide forced crouch toggle on entry (auto-clear on exit). */
+  private slideForcedCrouch = false;
+  /** Code-only mantle / vault state (no dedicated mantle GLB). */
+  private mantle: MantleState = createMantleState();
+  /** Set by movement when horizontal resolve blocks intended forward motion. */
+  private mantleWallBlocked = false;
+  /** Warface class support kits (ammo / heal+revive / armor). */
+  private classSupport: ClassSupportRuntime = createClassSupportRuntime();
+  /** Mixamo 3P gestures (mantle hang, CPR, kit use) from Animaçao pack. */
+  private playerGesture!: PlayerGestureThirdPerson;
+  /** 1P class kit props (ammo crate / medkit / armor plate) held while using support. */
+  public classKitProps!: ClassKitPropSystem;
+  /** 1P C4 held while planting in bomb modes. */
+  public c4PlantView!: C4PlantViewmodel;
 
   // Weapon & Recoil Spring Kinematics
   private swayPos = new THREE.Vector2();
@@ -220,6 +342,9 @@ export class TacticalFPSEngine {
   private recoilPitch = 0;
   private recoilYaw = 0;
   private cameraShake = 0;
+  /** Per-weapon recovery multiplier for recoil damp (from weaponFeel). */
+  private weaponFeelRecovery = 1;
+  private postFx: TacticalPostFxState = createTacticalPostFx();
   private boltCycleOffset = 0;
   private muzzleFlashTimer = 0;
   private fireCooldown = 0;
@@ -251,14 +376,7 @@ export class TacticalFPSEngine {
 
   private primaryWeapon: WeaponId = 'M4_CARBINE';
   private secondaryWeapon: WeaponId = 'P50_PISTOL';
-  private cachedRadarTargets: Array<{
-    id: string;
-    sector: 'RANGE' | 'KILLHOUSE';
-    x: number;
-    z: number;
-    isDown: boolean;
-    isAlly?: boolean;
-  }> = [];
+  private cachedRadarTargets: HudRadarCacheEntry[] = [];
 
   // Public HUD state mirror (All players start with M4_CARBINE as primary and P50_PISTOL as secondary)
   public state: HudState = {
@@ -294,6 +412,18 @@ export class TacticalFPSEngine {
 
     health: 100,
     maxHealth: 100,
+    armor: 15,
+    maxArmor: 15,
+    playerClass: 'FUZILEIRO',
+    supportKind: 'AMMO',
+    supportCharges: 2,
+    supportMaxCharges: 2,
+    supportCooldownSec: 0,
+    supportPrompt: '',
+    kitChannelProgress: 0,
+    reviveChargeProgress: 0,
+    reviveMarkers: [],
+    allyNeedMarkers: [],
     stamina: 100,
     isHoldingBreath: false,
     isAds: false,
@@ -344,6 +474,7 @@ export class TacticalFPSEngine {
     gyroSensitivity: 1.0,
     lookSensitivity: 1.0,
     adsSensitivity: 1.0,
+    aimAssistStrength: 0.45,
     hapticsEnabled: true,
     isFullscreen: false,
     graphicQuality: 'HIGH',
@@ -383,14 +514,16 @@ export class TacticalFPSEngine {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 0.95;
     this.currentRenderScale = this.isSoftwareGl
       ? 1.0
       : Math.min(window.devicePixelRatio || 1, 1.35);
     this.renderer.setPixelRatio(this.currentRenderScale);
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCF (not Soft) — Soft is significantly heavier on mobile GPUs.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    configureIntermittentShadows(this.renderer);
     container.appendChild(this.renderer.domElement);
 
     // 2. Scene, Studio IBL Environment (`RoomEnvironment`) & Horizon Fog
@@ -407,7 +540,9 @@ export class TacticalFPSEngine {
     pmremGenerator.dispose();
 
     // 3. Balanced 3-Point Warm/Cool Lighting Rig
+    // Outdoor desert maps dim hemi/rim via skySystem to avoid milky fill over map suns.
     const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x1e293b, 0.75);
+    this.hemiLight = hemiLight;
     hemiLight.position.set(0, 30, 0);
     this.scene.add(hemiLight);
 
@@ -431,10 +566,16 @@ export class TacticalFPSEngine {
     this.scene.add(keyLight);
 
     const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.55);
+    this.rimLight = rimLight;
     rimLight.position.set(-25, 18, -35);
     this.scene.add(rimLight);
 
-    this.skySystem = new TacticalSkySystem(this.scene, this.keyLight);
+    this.skySystem = new TacticalSkySystem(
+      this.scene,
+      this.keyLight,
+      this.hemiLight,
+      this.rimLight
+    );
 
     // 4. First-Person Camera Hierarchy (Yaw -> Pitch -> Camera -> WeaponRig)
     this.camera = new THREE.PerspectiveCamera(
@@ -459,6 +600,15 @@ export class TacticalFPSEngine {
       this.scene,
       this.isSoftwareGl
     );
+    this.playerGesture = new PlayerGestureThirdPerson(
+      this.scene,
+      this.isSoftwareGl
+    );
+    this.classKitProps = new ClassKitPropSystem(this.camera);
+    this.c4PlantView = new C4PlantViewmodel(this.camera);
+    void preloadMixamoAnimPack();
+    void preloadClassKitProps();
+    void preloadC4BombProp();
     this.postMatchShowcase = new PostMatchShowcase3D(
       this.scene,
       this.isSoftwareGl
@@ -487,6 +637,22 @@ export class TacticalFPSEngine {
     this.assaultLevelData = buildAssaultLevel(this.isSoftwareGl);
     this.assaultLevelData.levelGroup.visible = false;
     this.scene.add(this.assaultLevelData.levelGroup);
+
+    this.industriaLevelData = buildIndustriaLevel(this.isSoftwareGl);
+    this.industriaLevelData.levelGroup.visible = false;
+    this.scene.add(this.industriaLevelData.levelGroup);
+
+    this.hangarLevelData = buildHangarLevel(this.isSoftwareGl);
+    this.hangarLevelData.levelGroup.visible = false;
+    this.scene.add(this.hangarLevelData.levelGroup);
+
+    this.easternCityLevelData = buildEasternCityLevel(this.isSoftwareGl);
+    this.easternCityLevelData.levelGroup.visible = false;
+    this.scene.add(this.easternCityLevelData.levelGroup);
+
+    this.mirageAnubisLevelData = buildMirageAnubisLevel(this.isSoftwareGl);
+    this.mirageAnubisLevelData.levelGroup.visible = false;
+    this.scene.add(this.mirageAnubisLevelData.levelGroup);
 
     this.yardBombSystem = new YardBombSystem(this.scene);
 
@@ -589,6 +755,10 @@ export class TacticalFPSEngine {
       yardLevelData: this.yardLevelData,
       dust2LevelData: this.dust2LevelData,
       assaultLevelData: this.assaultLevelData,
+      industriaLevelData: this.industriaLevelData,
+      hangarLevelData: this.hangarLevelData,
+      easternCityLevelData: this.easternCityLevelData,
+      mirageAnubisLevelData: this.mirageAnubisLevelData,
       skySystem: this.skySystem,
       grenadeSystem: this.grenadeSystem,
       onProgress,
@@ -607,6 +777,10 @@ export class TacticalFPSEngine {
       this.yardLevelData,
       this.dust2LevelData,
       this.assaultLevelData,
+      this.industriaLevelData,
+      this.hangarLevelData,
+      this.easternCityLevelData,
+      this.mirageAnubisLevelData,
       this.grenadeSystem
     );
     this.colliders = this.standerTiroLevelData.colliders;
@@ -634,26 +808,85 @@ export class TacticalFPSEngine {
         );
       }
       if (localOp && hit.targetUid === localOp.uid) {
-        if (this.isPlayerDying || this.playerDeathTp?.isActive()) return;
+        if (
+          this.isPlayerDying ||
+          this.playerDeathTp?.isActive() ||
+          isLocalPlayerPendingRevive(this as any)
+        )
+          return;
         soundEngine.playImpact(hit.isHeadshot ? 'HEADSHOT' : 'TORSO');
         mobileHardware.vibrateDamage();
         playRealPlayerHitGrunt(hit.isHeadshot);
-        this.state.health = Math.max(0, this.state.health - hit.damage);
+        applyPlayerCombatDamage(this as any, hit.damage, hit.isHeadshot);
         this.state.damageFlashAlpha = hit.isHeadshot ? 0.95 : 0.75;
-        this.cameraShake = hit.isHeadshot ? 0.024 : 0.012;
+        {
+          const flinch = getWeaponFeel(this.state.activeWeapon).flinchScale;
+          this.cameraShake = (hit.isHeadshot ? 0.024 : 0.012) * flinch;
+          this.pitch = THREE.MathUtils.clamp(
+            this.pitch - (hit.isHeadshot ? 0.018 : 0.01) * flinch,
+            -Math.PI * 0.46,
+            Math.PI * 0.46
+          );
+        }
         if (this.state.health <= 0) {
+          const room = getActiveOnlineRoom();
+          const atk = room?.players?.[hit.attackerUid];
+          const killerPos =
+            atk != null
+              ? new THREE.Vector3(atk.x, atk.y, atk.z)
+              : null;
           this.triggerPlayerDeathSequence(
             hit.isHeadshot,
             hit.attackerCallsign,
             hit.attackerTeam,
             hit.weaponId,
             () => {
+              const bomb =
+                this.state.drillMode === 'YARD_BOMB_5V5' ||
+                this.state.drillMode === 'DUST2_BOMB_5V5' ||
+                this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+                this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+                this.state.drillMode === 'HANGAR_BOMB_5V5' ||
+                this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5';
+              if (bomb) {
+                const specBot = this.playerDeathTp.startSpectating(
+                  this.targets as YardBotEntity[]
+                );
+                if (specBot && this.yardBombSystem.info.roundState === 'PLAYING') {
+                  this.yardBombSystem.info.isSpectating = true;
+                  this.yardBombSystem.info.spectatedCallsign =
+                    specBot.callsign || 'VANGUARD-02';
+                  this.yardBombSystem.info.spectatedWeapon =
+                    specBot.weaponId || 'M4_CARBINE';
+                  this.yardBombSystem.info.spectatedHealth = Math.max(
+                    0,
+                    specBot.health
+                  );
+                  this.state.damageFlashAlpha = 0;
+                }
+              }
               this.emitHud();
-            }
+            },
+            killerPos
           );
         }
         this.emitHud();
       }
+    });
+
+    this.unsubOnlineClassSupport?.();
+    this.unsubOnlineClassSupport = subscribeOnlineClassSupport((evt) => {
+      if (!isOnlineMatchActive()) return;
+      const localOp = getLocalOnlinePlayerState();
+      if (!localOp || evt.targetUid !== localOp.uid) return;
+      if (evt.fromUid === localOp.uid) return;
+      applyIncomingClassSupportToLocal(
+        this as any,
+        evt.kind,
+        evt.amount,
+        evt.phase || 'APPLY'
+      );
     });
   }
 
@@ -664,14 +897,18 @@ export class TacticalFPSEngine {
     if (mode) {
       this.state.drillMode = mode;
     }
+    // Free menu/inspection WebGL contexts so the match owns the GPU.
+    disposeAllSecondaryWebGLRenderers();
+    requestShadowRefresh(this.shadowBudget);
     this.resetScenario(this.state.drillMode);
     this.state.screen = 'PLAYING';
+    this.hudForceEmit.value = true;
     this.startLoop();
     if (this.state.gyroMode !== 'OFF') {
       void this.enableGyroSensor();
     }
     this.requestPointerLock();
-    this.emitHud();
+    this.emitHud(true);
   }
 
   public resumeGame(): void {
@@ -716,6 +953,18 @@ export class TacticalFPSEngine {
     if (this.state.drillMode === 'ASSAULT_BOMB_5V5') {
       return this.assaultLevelData.collider.getGroundHeight(x, y, z);
     }
+    if (this.state.drillMode === 'INDUSTRIA_BOMB_5V5') {
+      return this.industriaLevelData.collider.getGroundHeight(x, y, z);
+    }
+    if (this.state.drillMode === 'HANGAR_BOMB_5V5') {
+      return this.hangarLevelData.collider.getGroundHeight(x, y, z);
+    }
+    if (this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') {
+      return this.easternCityLevelData.collider.getGroundHeight(x, y, z);
+    }
+    if (this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+      return this.mirageAnubisLevelData.collider.getGroundHeight(x, y, z);
+    }
     let groundHeight = 0;
     const r = 0.15;
     for (let i = 0; i < this.colliders.length; i++) {
@@ -731,6 +980,7 @@ export class TacticalFPSEngine {
 
   public setScreenState(screen: GameScreenState): void {
     this.state.screen = screen;
+    this.hudForceEmit.value = true;
     if (screen === 'INTRO' || screen === 'LOADING' || screen === 'AUTH_LOGIN') {
       this.stopLoop();
     } else {
@@ -753,7 +1003,11 @@ export class TacticalFPSEngine {
       this.state.screen !== 'PLAYING' ||
       (this.state.drillMode !== 'YARD_BOMB_5V5' &&
         this.state.drillMode !== 'DUST2_BOMB_5V5' &&
-        this.state.drillMode !== 'ASSAULT_BOMB_5V5')
+        this.state.drillMode !== 'ASSAULT_BOMB_5V5' &&
+        this.state.drillMode !== 'INDUSTRIA_BOMB_5V5' &&
+        this.state.drillMode !== 'HANGAR_BOMB_5V5' &&
+        this.state.drillMode !== 'EASTERN_CITY_BOMB_5V5' &&
+        this.state.drillMode !== 'MIRAGE_ANUBIS_BOMB_5V5')
     ) {
       return;
     }
@@ -808,7 +1062,11 @@ export class TacticalFPSEngine {
     if (
       this.state.drillMode === 'YARD_BOMB_5V5' ||
       this.state.drillMode === 'DUST2_BOMB_5V5' ||
-      this.state.drillMode === 'ASSAULT_BOMB_5V5'
+      this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+      this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5' ||
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
     ) {
       this.yardBombSystem?.recordKillEvent(
         killerName,
@@ -841,6 +1099,23 @@ export class TacticalFPSEngine {
     this.state.damageFlashAlpha = 1.0;
     this.grenadeSystem?.unequipFromHand();
 
+    const isBombMode =
+      this.state.drillMode === 'YARD_BOMB_5V5' ||
+      this.state.drillMode === 'DUST2_BOMB_5V5' ||
+      this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+      this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5' ||
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5';
+    if (isBombMode) {
+      markLocalPlayerDownForRevive(this as any);
+    } else {
+      this.playerReviveUntilSec = 0;
+      this.playerReviveExpired = true;
+      this.playerCorpsePos = null;
+      this._allyReviveCharge = 0;
+    }
+
     this.playerDeathTp.startDeathSequence(
       this.playerPos,
       this.yaw,
@@ -872,8 +1147,14 @@ export class TacticalFPSEngine {
   }
 
   public addPlayerXp(amount: number): void {
-    // Regra estrita: O stand de tiro NÃO pode conceder XP (apenas partidas oficiais)
-    if (this.state.drillMode === 'FREE_RANGE' || amount <= 0) return;
+    // Strict: XP / rank unlocks only from online matches with other humans.
+    // FREE_RANGE, offline bomb vs AI, killhouse, and solo rooms grant 0.
+    if (amount <= 0) return;
+    if (this.state.drillMode === 'FREE_RANGE') return;
+    if (!canGrantMatchProgressionRewards()) {
+      this.state.lastXpGained = 0;
+      return;
+    }
     const oldLevel = this.state.rankLevel;
     this.state.playerXp += amount;
     this.state.lastXpGained = amount;
@@ -1246,22 +1527,13 @@ export class TacticalFPSEngine {
     this.emitHud();
   }
 
+  /** Class support kit (ammo crate / medkit+defib / armor). Key U / dock +. */
   public resupplyAmmo(): void {
-    const cap = this.state.magCapacity;
-    this.state.magazines =
-      this.state.activeWeapon === 'L49_LMG'
-        ? [cap, cap, cap]
-        : [cap, cap, cap, cap];
-    this.state.currentMagRounds = cap;
-    this.state.chambered = 1;
-    this.state.fragGrenades = 3;
-    this.state.smokeGrenades = 3;
-    this.state.boltLockedBack = false;
-    this.state.reloadPhase = 'IDLE';
-    this.state.reloadTypeLabel = `MUNIÇÃO + GRANADAS REABASTECIDAS (${cap} TIROS | 3 FRAG | 3 SMOKE)`;
-    this.magCheckTimer = 1.6;
-    soundEngine.playReloadStage('MAG_IN');
-    this.emitHud();
+    useClassSupport(this as any);
+  }
+
+  public setClassSupportHeld(held: boolean): void {
+    setClassSupportHeld(this as any, held);
   }
 
   private lastGrenadeEquipTime = 0;
@@ -1283,47 +1555,46 @@ export class TacticalFPSEngine {
         this.state.reloadTypeLabel =
           'SEM GRANADAS DE FRAGMENTAÇÃO — REABASTEÇA NO BOTÃO [+]';
         this.magCheckTimer = 1.5;
-        this.emitHud();
+        this.emitHud(true);
         return;
       }
-      this.state.reloadTypeLabel =
-        'GRANADA FRAG NA MÃO — MIRE ONDE JOGAR E APERTE ATIRAR PARA TIRAR O PINO!';
+      this.state.reloadTypeLabel = 'FRAG PRONTA — ATIRE PARA JOGAR';
     } else {
       if (this.state.smokeGrenades <= 0) {
         soundEngine.playMechanicalSwitch(0.75);
         this.state.reloadTypeLabel =
           'SEM GRANADAS DE FUMAÇA (SMOKE) — REABASTEÇA NO BOTÃO [+]';
         this.magCheckTimer = 1.5;
-        this.emitHud();
+        this.emitHud(true);
         return;
       }
-      this.state.reloadTypeLabel =
-        'GRANADA SMOKE NA MÃO — MIRE ONDE JOGAR E APERTE ATIRAR PARA TIRAR O PINO!';
+      this.state.reloadTypeLabel = 'SMOKE PRONTA — ATIRE PARA JOGAR';
     }
 
+    // Instant feedback first (haptic + state), then light equip — avoid HUD/startTransition hitch.
     this.lastGrenadeEquipTime = performance.now();
     this.state.isAds = false;
     this.state.reloadPhase = 'IDLE';
     this.state.equippedGrenade = type;
-    this.magCheckTimer = 3.5;
+    this.magCheckTimer = 1.6;
+    mobileHardware.vibratePinPull();
     this.grenadeSystem.equipInHand(type);
-    this.emitHud();
+    this.emitHud(true);
   }
 
   public useEquippedGrenade(): void {
     if (this.state.screen !== 'PLAYING') return;
     if (!this.state.equippedGrenade || this.grenadeSystem.isThrowing()) return;
-    if (performance.now() - this.lastGrenadeEquipTime < 100) return;
+    // Was 100ms — felt like lag on second tap / fire-to-throw.
+    if (performance.now() - this.lastGrenadeEquipTime < 40) return;
 
     const type = this.state.equippedGrenade;
     if (this.grenadeSystem.triggerPinPullAndThrow()) {
       this.state.isThrowingGrenade = true;
       this.state.reloadTypeLabel =
-        type === 'FRAG'
-          ? 'TIRANDO O PINO E ARREMESSANDO GRANADA DE FRAGMENTAÇÃO!'
-          : 'TIRANDO O PINO E LANÇANDO GRANADA DE FUMAÇA (SMOKE)!';
-      this.magCheckTimer = 1.8;
-      this.emitHud();
+        type === 'FRAG' ? 'ARREMESSANDO FRAG!' : 'LANÇANDO SMOKE!';
+      this.magCheckTimer = 1.2;
+      this.emitHud(true);
     }
   }
 
@@ -1378,6 +1649,7 @@ export class TacticalFPSEngine {
       if (t.health <= 0) {
         killsCount++;
         t.isDown = true;
+        t.lastDeathWasHeadshot = false;
         t.downTimer = this.state.drillMode === 'FREE_RANGE' ? 2.6 : 9999;
         t.isTelegraphing = false;
         if (t.laserLine) t.laserLine.visible = false;
@@ -1413,7 +1685,11 @@ export class TacticalFPSEngine {
         this.state.drillMode === 'TACTICAL_WAVE' ||
         this.state.drillMode === 'YARD_BOMB_5V5' ||
         this.state.drillMode === 'DUST2_BOMB_5V5' ||
-        this.state.drillMode === 'ASSAULT_BOMB_5V5'
+        this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+        this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+        this.state.drillMode === 'HANGAR_BOMB_5V5' ||
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
       ) {
         const remaining = this.targets.filter(
           (t) =>
@@ -1471,29 +1747,46 @@ export class TacticalFPSEngine {
   }
 
   public applyTouchLookDelta(dx: number, dy: number): void {
-    if (this.state.screen !== 'PLAYING') return;
-
-    const userSens = this.state.isAds
-      ? this.state.lookSensitivity * this.state.adsSensitivity
-      : this.state.lookSensitivity;
-
-    const zoomSensFactor =
-      this.state.isAds && this.state.optic === 'lpvo' && !this.state.cantedActive
-        ? 0.48 / Math.sqrt(this.state.lpvoZoom)
-        : this.state.isAds
-          ? 0.68
-          : 1.0;
-
-    const sens = 0.0044 * zoomSensFactor * userSens;
-    this.yaw -= dx * sens;
-    this.pitch = THREE.MathUtils.clamp(
-      this.pitch - dy * sens,
-      -Math.PI * 0.46,
-      Math.PI * 0.46
+    const assistTargets = (this.targets || []).map((t) => ({
+      position: t.root.position,
+      isDown: t.isDown,
+      isAlly: Boolean((t as { isAlly?: boolean }).isAlly),
+    }));
+    const assisted = applyAimAssistToLookDelta(
+      dx,
+      dy,
+      this.camera,
+      assistTargets,
+      this.state.aimAssistStrength || 0,
+      this.state.isAds
     );
+    applyLookDelta(
+      this.state,
+      this as unknown as LookInputState,
+      assisted.dx,
+      assisted.dy
+    );
+  }
 
-    this.swayVel.x -= dx * 0.00075;
-    this.swayVel.y += dy * 0.00075;
+  public setAimAssistStrength(strength: number): void {
+    this.state.aimAssistStrength = THREE.MathUtils.clamp(strength, 0, 1);
+    this.emitHud();
+  }
+
+  public configurePostFx(opts: {
+    enabled: boolean;
+    sharpen?: number;
+    bloom?: number;
+    exposure?: number;
+    lift?: number;
+  }): void {
+    configureTacticalPostFx(this.postFx, this.renderer, {
+      enabled: opts.enabled,
+      sharpen: opts.sharpen ?? 0.2,
+      bloom: opts.bloom ?? 0.12,
+      exposure: opts.exposure,
+      lift: opts.lift,
+    });
   }
 
   public setTouchFireHeld(held: boolean): void {
@@ -1554,6 +1847,20 @@ export class TacticalFPSEngine {
 
   public toggleCrouchOrSlide(): void {
     if (this.state.screen !== 'PLAYING') return;
+
+    // Mid-slide crouch tap = slide cancel into crouch (COD).
+    if (this.slideTimer > 0) {
+      this.slideTimer = 0;
+      this.state.isCrouchingToggled = true;
+      this.slideForcedCrouch = false;
+      this.state.stance = 'CROUCH';
+      this.playerVel.x *= 0.5;
+      this.playerVel.z *= 0.5;
+      this.cameraFovPunch = Math.min((this.cameraFovPunch || 0) + 2.0, 6);
+      this.emitHud();
+      return;
+    }
+
     const isMovingForwardFast =
       (this.touchSprinting ||
         (this.keysHeld.has('ShiftLeft') && this.keysHeld.has('KeyW')) ||
@@ -1562,13 +1869,15 @@ export class TacticalFPSEngine {
       this.slideTimer <= 0;
 
     if (isMovingForwardFast && !this.state.isCrouchingToggled && !this.state.isProneToggled) {
-      this.slideTimer = 0.68;
+      this.slideTimer = 0.72;
       this.camera.getWorldDirection(_forward);
       _forward.y = 0;
       _forward.normalize();
       this.slideDir.copy(_forward);
+      this.slideForcedCrouch = !this.state.isCrouchingToggled;
       this.state.isCrouchingToggled = true;
       this.state.isProneToggled = false;
+      this.cameraFovPunch = Math.min(this.cameraFovPunch + 3.2, 7);
       soundEngine.playPlayerSlide();
     } else if (this.state.isProneToggled) {
       // Stand up from Prone
@@ -1636,6 +1945,8 @@ export class TacticalFPSEngine {
         this.renderer.shadowMap.enabled = true;
         this.keyLight.castShadow = true;
         this.currentRenderScale = dpr;
+        configureIntermittentShadows(this.renderer);
+        requestShadowRefresh(this.shadowBudget);
       } else {
         this.renderer.shadowMap.enabled = false;
         this.keyLight.castShadow = false;
@@ -1728,74 +2039,28 @@ export class TacticalFPSEngine {
   }
 
   private updateDynamicResolutionGovernor(rawDt: number): void {
-    if (this.drsCooldownSec > 0) {
-      this.drsCooldownSec = Math.max(0, this.drsCooldownSec - rawDt);
-    }
-
-    this.drsAccumTime += rawDt;
-    this.drsFrameCount += 1;
-
-    if (this.drsAccumTime < 0.48) return;
-
-    const avgFps = this.drsFrameCount / this.drsAccumTime;
-    this.state.liveFps = Math.min(120, Math.round(avgFps));
-    this.drsAccumTime = 0;
-    this.drsFrameCount = 0;
-
-    if (this.isSoftwareGl || !this.state.dynamicResolutionEnabled) return;
-
-    if (this.drsCooldownSec > 0) {
-      this.drsLowFpsStreak = 0;
-      this.drsHighFpsStreak = 0;
-      return;
-    }
-
-    const maxDpr = Math.min(window.devicePixelRatio || 1, 2.0);
-    const targetCeiling =
-      this.state.qualityPreset === 'COMPETITIVE_120'
-        ? Math.min(maxDpr, 1.05)
-        : this.state.qualityPreset === 'BALANCED_60'
-          ? Math.min(maxDpr, 1.4)
-          : maxDpr;
-
-    if (avgFps < 48) {
-      this.drsLowFpsStreak += 1;
-      this.drsHighFpsStreak = 0;
-    } else if (avgFps >= 58) {
-      this.drsHighFpsStreak += 1;
-      this.drsLowFpsStreak = 0;
-    } else {
-      this.drsLowFpsStreak = 0;
-      this.drsHighFpsStreak = 0;
-    }
-
-    let nextScale = this.currentRenderScale;
-    if (this.drsLowFpsStreak >= 2 && this.currentRenderScale > 0.65) {
-      nextScale = Math.max(0.65, this.currentRenderScale - 0.08);
-    } else if (
-      this.drsHighFpsStreak >= 6 &&
-      this.currentRenderScale < targetCeiling
-    ) {
-      nextScale = Math.min(targetCeiling, this.currentRenderScale + 0.08);
-    }
-
-    if (Math.abs(nextScale - this.currentRenderScale) >= 0.01) {
-      this.currentRenderScale = nextScale;
-      this.renderer.setPixelRatio(this.currentRenderScale);
-      this.state.renderScalePercent = Math.round(
-        (this.currentRenderScale / maxDpr) * 100
-      );
-      this.drsLowFpsStreak = 0;
-      this.drsHighFpsStreak = 0;
-      this.drsCooldownSec = 4.0;
-    }
+    updateDynamicResolutionGovernor(
+      this.drsState,
+      this.state,
+      this.renderer,
+      rawDt,
+      { isSoftwareGl: this.isSoftwareGl }
+    );
   }
 
   public resetScenario(mode: DrillMode, keepMatchScore = false): void {
     const loadoutMod = getClassCombatModifiers();
     this.state.drillMode = mode;
-    this.state.maxHealth = loadoutMod.totalMaxHealth;
-    this.state.health = loadoutMod.totalMaxHealth;
+    resetClassSupportForRound(this as any);
+    this.playerReviveUntilSec = 0;
+    this.playerReviveExpired = false;
+    this.playerCorpsePos = null;
+    this._allyReviveCharge = 0;
+    try {
+      this.classKitProps?.hide?.();
+    } catch {
+      /* optional */
+    }
     this.state.stamina = 100;
     this.isPlayerDying = false;
     this.deathAnimElapsed = 0;
@@ -1833,12 +2098,16 @@ export class TacticalFPSEngine {
     this.state.boltLockedBack = false;
     this.state.reloadPhase = 'IDLE';
 
-    // Activate Warface YARD 5v5, DE_DUST2 5v5, CS_ASSAULT 5v5, Stander de Tiro (FREE_RANGE), or Killhouse Facility
+    // Activate bomb arenas, Stander de Tiro (FREE_RANGE), or Killhouse Facility
     const isYard = mode === 'YARD_BOMB_5V5';
     const isDust2 = mode === 'DUST2_BOMB_5V5';
     const isAssault = mode === 'ASSAULT_BOMB_5V5';
+    const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
+    const isHangar = mode === 'HANGAR_BOMB_5V5';
+    const isEasternCity = mode === 'EASTERN_CITY_BOMB_5V5';
+    const isMirageAnubis = mode === 'MIRAGE_ANUBIS_BOMB_5V5';
     const isFreeRange = mode === 'FREE_RANGE';
-    const isBombMode = isYard || isDust2 || isAssault;
+    const isBombMode = isYard || isDust2 || isAssault || isIndustria || isHangar || isEasternCity || isMirageAnubis;
 
     if (isFreeRange && !this.standerTiroLevelData.isLoaded) {
       void loadStanderTiroMapGeometry(
@@ -1852,16 +2121,28 @@ export class TacticalFPSEngine {
     this.yardLevelData.levelGroup.visible = isYard;
     this.dust2LevelData.levelGroup.visible = isDust2;
     this.assaultLevelData.levelGroup.visible = isAssault;
+    this.industriaLevelData.levelGroup.visible = isIndustria;
+    this.hangarLevelData.levelGroup.visible = isHangar;
+    this.easternCityLevelData.levelGroup.visible = isEasternCity;
+    this.mirageAnubisLevelData.levelGroup.visible = isMirageAnubis;
 
     const activeLevel = isDust2
       ? this.dust2LevelData
       : isAssault
         ? this.assaultLevelData
-        : isYard
-          ? this.yardLevelData
-          : isFreeRange
-            ? this.standerTiroLevelData
-            : this.facilityLevelData;
+        : isIndustria
+          ? this.industriaLevelData
+          : isHangar
+            ? this.hangarLevelData
+            : isEasternCity
+              ? this.easternCityLevelData
+            : isMirageAnubis
+              ? this.mirageAnubisLevelData
+            : isYard
+              ? this.yardLevelData
+              : isFreeRange
+                ? this.standerTiroLevelData
+                : this.facilityLevelData;
     this.colliders = activeLevel.colliders;
     this.targets = activeLevel.targets;
     this.targetMap.clear();
@@ -1940,6 +2221,142 @@ export class TacticalFPSEngine {
       this.pitch = 0;
       this.yardBombSystem.resetRound('ASSAULT_BOMB_5V5', keepMatchScore);
       this.state.yardBomb = { ...this.yardBombSystem.info };
+    } else if (isIndustria) {
+      if (!this.industriaLevelData.isLoaded) {
+        void loadIndustriaMapGeometry(
+          this.industriaLevelData,
+          this.isSoftwareGl,
+          new THREE.LoadingManager()
+        ).then(() => {
+          if (this.state.drillMode === 'INDUSTRIA_BOMB_5V5') {
+            this.playerPos.y = this.industriaLevelData.collider.getGroundHeight(
+              this.playerPos.x,
+              this.playerPos.y,
+              this.playerPos.z
+            );
+            this.playerVel.y = 0;
+            this.isGrounded = true;
+          }
+        });
+      }
+      const startY = this.industriaLevelData.collider.ready
+        ? this.industriaLevelData.collider.getGroundHeight(
+            INDUSTRIA_ATTACKER_SPAWN.x,
+            INDUSTRIA_ATTACKER_SPAWN.y,
+            INDUSTRIA_ATTACKER_SPAWN.z
+          )
+        : INDUSTRIA_ATTACKER_SPAWN.y;
+      this.playerPos.set(
+        INDUSTRIA_ATTACKER_SPAWN.x,
+        startY,
+        INDUSTRIA_ATTACKER_SPAWN.z
+      );
+      this.yaw = INDUSTRIA_SPAWN_YAW;
+      this.pitch = 0;
+      this.yardBombSystem.resetRound('INDUSTRIA_BOMB_5V5', keepMatchScore);
+      this.state.yardBomb = { ...this.yardBombSystem.info };
+    } else if (isHangar) {
+      if (!this.hangarLevelData.isLoaded) {
+        void loadHangarMapGeometry(
+          this.hangarLevelData,
+          this.isSoftwareGl,
+          new THREE.LoadingManager()
+        ).then(() => {
+          if (this.state.drillMode === 'HANGAR_BOMB_5V5') {
+            this.playerPos.y = this.hangarLevelData.collider.getGroundHeight(
+              this.playerPos.x,
+              this.playerPos.y,
+              this.playerPos.z
+            );
+            this.playerVel.y = 0;
+            this.isGrounded = true;
+          }
+        });
+      }
+      const startY = this.hangarLevelData.collider.ready
+        ? this.hangarLevelData.collider.getGroundHeight(
+            HANGAR_ATTACKER_SPAWN.x,
+            HANGAR_ATTACKER_SPAWN.y,
+            HANGAR_ATTACKER_SPAWN.z
+          )
+        : HANGAR_ATTACKER_SPAWN.y;
+      this.playerPos.set(
+        HANGAR_ATTACKER_SPAWN.x,
+        startY,
+        HANGAR_ATTACKER_SPAWN.z
+      );
+      this.yaw = HANGAR_SPAWN_YAW;
+      this.pitch = 0;
+      this.yardBombSystem.resetRound('HANGAR_BOMB_5V5', keepMatchScore);
+      this.state.yardBomb = { ...this.yardBombSystem.info };
+    } else if (isEasternCity) {
+      if (!this.easternCityLevelData.isLoaded) {
+        void loadEasternCityMapGeometry(
+          this.easternCityLevelData,
+          this.isSoftwareGl,
+          new THREE.LoadingManager()
+        ).then(() => {
+          if (this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') {
+            this.playerPos.y = this.easternCityLevelData.collider.getGroundHeight(
+              this.playerPos.x,
+              this.playerPos.y,
+              this.playerPos.z
+            );
+            this.playerVel.y = 0;
+            this.isGrounded = true;
+          }
+        });
+      }
+      const startY = this.easternCityLevelData.collider.ready
+        ? this.easternCityLevelData.collider.getGroundHeight(
+            EASTERN_CITY_ATTACKER_SPAWN.x,
+            EASTERN_CITY_ATTACKER_SPAWN.y,
+            EASTERN_CITY_ATTACKER_SPAWN.z
+          )
+        : EASTERN_CITY_ATTACKER_SPAWN.y;
+      this.playerPos.set(
+        EASTERN_CITY_ATTACKER_SPAWN.x,
+        startY,
+        EASTERN_CITY_ATTACKER_SPAWN.z
+      );
+      this.yaw = EASTERN_CITY_SPAWN_YAW;
+      this.pitch = 0;
+      this.yardBombSystem.resetRound('EASTERN_CITY_BOMB_5V5', keepMatchScore);
+      this.state.yardBomb = { ...this.yardBombSystem.info };
+    } else if (isMirageAnubis) {
+      if (!this.mirageAnubisLevelData.isLoaded) {
+        void loadMirageAnubisMapGeometry(
+          this.mirageAnubisLevelData,
+          this.isSoftwareGl,
+          new THREE.LoadingManager()
+        ).then(() => {
+          if (this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+            this.playerPos.y = this.mirageAnubisLevelData.collider.getGroundHeight(
+              this.playerPos.x,
+              this.playerPos.y,
+              this.playerPos.z
+            );
+            this.playerVel.y = 0;
+            this.isGrounded = true;
+          }
+        });
+      }
+      const startY = this.mirageAnubisLevelData.collider.ready
+        ? this.mirageAnubisLevelData.collider.getGroundHeight(
+            MIRAGE_ANUBIS_ATTACKER_SPAWN.x,
+            MIRAGE_ANUBIS_ATTACKER_SPAWN.y,
+            MIRAGE_ANUBIS_ATTACKER_SPAWN.z
+          )
+        : MIRAGE_ANUBIS_ATTACKER_SPAWN.y;
+      this.playerPos.set(
+        MIRAGE_ANUBIS_ATTACKER_SPAWN.x,
+        startY,
+        MIRAGE_ANUBIS_ATTACKER_SPAWN.z
+      );
+      this.yaw = MIRAGE_ANUBIS_SPAWN_YAW;
+      this.pitch = 0;
+      this.yardBombSystem.resetRound('MIRAGE_ANUBIS_BOMB_5V5', keepMatchScore);
+      this.state.yardBomb = { ...this.yardBombSystem.info };
     } else if (isYard) {
       this.playerPos.set(
         YARD_ATTACKER_SPAWN.x,
@@ -1971,6 +2388,9 @@ export class TacticalFPSEngine {
     let activeCount = 0;
     this.targets.forEach((t) => {
       t.isDown = false;
+      t.lastDeathWasHeadshot = false;
+      t.reviveUntilSec = 0;
+      t.reviveExpired = false;
       t.downTimer = 0;
       t.health = t.maxHealth;
       t.armorHealth = t.armorMesh ? 60 : 0;
@@ -2119,6 +2539,7 @@ export class TacticalFPSEngine {
         break;
       case 'KeyU':
         this.resupplyAmmo();
+        this.setClassSupportHeld(true);
         break;
       case 'KeyM':
         this.toggleMute();
@@ -2130,7 +2551,11 @@ export class TacticalFPSEngine {
         if (
           (this.state.drillMode === 'YARD_BOMB_5V5' ||
             this.state.drillMode === 'DUST2_BOMB_5V5' ||
-            this.state.drillMode === 'ASSAULT_BOMB_5V5') &&
+            this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+            this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+            this.state.drillMode === 'HANGAR_BOMB_5V5' ||
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') &&
           this.yardBombSystem.info.nearSite &&
           this.yardBombSystem.info.bombStatus === 'CARRIED'
         ) {
@@ -2141,7 +2566,11 @@ export class TacticalFPSEngine {
         if (
           (this.state.drillMode === 'YARD_BOMB_5V5' ||
             this.state.drillMode === 'DUST2_BOMB_5V5' ||
-            this.state.drillMode === 'ASSAULT_BOMB_5V5') &&
+            this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+            this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+            this.state.drillMode === 'HANGAR_BOMB_5V5' ||
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') &&
           this.yardBombSystem.info.nearSite &&
           this.yardBombSystem.info.bombStatus === 'CARRIED'
         ) {
@@ -2195,6 +2624,9 @@ export class TacticalFPSEngine {
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keysHeld.delete(e.code);
+    if (e.code === 'KeyU') {
+      this.setClassSupportHeld(false);
+    }
   };
 
   private onMouseDown = (e: MouseEvent) => {
@@ -2597,365 +3029,11 @@ export class TacticalFPSEngine {
   // BALLISTICS & WEAPON FIRING
   // =========================================================================
   private attemptFireWeapon(): void {
-    if (this.isPlayerDying || this.state.health <= 0) return;
-    // If the player is holding a grenade in hand, pressing Fire pulls the pin & throws the grenade!
-    if (
-      this.state.equippedGrenade !== null ||
-      this.grenadeSystem.isBusyOrHolding()
-    ) {
-      if (!this.triggerPulledThisPress) {
-        this.triggerPulledThisPress = true;
-        this.useEquippedGrenade();
-      }
-      return;
-    }
-
-    if (this.state.reloadPhase !== 'IDLE' && this.state.reloadPhase !== 'MAG_CHECK') {
-      return;
-    }
-    if (this.fireCooldown > 0) return;
-
-    // Prevent firing if barrel is heavily tucked against a wall
-    if (this.state.wallTuckAmount > 0.78) {
-      soundEngine.playMechanicalSwitch(0.7);
-      return;
-    }
-
-    if (this.state.chambered === 0) {
-      if (this.sniperChamberTimer > 0) {
-        return;
-      }
-      if (!this.triggerPulledThisPress) {
-        soundEngine.playDryFire();
-        this.triggerPulledThisPress = true;
-        if (this.state.currentMagRounds <= 0) {
-          this.triggerReload(false);
-        } else {
-          this.triggerManualBoltRack();
-        }
-      }
-      return;
-    }
-
-    if (this.state.fireMode === 'SEMI' && this.triggerPulledThisPress) {
-      return;
-    }
-
-    this.triggerPulledThisPress = true;
-    if (this.state.fireMode === 'BURST' && this.burstRemaining === 0) {
-      this.burstRemaining = 3;
-    }
-
-    // Interrompe imediatamente o sprint para trazer a arma para a mira frontal e atirar no alvo
-    if (this.state.stance === 'SPRINT' || this.touchSprinting) {
-      this.touchSprinting = false;
-      this.sprintPoseAlpha = 0;
-      this.state.stance = 'STAND';
-    }
-
-    this.executeSingleShot();
+    runAttemptFireWeapon(this as any);
   }
 
   private executeSingleShot(): void {
-    if (this.state.activeWeapon === 'KNIFE_TACTICAL') {
-      this.fireCooldown = 0.52;
-      this.state.shotsFired += 1;
-      this.weaponRig.triggerFireAnimation(false);
-      soundEngine.playKnifeSlash();
-      mobileHardware.vibrateKnifeSlash();
-
-      this.yawObject.rotation.y = this.yaw;
-      this.pitchObject.rotation.x = this.pitch;
-      this.camera.updateMatrixWorld(true);
-
-      this.camera.getWorldPosition(_rayOrigin);
-      this.camera.getWorldDirection(_rayDir);
-      this.raycaster.set(_rayOrigin, _rayDir);
-      this.raycaster.far = 2.4;
-
-      const hits = this.raycaster.intersectObjects(this.shootableMeshes, false);
-      if (hits.length > 0) {
-        const hit = hits[0];
-        const hitMesh = hit.object as THREE.Mesh;
-        const wallWeaponId = hitMesh.userData.wallWeaponId as
-          | WeaponId
-          | undefined;
-        if (wallWeaponId) {
-          this.selectWeapon(wallWeaponId);
-          return;
-        }
-
-        const targetId = hitMesh.userData.targetId as string | undefined;
-        if (targetId) {
-          soundEngine.playKnifeHit();
-          mobileHardware.vibrateKnifeHit();
-          this.state.hitMarkerAlpha = 1.0;
-          this.state.hitMarkerIsCrit = true;
-          _hitNormal.set(0, 1, 0);
-          this.handleTargetHit(
-            targetId,
-            'HEAD',
-            hit.distance,
-            hit.point,
-            _hitNormal
-          );
-        } else {
-          soundEngine.playKnifeHit();
-          _hitNormal.set(0, 1, 0);
-          this.fxPool.spawnImpactFX(hit.point, _hitNormal, false, false);
-        }
-      }
-      this.emitHud();
-      return;
-    }
-
-    // Safety check: weapon cannot fire if chamber is empty
-    if (this.state.chambered === 0) {
-      this.burstRemaining = 0;
-      soundEngine.playDryFire();
-      if (this.state.currentMagRounds <= 0) {
-        this.triggerReload(false);
-      } else {
-        this.triggerManualBoltRack();
-      }
-      return;
-    }
-
-    const isSniper =
-      this.state.activeWeapon === 'SNIPER_BOLT' ||
-      this.state.activeWeapon === 'SNIPER_TACTICAL';
-    const wasScopedAtShot = this.state.isAds;
-
-    const isShotgun =
-      this.state.activeWeapon === 'SHOTGUN_12' ||
-      this.state.activeWeapon === 'SHOTGUN_SPAS';
-
-    if (isSniper) {
-      const boltDur =
-        this.state.activeWeapon === 'SNIPER_BOLT' ? 1.32 : 1.08;
-      this.fireCooldown = boltDur + 0.1;
-      this.sniperChamberDuration = boltDur;
-      if (this.state.currentMagRounds > 0) {
-        this.sniperChamberTimer = boltDur;
-        this.sniperReturnToScopeAfterBolt = wasScopedAtShot;
-        this.state.reloadTypeLabel =
-          'CICLANDO FERROLHO — CARREGANDO PRÓXIMA BALA...';
-        this.magCheckTimer = boltDur;
-        soundEngine.playBoltActionCycle();
-      } else {
-        this.sniperChamberTimer = 0;
-        this.sniperReturnToScopeAfterBolt = false;
-        this.state.boltLockedBack = true;
-      }
-    } else if (isShotgun) {
-      this.fireCooldown =
-        this.state.activeWeapon === 'SHOTGUN_12' ? 0.68 : 0.32;
-    } else {
-      this.fireCooldown =
-        this.state.activeWeapon === 'SMG_45'
-          ? 0.066
-          : this.state.activeWeapon === 'SMG_MP5'
-            ? 0.072
-            : this.state.activeWeapon === 'AK47_RIFLE'
-              ? 0.095
-              : this.state.activeWeapon === 'AK12_RIFLE'
-                ? 0.086
-                : 0.078;
-    }
-    this.state.shotsFired += 1;
-
-    // Consume chambered round and cycle bolt carrier
-    this.state.chambered = 0;
-    if (!isSniper) {
-      if (this.state.currentMagRounds > 0) {
-        this.state.currentMagRounds -= 1;
-        this.state.chambered = 1;
-        this.state.boltLockedBack = false;
-      } else {
-        // Last round fired! Lock Bolt Carrier Group back!
-        this.state.boltLockedBack = true;
-      }
-    }
-
-    // Play weapon-specific gunshot audio (Desert Eagle .WAV for P50 Pistol) + Mobile Haptic Vibration
-    soundEngine.playGunshot(
-      this.state.suppressorAttached,
-      this.state.boltLockedBack,
-      this.state.activeWeapon
-    );
-    if (!this.state.suppressorAttached) {
-      alertBotsToPlayerCombat(this.targets, this.playerPos, null);
-    }
-    mobileHardware.vibrateGunshot(
-      this.state.suppressorAttached,
-      this.state.boltLockedBack
-    );
-
-    // Muzzle flash, GLB embedded fire animation (Fire / Fire_ADS) & bolt carrier kick
-    this.weaponRig.triggerFireAnimation(wasScopedAtShot);
-    this.boltCycleOffset = 0.052;
-    this.muzzleFlashTimer = this.state.suppressorAttached ? 0.022 : 0.056;
-    this.weaponRig.muzzleFlashGroup.rotation.z = Math.random() * Math.PI * 2;
-    const randFlashScale = 0.92 + Math.random() * 0.36;
-    this.weaponRig.muzzleFlashGroup.scale.set(
-      randFlashScale,
-      randFlashScale,
-      0.95 + Math.random() * 0.45
-    );
-
-    // Eject spinning 5.56mm brass casing from ejection port + 3D brass bounce sound on concrete
-    this.weaponRig.ejectionPortWorldPos.getWorldPosition(_worldPos);
-    this.camera.getWorldDirection(_forward);
-    _right.crossVectors(_forward, _up).normalize();
-    this.fxPool.spawnBrassCasing(_worldPos, _right, _up);
-    playShellCasingDrop3D(
-      this.playerPos,
-      this.playerPos,
-      this.yaw,
-      this.state.activeWeapon,
-      true
-    );
-
-    // Perform Ballistic Raycast FIRST (aligned with exact current Sight/Crosshair vector before recoil kick & unscope!)
-    this.yawObject.rotation.y = this.yaw;
-    this.pitchObject.rotation.x = this.pitch;
-    this.camera.updateMatrixWorld(true);
-
-    this.camera.getWorldPosition(_rayOrigin);
-    this.camera.getWorldDirection(_rayDir);
-
-    // Tight, predictable dispersion when hip-firing or moving fast; 100% pinpoint accuracy when ADS
-    const speed = Math.hypot(this.playerVel.x, this.playerVel.z);
-    const hipSpread =
-      this.state.adsAlpha > 0.85
-        ? 0
-        : (1 - this.state.adsAlpha) * 0.0028 + speed * 0.001;
-    if (hipSpread > 0.0002) {
-      _rayDir.x += (Math.random() - 0.5) * hipSpread;
-      _rayDir.y += (Math.random() - 0.5) * hipSpread;
-      _rayDir.z += (Math.random() - 0.5) * hipSpread;
-      _rayDir.normalize();
-    }
-
-    this.weaponRig.muzzleWorldPos.getWorldPosition(_worldPos2);
-
-    const pelletCount = isShotgun ? 8 : 1;
-    const baseDir = _rayDir.clone();
-    const pelletSpread =
-      this.state.activeWeapon === 'SHOTGUN_12'
-        ? wasScopedAtShot
-          ? 0.036
-          : 0.052
-        : this.state.activeWeapon === 'SHOTGUN_SPAS'
-          ? wasScopedAtShot
-            ? 0.04
-            : 0.058
-          : 0;
-
-    // For bolt-action Snipers: immediately exit the scope zoom AFTER the shot raycast so the player sees the 3D bolt-action animation!
-    if (isSniper && wasScopedAtShot) {
-      this.state.isAds = false;
-      this.touchHoldBreath = false;
-    }
-
-    // Physical Recoil Impulse applied AFTER raycast (so shot lands where player aimed)
-    const stanceMult = this.state.stance === 'CROUCH' ? 0.72 : 1.0;
-    const suppMult = this.state.suppressorAttached ? 0.82 : 1.0;
-    const adsMult = wasScopedAtShot ? 0.55 : 1.0;
-    const shotgunKickMult = isShotgun ? 2.15 : 1.0;
-    const totalMult = stanceMult * suppMult * adsMult * shotgunKickMult;
-
-    this.recoilKickZ = Math.min(this.recoilKickZ + 0.032 * totalMult, 0.088);
-    this.recoilPitch += (0.012 + Math.random() * 0.004) * totalMult;
-    this.recoilYaw += (Math.random() - 0.5) * 0.004 * totalMult;
-    this.cameraShake = Math.min(this.cameraShake + 0.004 * totalMult, 0.016);
-
-    this.pitch = THREE.MathUtils.clamp(
-      this.pitch + 0.006 * totalMult,
-      -Math.PI * 0.46,
-      Math.PI * 0.46
-    );
-
-    let wallSelected = false;
-    for (let p = 0; p < pelletCount; p++) {
-      const pDir = _rayDir.copy(baseDir);
-      if (isShotgun) {
-        if (p > 0) {
-          const ang = ((p - 1) / (pelletCount - 1)) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
-          const rad = (0.35 + Math.random() * 0.65) * pelletSpread;
-          pDir.x += Math.cos(ang) * rad;
-          pDir.y += Math.sin(ang) * rad;
-          pDir.z += (Math.random() - 0.5) * rad * 0.35;
-          pDir.normalize();
-        }
-      }
-      this.raycaster.set(_rayOrigin, pDir);
-      this.raycaster.far = isShotgun ? 34 : 140;
-
-      const hits = this.raycaster.intersectObjects(this.shootableMeshes, false);
-      if (hits.length > 0) {
-        const hit = hits[0];
-        const hitMesh = hit.object as THREE.Mesh;
-        const dist = hit.distance;
-
-        if (p < 3) {
-          this.fxPool.spawnTracer(_worldPos2, hit.point);
-        }
-
-        if (hit.face) {
-          _hitNormal
-            .copy(hit.face.normal)
-            .transformDirection(hitMesh.matrixWorld)
-            .normalize();
-        } else {
-          _hitNormal.set(0, 1, 0);
-        }
-
-        const wallWeaponId = hitMesh.userData.wallWeaponId as
-          | WeaponId
-          | undefined;
-        if (wallWeaponId && !wallSelected) {
-          wallSelected = true;
-          this.selectWeapon(wallWeaponId);
-          return;
-        }
-
-        const targetId = hitMesh.userData.targetId as string | undefined;
-        const hitZone = hitMesh.userData.hitZone as
-          | 'HEAD'
-          | 'TORSO_A'
-          | 'ARMOR'
-          | 'STEEL_GONG'
-          | undefined;
-
-        if (targetId && hitZone) {
-          this.handleTargetHit(targetId, hitZone, dist, hit.point, _hitNormal, isShotgun);
-        } else {
-          const surfMat = detectSurfaceMaterialFromMesh(hitMesh, hit.point);
-          this.fxPool.spawnImpactFX(
-            hit.point,
-            _hitNormal,
-            surfMat === 'METAL',
-            false
-          );
-          if (p === 0) {
-            playMaterialImpact3D(hit.point, _rayOrigin, this.yaw, surfMat);
-            if (surfMat === 'CONCRETE') {
-              soundEngine.playImpact('CONCRETE');
-            }
-          }
-        }
-      } else if (p < 2) {
-        _worldPos.copy(_rayOrigin).addScaledVector(pDir, isShotgun ? 28 : 80);
-        this.fxPool.spawnTracer(_worldPos2, _worldPos);
-      }
-    }
-
-    if (this.burstRemaining > 0) {
-      this.burstRemaining -= 1;
-    }
-
-    this.emitHud();
+    runExecuteSingleShot(this as any);
   }
 
   private handleTargetHit(
@@ -2966,171 +3044,15 @@ export class TacticalFPSEngine {
     hitNormal: THREE.Vector3,
     isShotgunPellet = false
   ): void {
-    const target = this.targetMap.get(targetId);
-    if (!target || target.isDown || (target as YardBotEntity).isAlly) return;
-
-    this.state.hits += 1;
-    const velocityMs = Math.round(
-      Math.max(420, (this.state.suppressorAttached ? 915 : 890) - distanceMeters * 2.4)
-    );
-
-    if (hitZone === 'STEEL_GONG') {
-      // Steel Gong Harmonics & Reactive Swing
-      soundEngine.playImpact('STEEL_GONG');
-      this.fxPool.spawnImpactFX(hitPoint, hitNormal, true, false);
-      target.hitTiltVelocity = -12.5;
-      this.state.score += 75;
-      this.state.hitMarkerAlpha = 1.0;
-      this.state.hitMarkerIsCrit = false;
-      this.state.lastHitZone = 'TORSO';
-      this.recordShotTelemetry(distanceMeters, 'STEEL_GONG', 75, velocityMs);
-      return;
-    }
-
-    const isSniper =
-      this.state.activeWeapon === 'SNIPER_BOLT' ||
-      this.state.activeWeapon === 'SNIPER_TACTICAL';
-
-    if (hitZone === 'ARMOR' && target.armorHealth > 0) {
-      if (isSniper) {
-        // Sniper .338 Lapua / .308 AP round punches straight through armor, shattering it and continuing to lethal body damage
-        target.armorHealth = 0;
-        if (target.armorMesh) target.armorMesh.visible = false;
-        soundEngine.playImpact('ARMOR_BREAK');
-      } else {
-        target.armorHealth -= isShotgunPellet ? 16 : 34;
-        target.hitTiltVelocity = -5.5;
-        triggerBotHitAnimation(target);
-        this.fxPool.spawnImpactFX(hitPoint, hitNormal, true, false);
-        this.state.hitMarkerAlpha = 1.0;
-        this.state.hitMarkerIsCrit = false;
-        this.state.lastHitZone = 'ARMOR';
-
-        if (target.armorHealth <= 0 && target.armorMesh) {
-          target.armorMesh.visible = false;
-          soundEngine.playImpact('ARMOR_BREAK');
-          this.hitstopTimer = 0.038; // Crisp 38ms hitstop on armor shatter
-        } else {
-          soundEngine.playImpact('TORSO');
-        }
-        this.recordShotTelemetry(distanceMeters, 'ARMOR', isShotgunPellet ? 14 : 25, velocityMs);
-        return;
-      }
-    }
-
-    const isHead = hitZone === 'HEAD';
-    let damage = isSniper ? 250 : isHead ? 110 : 42;
-    if (isShotgunPellet) {
-      // Short-range 12ga buckshot: devastating <= 11m, steep falloff beyond 18m
-      const closeFactor =
-        distanceMeters <= 10
-          ? 1.0
-          : distanceMeters >= 24
-            ? 0.2
-            : 1.0 - ((distanceMeters - 10) / 14) * 0.8;
-      const perPelletBase =
-        this.state.activeWeapon === 'SHOTGUN_12' ? 28 : 24;
-      damage = Math.max(4, Math.round(perPelletBase * closeFactor * (isHead ? 1.5 : 1.0)));
-    }
-    target.health -= damage;
-    if (isOnlineMatchActive() && target.root.userData?.remotePlayerUid) {
-      publishCombatHit(
-        String(target.root.userData.remotePlayerUid),
-        damage,
-        isHead || isSniper,
-        this.state.activeWeapon
-      );
-    }
-    target.hitTiltVelocity = isSniper || isHead ? -16.0 : -7.5;
-    triggerBotHitAnimation(target);
-    alertBotsToPlayerCombat(this.targets, this.playerPos, target);
-
-    this.fxPool.spawnImpactFX(hitPoint, hitNormal, isHead || isSniper, isHead || isSniper);
-    this.state.hitMarkerAlpha = 1.0;
-    this.state.hitMarkerIsCrit = isHead || isSniper;
-    playRealHitmarkerSound(isHead || isSniper);
-
-    if (isHead || isSniper) {
-      if (isHead) this.state.headshots += 1;
-      soundEngine.playImpact(isHead ? 'HEADSHOT' : 'TORSO');
-      mobileHardware.vibrateHitConfirm(true);
-      this.hitstopTimer = isSniper ? 0.052 : 0.042; // Heavy tactile hitstop on lethal sniper shot
-    } else {
-      soundEngine.playImpact('TORSO');
-      mobileHardware.vibrateHitConfirm(false);
-    }
-
-    this.recordShotTelemetry(
+    runHandleTargetHit(
+      this as any,
+      targetId,
+      hitZone,
       distanceMeters,
-      isHead ? 'HEAD' : 'TORSO_A',
-      damage,
-      velocityMs
+      hitPoint,
+      hitNormal,
+      isShotgunPellet
     );
-
-    if (target.health <= 0) {
-      target.isDown = true;
-      target.downTimer = this.state.drillMode === 'FREE_RANGE' ? 2.6 : 9999;
-      target.isTelegraphing = false;
-      if (target.laserLine) target.laserLine.visible = false;
-      if (isHead) {
-        soundEngine.playHeadshotDeath();
-      }
-      this.state.score += isHead ? 150 : 100;
-      this.state.lastHitZone = 'KILL';
-
-      const bot = target as YardBotEntity;
-      if (this.state.drillMode !== 'FREE_RANGE') {
-        triggerTacticalRadioCallout('TARGET_DOWN');
-      }
-      this.registerKill(
-        'VOCÊ',
-        'VANGUARD',
-        bot.callsign || 'INIMIGO-BT',
-        'BLACKTHORN',
-        this.state.activeWeapon,
-        isHead
-      );
-
-      // Update remaining drill targets
-      if (
-        this.state.drillMode === 'KILLHOUSE_BLITZ' ||
-        this.state.drillMode === 'TACTICAL_WAVE' ||
-        this.state.drillMode === 'YARD_BOMB_5V5' ||
-        this.state.drillMode === 'DUST2_BOMB_5V5' ||
-        this.state.drillMode === 'ASSAULT_BOMB_5V5'
-      ) {
-        const remaining = this.targets.filter(
-          (t) =>
-            t.sector === 'KILLHOUSE' &&
-            !t.isDown &&
-            !(t as YardBotEntity).isAlly
-        ).length;
-        this.state.targetsRemaining = remaining;
-
-        if (
-          remaining === 0 &&
-          (this.state.drillMode === 'KILLHOUSE_BLITZ' ||
-            this.state.drillMode === 'TACTICAL_WAVE')
-        ) {
-          if (
-            this.state.bestCourseTimeSec === null ||
-            this.state.courseTimerSec < this.state.bestCourseTimeSec
-          ) {
-            this.state.bestCourseTimeSec = Number(
-              this.state.courseTimerSec.toFixed(2)
-            );
-          }
-          this.addPlayerXp(350);
-          this.state.screen = 'VICTORY';
-          if (document.pointerLockElement) {
-            document.exitPointerLock();
-          }
-        }
-      }
-    } else {
-      this.state.score += 35;
-      this.state.lastHitZone = isHead ? 'HEAD' : 'TORSO';
-    }
   }
 
   private recordShotTelemetry(
@@ -3194,9 +3116,23 @@ export class TacticalFPSEngine {
       } else {
         this.updatePlayingSimulation(dt);
       }
+      if (this.keyLight?.castShadow && this.renderer.shadowMap.enabled) {
+        followKeyLightShadowFrustum(this.keyLight, this.playerPos);
+        tickShadowBudget(this.renderer, this.shadowBudget, this.playerPos, dt);
+      }
     }
 
-    this.renderer.render(this.scene, this.camera);
+    if (this.postFx.enabled && this.state.screen === 'PLAYING') {
+      renderWithTacticalPostFx(
+        this.postFx,
+        this.renderer,
+        this.scene,
+        this.camera,
+        this.state.damageFlashAlpha || 0
+      );
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
     if (this.isLoopRunning && !this.disposed) {
       this.frameId = requestAnimationFrame(this.tick);
     }
@@ -3253,7 +3189,11 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'TACTICAL_WAVE' ||
       this.state.drillMode === 'YARD_BOMB_5V5' ||
       this.state.drillMode === 'DUST2_BOMB_5V5' ||
-      this.state.drillMode === 'ASSAULT_BOMB_5V5'
+      this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+      this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5' ||
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
     ) {
       this.state.courseTimerSec += dt;
     }
@@ -3261,7 +3201,11 @@ export class TacticalFPSEngine {
     if (
       this.state.drillMode === 'YARD_BOMB_5V5' ||
       this.state.drillMode === 'DUST2_BOMB_5V5' ||
-      this.state.drillMode === 'ASSAULT_BOMB_5V5'
+      this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+      this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+      this.state.drillMode === 'HANGAR_BOMB_5V5' ||
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
     ) {
       const playerAlive =
         this.state.health > 0 &&
@@ -3275,7 +3219,9 @@ export class TacticalFPSEngine {
         this.fxPool,
         (xp, cash) => {
           this.addPlayerXp(xp);
-          addPlayerCash(cash);
+          if (canGrantMatchProgressionRewards() && cash > 0) {
+            addPlayerCash(cash);
+          }
           this.state.score += xp;
           this.emitHud();
         },
@@ -3287,8 +3233,36 @@ export class TacticalFPSEngine {
           this.returnToMainMenu();
         },
         this.registerKill.bind(this),
-        playerAlive
+        playerAlive,
+        isLocalPlayerPendingRevive(this as any)
       );
+
+      // Pre-round equip freeze: look OK, no combat / sprint / plant.
+      if (this.yardBombSystem.info.roundState === 'EQUIP') {
+        this.touchFireHeld = false;
+        this.touchSprinting = false;
+        this.burstRemaining = 0;
+        this.fireCooldown = Math.max(this.fireCooldown, 0.05);
+        this.playerVel.x = 0;
+        this.playerVel.z = 0;
+        this.state.isAds = false;
+        this.state.yardBomb = { ...this.yardBombSystem.info };
+        // Keep camera orientation live so players can look around while equipping.
+        this.yawObject.position.set(
+          this.playerPos.x,
+          this.playerPos.y + this.currentEyeHeight,
+          this.playerPos.z
+        );
+        this.yawObject.rotation.y = this.yaw;
+        this.pitchObject.rotation.x = this.pitch;
+        this.updateWeaponKinematicsAndOptics(dt);
+        this.hudSyncTimer += dt;
+        if (this.hudSyncTimer >= 0.09) {
+          this.hudSyncTimer = 0;
+          this.emitHud();
+        }
+        return;
+      }
 
       if (this.playerDeathTp?.isSpectating()) {
         const specBot = this.playerDeathTp.getSpectatedBot(
@@ -3453,6 +3427,22 @@ export class TacticalFPSEngine {
     // 6. Reactive Targets & Killhouse Combat Bot AI
     this.updateTargetsAndCombatAI(dt);
 
+    // 6b. Warface class support (ammo / heal+revive / armor) + medic markers
+    updateClassSupport(this as any, dt);
+    this.playerGesture?.update(dt);
+    this.classKitProps?.update(dt);
+    const planting =
+      (this.state.drillMode === 'YARD_BOMB_5V5' ||
+        this.state.drillMode === 'DUST2_BOMB_5V5' ||
+        this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
+        this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+        this.state.drillMode === 'HANGAR_BOMB_5V5' ||
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') &&
+      this.yardBombSystem?.info.bombStatus === 'PLANTING';
+    this.c4PlantView?.setPlanting(Boolean(planting));
+    this.c4PlantView?.update(dt);
+
     // 7. Update Pooled Brass Casings, Dropped Magazines, Sparks, Tracers & 3D Grenades
     this.fxPool.update(dt);
     this.grenadeSystem.update(
@@ -3474,596 +3464,11 @@ export class TacticalFPSEngine {
   }
 
   private updateReloadStateMachine(dt: number): void {
-    const phase = this.state.reloadPhase;
-
-    // Update top brass cartridges visibility inside PMAG feed lips
-    const hasRoundsInMag = this.state.currentMagRounds > 0;
-    this.weaponRig.topCartridges.forEach((c, idx) => {
-      c.visible = this.state.currentMagRounds > idx;
-    });
-
-    if (phase === 'IDLE' || phase === 'MAG_CHECK') {
-      // Smoothly return M4 magazine & charging handle to default position
-      this.weaponRig.magazineGroup.position.set(0, -0.125, -0.014);
-      this.weaponRig.magazineGroup.rotation.set(-0.11, 0, 0);
-      this.weaponRig.chargingHandle.position.z = 0.14;
-      return;
-    }
-
-    if (phase === 'CHARGING_PULL') {
-      this.reloadTimer += dt;
-      const p = Math.min(1, this.reloadTimer / this.reloadDuration);
-      this.state.reloadProgress = p;
-
-      // Animate M4 charging handle pulled back and released (hands driven by updateGlbAnimations)
-      const pullCurve = p < 0.6 ? p / 0.6 : Math.max(0, 1 - (p - 0.6) / 0.2);
-      this.weaponRig.chargingHandle.position.z = 0.14 + pullCurve * 0.068;
-
-      if (p >= 1) {
-        this.state.reloadPhase = 'IDLE';
-        this.state.reloadProgress = 0;
-        this.state.reloadTypeLabel = '';
-      }
-      return;
-    }
-
-    // Standard Tactical / Speed / Dry Staged Reload
-    this.reloadTimer += dt;
-    const p = Math.min(1, this.reloadTimer / this.reloadDuration);
-    this.state.reloadProgress = p;
-
-    const magOutEnd = this.needsBoltReleaseStage ? 0.36 : 0.46;
-    const magInEnd = this.needsBoltReleaseStage ? 0.76 : 1.0;
-
-    const hasCustomReloadSound =
-      this.state.activeWeapon === 'P50_PISTOL' ||
-      this.state.activeWeapon === 'M4_CARBINE' ||
-      this.state.activeWeapon === 'CARBINE_AR';
-
-    if (p < magOutEnd) {
-      // STAGE 1: MAG_OUT
-      this.state.reloadPhase = 'MAG_OUT';
-
-      if (!this.stageSoundFlags.magOut) {
-        this.stageSoundFlags.magOut = true;
-        if (!hasCustomReloadSound) {
-          soundEngine.playReloadStage('MAG_OUT');
-        }
-        mobileHardware.vibrateReloadStage('MAG_OUT');
-        if (this.isSpeedReload) {
-          this.weaponRig.magazineGroup.getWorldPosition(_worldPos);
-          this.camera.getWorldDirection(_forward);
-          this.fxPool.spawnDroppedMagazine(_worldPos, _forward);
-        }
-      }
-      const localP = p / magOutEnd;
-      this.weaponRig.magazineGroup.position.set(
-        -0.02 * localP,
-        -0.125 - localP * 0.24,
-        -0.014 + localP * 0.04
-      );
-      this.weaponRig.magazineGroup.rotation.z = localP * 0.35;
-    } else if (p < magInEnd) {
-      // STAGE 2: MAG_IN
-      if (this.state.reloadPhase !== 'MAG_IN') {
-        this.state.reloadPhase = 'MAG_IN';
-        this.completeMagazineSwap();
-      }
-      const localP = (p - magOutEnd) / (magInEnd - magOutEnd);
-      if (localP > 0.68 && !this.stageSoundFlags.magIn) {
-        this.stageSoundFlags.magIn = true;
-        if (!hasCustomReloadSound) {
-          soundEngine.playReloadStage('MAG_IN');
-        }
-        mobileHardware.vibrateReloadStage('MAG_IN');
-        // Upward physical seating impulse
-        this.recoilPitch += 0.012;
-      }
-      const slideOffset = Math.max(0, 1 - localP * 1.25);
-      this.weaponRig.magazineGroup.position.set(
-        -0.01 * slideOffset,
-        -0.125 - slideOffset * 0.24,
-        -0.014
-      );
-      this.weaponRig.magazineGroup.rotation.z = slideOffset * 0.2;
-    } else {
-      // STAGE 3: BOLT_SLAP / CHAMBERING ROUND
-      this.state.reloadPhase = 'BOLT_SLAP';
-      const localP = (p - magInEnd) / (1 - magInEnd);
-      this.weaponRig.magazineGroup.position.set(0, -0.125, -0.014);
-      this.weaponRig.magazineGroup.rotation.set(-0.11, 0, 0);
-
-      if (localP > 0.38 && !this.stageSoundFlags.boltSlap) {
-        this.stageSoundFlags.boltSlap = true;
-        if (!hasCustomReloadSound) {
-          soundEngine.playReloadStage('BOLT_SLAP');
-        }
-        mobileHardware.vibrateReloadStage('BOLT_SLAP');
-        if (this.state.currentMagRounds > 0 && this.state.chambered === 0) {
-          this.state.currentMagRounds -= 1;
-          this.state.chambered = 1;
-        }
-        this.state.boltLockedBack = false;
-        this.recoilKickZ += 0.018;
-      }
-    }
-
-    if (p >= 1) {
-      if (this.state.chambered === 0 && this.state.currentMagRounds > 0) {
-        this.state.currentMagRounds -= 1;
-        this.state.chambered = 1;
-      }
-      this.state.boltLockedBack = false;
-      this.state.reloadPhase = 'IDLE';
-      this.state.reloadProgress = 0;
-      this.state.reloadTypeLabel = '';
-    }
-
-    void hasRoundsInMag;
+    runReloadStateMachine(this as any, dt);
   }
 
   private updatePlayerMovementAndCollision(dt: number): void {
-    // Se o jogador estiver morrendo, bloqueia imediatamente qualquer caminhada, pulo, agachamento ou tiro
-    if (this.isPlayerDying || this.playerDeathTp?.isActive()) {
-      this.playerVel.set(0, 0, 0);
-      this.touchMoveX = 0;
-      this.touchMoveY = 0;
-      this.touchSprinting = false;
-      this.touchFireHeld = false;
-      this.burstRemaining = 0;
-      this.slideTimer = 0;
-      this.jumpBufferTimer = 0;
-      this.state.isAds = false;
-
-      this.deathAnimElapsed += dt;
-      this.state.damageFlashAlpha = THREE.MathUtils.lerp(
-        0.92,
-        0.35,
-        Math.min(1, this.deathAnimElapsed / 1.8)
-      );
-
-      const activeGlbCol =
-        this.state.drillMode === 'DUST2_BOMB_5V5'
-          ? this.dust2LevelData.collider
-          : this.state.drillMode === 'ASSAULT_BOMB_5V5'
-            ? this.assaultLevelData.collider
-            : null;
-
-      const activeColliders =
-        this.state.drillMode === 'YARD_BOMB_5V5'
-          ? this.yardLevelData.colliders
-          : this.state.drillMode === 'FREE_RANGE'
-            ? this.standerTiroLevelData.colliders
-            : this.facilityLevelData.colliders;
-
-      this.playerDeathTp.update(
-        dt,
-        this.deathAnimElapsed,
-        this.playerPos,
-        this.yawObject,
-        this.pitchObject,
-        this.camera,
-        this.weaponRig.root,
-        this.grenadeSystem,
-        activeColliders,
-        activeGlbCol,
-        this.targets as YardBotEntity[]
-      );
-
-      if (this.isPlayerDying && this.deathAnimElapsed >= this.deathSequenceDuration) {
-        this.isPlayerDying = false;
-        const cb = this.deathOnFinish;
-        this.deathOnFinish = null;
-        cb?.();
-      }
-      return;
-    }
-
-    // Check if a low ceiling (such as Yard's crouch-only wall breaches or Dust2 tunnels) is directly above the player
-    let lowCeilingAbove = false;
-    const checkR = 0.32;
-    if (this.state.drillMode === 'DUST2_BOMB_5V5') {
-      lowCeilingAbove = this.dust2LevelData.collider.hasLowCeiling(
-        this.playerPos.x,
-        this.playerPos.y,
-        this.playerPos.z
-      );
-    } else if (this.state.drillMode === 'ASSAULT_BOMB_5V5') {
-      lowCeilingAbove = this.assaultLevelData.collider.hasLowCeiling(
-        this.playerPos.x,
-        this.playerPos.y,
-        this.playerPos.z
-      );
-    } else {
-      for (let i = 0; i < this.colliders.length; i++) {
-        const c = this.colliders[i];
-        if (
-          c.minY >= this.playerPos.y + 0.4 &&
-          c.minY < this.playerPos.y + 1.68 &&
-          this.playerPos.x + checkR > c.minX &&
-          this.playerPos.x - checkR < c.maxX &&
-          this.playerPos.z + checkR > c.minZ &&
-          this.playerPos.z - checkR < c.maxZ
-        ) {
-          lowCeilingAbove = true;
-          break;
-        }
-      }
-    }
-
-    // 1. Stance & Breath Stamina (Keyboard + Mobile Touch Controls)
-    const crouchHeld =
-      lowCeilingAbove ||
-      this.keysHeld.has('KeyC') ||
-      this.keysHeld.has('ControlLeft') ||
-      this.state.isCrouchingToggled;
-    // Hysteresis latch prevents 60Hz SPRINT <-> STAND oscillation when stamina hits bottom
-    if (this.state.stamina <= 1) {
-      this.sprintExhausted = true;
-    } else if (this.state.stamina >= 26) {
-      this.sprintExhausted = false;
-    }
-
-    const wantsToSprint =
-      ((this.keysHeld.has('ShiftLeft') && this.keysHeld.has('KeyW')) ||
-        this.touchSprinting) &&
-      !this.state.isAds &&
-      !crouchHeld &&
-      this.state.reloadPhase === 'IDLE' &&
-      !this.touchFireHeld &&
-      !this.mouseButtonsHeld.has(0);
-
-    const sprintHeld = wantsToSprint && !this.sprintExhausted;
-
-    // Breath holding when ShiftLeft or Mobile Breath Button is held during ADS
-    const holdBreath =
-      (this.keysHeld.has('ShiftLeft') || this.touchHoldBreath) &&
-      this.state.isAds &&
-      this.state.stamina > 5;
-    this.state.isHoldingBreath = holdBreath;
-
-    if (holdBreath) {
-      const prevStamina = this.state.stamina;
-      this.state.stamina = Math.max(0, this.state.stamina - 22 * dt);
-      if (prevStamina > 25 && this.state.stamina <= 25) {
-        soundEngine.playHeartbeat();
-      }
-    } else if (sprintHeld) {
-      this.state.stamina = Math.max(0, this.state.stamina - 14 * dt);
-    } else {
-      this.state.stamina = Math.min(100, this.state.stamina + 18 * dt);
-    }
-
-    if (this.slideTimer > 0) {
-      this.slideTimer -= dt;
-      this.state.stance = 'SLIDE';
-    } else if (this.state.isProneToggled || this.keysHeld.has('KeyZ')) {
-      this.state.stance = 'PRONE';
-    } else if (crouchHeld) {
-      this.state.stance = 'CROUCH';
-    } else if (sprintHeld) {
-      this.state.stance = 'SPRINT';
-    } else {
-      this.state.stance = 'STAND';
-    }
-
-    // 2. Q / E Tactical Corner Leaning (Keyboard + Mobile Touch Toggle)
-    if (this.keysHeld.has('KeyQ') && !this.keysHeld.has('KeyE')) {
-      this.leanTarget = -1;
-    } else if (this.keysHeld.has('KeyE') && !this.keysHeld.has('KeyQ')) {
-      this.leanTarget = 1;
-    } else {
-      this.leanTarget = this.touchLeanToggle;
-    }
-    this.state.leanDirection = this.leanTarget;
-    this.leanCurrent = THREE.MathUtils.damp(
-      this.leanCurrent,
-      this.leanTarget,
-      14,
-      dt
-    );
-
-    // 3. Horizontal Velocity & Acceleration (Keyboard WASD + Mobile Analog Joystick)
-    const kbForward =
-      (this.keysHeld.has('KeyW') || this.keysHeld.has('ArrowUp') ? 1 : 0) -
-      (this.keysHeld.has('KeyS') || this.keysHeld.has('ArrowDown') ? 1 : 0);
-    const kbRight =
-      (this.keysHeld.has('KeyD') || this.keysHeld.has('ArrowRight') ? 1 : 0) -
-      (this.keysHeld.has('KeyA') || this.keysHeld.has('ArrowLeft') ? 1 : 0);
-
-    const forwardInput = THREE.MathUtils.clamp(
-      kbForward + this.touchMoveY,
-      -1,
-      1
-    );
-    const rightInput = THREE.MathUtils.clamp(
-      kbRight + this.touchMoveX,
-      -1,
-      1
-    );
-
-    _forward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
-    _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
-
-    if (this.slideTimer > 0) {
-      const slideSpeed = 7.8 * (0.4 + 0.6 * (this.slideTimer / 0.68));
-      this.playerVel.x = this.slideDir.x * slideSpeed;
-      this.playerVel.z = this.slideDir.z * slideSpeed;
-    } else {
-      _moveVec
-        .set(0, 0, 0)
-        .addScaledVector(_forward, forwardInput)
-        .addScaledVector(_right, rightInput);
-      if (_moveVec.lengthSq() > 1) _moveVec.normalize();
-
-      let maxSpeed = 4.6;
-      if (this.state.stance === 'SPRINT') maxSpeed = 6.8;
-      else if (this.state.stance === 'CROUCH') maxSpeed = 2.65;
-      else if (this.state.stance === 'PRONE') maxSpeed = 1.25;
-      if (this.state.isAds) maxSpeed *= 0.68;
-
-      this.playerVel.x = THREE.MathUtils.damp(
-        this.playerVel.x,
-        _moveVec.x * maxSpeed,
-        12,
-        dt
-      );
-      this.playerVel.z = THREE.MathUtils.damp(
-        this.playerVel.z,
-        _moveVec.z * maxSpeed,
-        12,
-        dt
-      );
-    }
-
-    // 4. Jump with Coyote Time & Input Buffering
-    if (this.isGrounded) {
-      this.coyoteTimer = 0.12;
-    } else {
-      this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
-    }
-    if (this.jumpBufferTimer > 0) {
-      this.jumpBufferTimer = Math.max(0, this.jumpBufferTimer - dt);
-    }
-
-    const isDust2 = this.state.drillMode === 'DUST2_BOMB_5V5';
-    const isAssault = this.state.drillMode === 'ASSAULT_BOMB_5V5';
-    const activeGlbCollider = isDust2
-      ? this.dust2LevelData.collider
-      : isAssault
-        ? this.assaultLevelData.collider
-        : null;
-
-    const activeLadder = activeGlbCollider
-      ? activeGlbCollider.getActiveLadder(
-          this.playerPos.x,
-          this.playerPos.y,
-          this.playerPos.z
-        )
-      : null;
-
-    if (activeLadder) {
-      this.coyoteTimer = 0.12;
-      const climbJump = this.keysHeld.has('Space') || this.jumpBufferTimer > 0;
-      if (climbJump) {
-        this.jumpBufferTimer = 0;
-        this.playerVel.y = 3.6;
-        this.playerVel.x = -_forward.x * 2.8;
-        this.playerVel.z = -_forward.z * 2.8;
-        this.isGrounded = false;
-      } else if (forwardInput > 0.12) {
-        const climbDir = this.pitch < -0.55 ? -4.2 : 4.4;
-        if (climbDir > 0 && this.playerPos.y >= activeLadder.maxY - 0.06) {
-          this.playerPos.y = activeLadder.maxY;
-          this.playerVel.y = 0;
-          this.playerVel.x = _forward.x * 3.0;
-          this.playerVel.z = _forward.z * 3.0;
-          this.isGrounded = true;
-        } else {
-          this.playerVel.y = climbDir;
-          this.isGrounded = false;
-        }
-      } else if (forwardInput < -0.12) {
-        this.playerVel.y = -4.5;
-        this.isGrounded = false;
-      } else if (!this.isGrounded) {
-        this.playerVel.y = 0;
-        this.playerVel.x *= 0.5;
-        this.playerVel.z *= 0.5;
-      } else {
-        this.playerVel.y -= 15.5 * dt;
-      }
-
-      if (activeLadder.id.startsWith('vent_') && this.playerPos.y >= 9.6) {
-        this.state.stance = 'CROUCH';
-      }
-    } else {
-      if (this.jumpBufferTimer > 0 && this.coyoteTimer > 0) {
-        this.playerVel.y = 5.4;
-        this.isGrounded = false;
-        this.coyoteTimer = 0;
-        this.jumpBufferTimer = 0;
-        soundEngine.playPlayerJump();
-      }
-
-      // Gravity
-      this.playerVel.y -= 15.5 * dt;
-    }
-
-    // 5. Move & Resolve Colliders (Dust2 / Assault 3D Triangle Spatial Hash or AABB Boxes)
-    const radius =
-      activeLadder ||
-      this.state.stance === 'CROUCH' ||
-      this.state.stance === 'PRONE' ||
-      lowCeilingAbove
-        ? 0.26
-        : 0.34;
-
-    const currentHeight =
-      this.state.stance === 'SLIDE'
-        ? 0.90
-        : this.state.stance === 'PRONE'
-          ? 0.45
-          : this.state.stance === 'CROUCH'
-            ? 1.10
-            : 1.72;
-
-    if (activeGlbCollider) {
-      const candX = this.playerPos.x + this.playerVel.x * dt;
-      const candZ = this.playerPos.z + this.playerVel.z * dt;
-      activeGlbCollider.resolveHorizontal(
-        candX,
-        candZ,
-        this.playerPos.y,
-        currentHeight,
-        radius,
-        _resolvedHoriz
-      );
-      this.playerPos.x = _resolvedHoriz.x;
-      this.playerPos.z = _resolvedHoriz.z;
-    } else {
-      const nextX = this.playerPos.x + this.playerVel.x * dt;
-      if (!this.checkHorizontalCollision(nextX, this.playerPos.z, this.playerPos.y, radius)) {
-        this.playerPos.x = nextX;
-      } else {
-        this.playerVel.x = 0;
-      }
-
-      const nextZ = this.playerPos.z + this.playerVel.z * dt;
-      if (!this.checkHorizontalCollision(this.playerPos.x, nextZ, this.playerPos.y, radius)) {
-        this.playerPos.z = nextZ;
-      } else {
-        this.playerVel.z = 0;
-      }
-    }
-
-    const wasGrounded = this.isGrounded;
-    const prevY = this.playerPos.y;
-    let nextY = prevY + this.playerVel.y * dt;
-
-    if (activeLadder && this.playerVel.y > 0 && nextY >= activeLadder.maxY) {
-      nextY = activeLadder.maxY;
-      this.playerVel.y = 0;
-      this.playerVel.x = _forward.x * 3.0;
-      this.playerVel.z = _forward.z * 3.0;
-    }
-
-    if (activeGlbCollider && nextY > prevY) {
-      const clampedY = activeGlbCollider.clampCeilingHeight(
-        this.playerPos.x,
-        prevY,
-        nextY,
-        this.playerPos.z,
-        currentHeight
-      );
-      if (clampedY < nextY) {
-        nextY = clampedY;
-        if (this.playerVel.y > 0) this.playerVel.y = 0;
-      }
-    }
-
-    this.playerPos.y = nextY;
-
-    // Find highest walkable ground underneath player
-    let groundHeight = 0;
-    if (activeGlbCollider) {
-      groundHeight = activeGlbCollider.getGroundHeight(
-        this.playerPos.x,
-        this.playerPos.y,
-        this.playerPos.z
-      );
-    } else {
-      for (let i = 0; i < this.colliders.length; i++) {
-        const c = this.colliders[i];
-        if (
-          this.playerPos.x + radius > c.minX &&
-          this.playerPos.x - radius < c.maxX &&
-          this.playerPos.z + radius > c.minZ &&
-          this.playerPos.z - radius < c.maxZ
-        ) {
-          // Allow 0.45m step-up onto stairs/crates and landing onto roofs/balconies up to 8m
-          if (
-            this.playerPos.y >= c.maxY - 0.46 &&
-            c.maxY > groundHeight &&
-            c.maxY <= 8.0
-          ) {
-            groundHeight = c.maxY;
-          }
-        }
-      }
-    }
-
-    if (
-      this.playerPos.y <= groundHeight ||
-      (!activeLadder &&
-        wasGrounded &&
-        this.playerVel.y <= 0 &&
-        this.playerPos.y - groundHeight < 0.35)
-    ) {
-      if (!wasGrounded && this.playerVel.y < -2.0) {
-        this.landingDipVel = Math.max(this.playerVel.y * 0.03, -0.12);
-        soundEngine.playFootstep(true, false);
-      }
-      this.playerPos.y = groundHeight;
-      this.playerVel.y = 0;
-      this.isGrounded = true;
-    } else if (
-      groundHeight > 0 &&
-      Math.abs(this.playerPos.y - groundHeight) < 0.05
-    ) {
-      this.isGrounded = true;
-    } else if (this.playerPos.y > groundHeight + 0.06) {
-      this.isGrounded = false;
-    }
-
-    // Landing spring dip (critically damped physics)
-    const clampedDt = Math.min(dt, 0.033);
-    this.landingDip += this.landingDipVel * clampedDt;
-    this.landingDipVel += -this.landingDip * 130 * clampedDt;
-    this.landingDipVel *= Math.exp(-18 * clampedDt);
-    this.landingDip = THREE.MathUtils.clamp(this.landingDip, -0.06, 0.03);
-    if (Math.abs(this.landingDip) < 0.0002 && Math.abs(this.landingDipVel) < 0.001) {
-      this.landingDip = 0;
-      this.landingDipVel = 0;
-    }
-
-    // Eye height interpolation (Stand: 1.68m, Crouch: 1.08m, Slide: 0.86m, Prone: 0.42m)
-    const targetEye =
-      this.state.stance === 'SLIDE'
-        ? 0.86
-        : this.state.stance === 'PRONE'
-          ? 0.42
-          : this.state.stance === 'CROUCH'
-            ? 1.08
-            : 1.68;
-    this.currentEyeHeight = THREE.MathUtils.damp(
-      this.currentEyeHeight,
-      targetEye,
-      14,
-      dt
-    );
-
-    // Apply Yaw, Pitch, Lean Offset & Camera Roll
-    const leanOffsetDist = this.leanCurrent * 0.42;
-    const leanWorldX = this.playerPos.x + _right.x * leanOffsetDist;
-    const leanWorldZ = this.playerPos.z + _right.z * leanOffsetDist;
-
-    // Smooth harmonic camera trauma shake (no random white noise)
-    const shakePitch = this.cameraShake > 0.0001 ? Math.sin(this.elapsedTime * 42) * this.cameraShake : 0;
-    const shakeYaw = this.cameraShake > 0.0001 ? Math.cos(this.elapsedTime * 34) * this.cameraShake * 0.5 : 0;
-
-    const slideRoll = this.slideTimer > 0 ? -0.08 : 0;
-    this.camera.rotation.z = -this.leanCurrent * 0.24 + slideRoll;
-
-    this.yawObject.position.set(
-      leanWorldX,
-      this.playerPos.y + this.currentEyeHeight + this.landingDip,
-      leanWorldZ
-    );
-    this.yawObject.rotation.y = this.yaw + shakeYaw;
-    this.pitchObject.rotation.x = this.pitch + shakePitch;
-
-    this.cameraShake = THREE.MathUtils.damp(this.cameraShake, 0, 24, dt);
+    runPlayerMovement(this as any, dt);
   }
 
   private checkHorizontalCollision(
@@ -4072,681 +3477,47 @@ export class TacticalFPSEngine {
     yBottom: number,
     r: number
   ): boolean {
-    const currentHeight =
-      this.state.stance === 'SLIDE'
-        ? 0.90
-        : this.state.stance === 'PRONE'
-          ? 0.45
-          : this.state.stance === 'CROUCH'
-            ? 1.10
-            : 1.72;
-    const playerTop = yBottom + currentHeight;
-    for (let i = 0; i < this.colliders.length; i++) {
-      const c = this.colliders[i];
-      // Allow smooth step-up onto stairs/crates up to 0.45m high
-      if (playerTop <= c.minY || yBottom >= c.maxY - 0.45) continue;
-      if (
-        x + r > c.minX &&
-        x - r < c.maxX &&
-        z + r > c.minZ &&
-        z - r < c.maxZ
-      ) {
-        return true;
-      }
-    }
-    return false;
+    return runHorizontalCollision(this as any, x, z, yBottom, r);
   }
 
   private updateWeaponKinematicsAndOptics(dt: number): void {
-    // 1. ADS Interpolation & Field of View (FOV) Zoom
-    const canAds =
-      this.state.isAds &&
-      this.state.reloadPhase === 'IDLE' &&
-      this.state.stance !== 'SPRINT' &&
-      this.state.wallTuckAmount < 0.55;
-
-    this.state.adsAlpha = THREE.MathUtils.damp(
-      this.state.adsAlpha,
-      canAds ? 1 : 0,
-      14,
-      dt
-    );
-
-    let targetFov = 72;
-    if (this.state.stance === 'SPRINT') {
-      targetFov = 78;
-    } else if (canAds) {
-      if (this.state.cantedActive) {
-        targetFov = 60;
-      } else if (this.state.activeWeapon === 'SNIPER_BOLT') {
-        targetFov = 14;
-      } else if (this.state.activeWeapon === 'SNIPER_TACTICAL') {
-        targetFov = 18;
-      } else if (this.state.activeWeapon === 'AK12_RIFLE') {
-        // Moderate 2.1x optical zoom on AK-12's native scope keeping ~48% bezel and upper receiver crisp
-        targetFov = 34;
-      } else if (this.state.optic === 'lpvo') {
-        targetFov = THREE.MathUtils.clamp(54 - (this.state.lpvoZoom - 1) * 4.5, 36, 54);
-      } else {
-        targetFov = 58;
-      }
-    }
-
-    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
-      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 14, dt);
-      this.camera.updateProjectionMatrix();
-    }
-
-    // Consolidated Single Forward Camera Raycast for Wall Avoidance, Aim Focus & Green PEQ Laser (Throttled for Mobile Performance)
-    const activeGlbCollider =
-      this.state.drillMode === 'DUST2_BOMB_5V5'
-        ? this.dust2LevelData.collider
-        : this.state.drillMode === 'ASSAULT_BOMB_5V5'
-          ? this.assaultLevelData.collider
-          : null;
-
-    if (activeGlbCollider && activeGlbCollider.ready) {
-      this.aimRaycastTimer += dt;
-      if (!this.aimRaycastInitialized || this.aimRaycastTimer >= 0.033) {
-        this.aimRaycastInitialized = true;
-        this.aimRaycastTimer = 0;
-        this.camera.getWorldPosition(_rayOrigin);
-        this.camera.getWorldDirection(_rayDir);
-        const maxCheckDist =
-          this.state.laserActive && this.state.activeWeapon !== 'KNIFE_TACTICAL'
-            ? 45.0
-            : 0.9;
-        const hitDist = activeGlbCollider.raycastDistance(
-          _rayOrigin,
-          _rayDir,
-          maxCheckDist
-        );
-        const targetTuck =
-          hitDist !== null && hitDist <= 0.85
-            ? Math.max(0, 1 - hitDist / 0.85)
-            : 0;
-        this.state.wallTuckAmount = THREE.MathUtils.damp(
-          this.state.wallTuckAmount,
-          targetTuck,
-          14,
-          dt
-        );
-        this.state.focusedWallWeapon = null;
-
-        if (this.state.laserActive && this.state.activeWeapon !== 'KNIFE_TACTICAL') {
-          this.weaponRig.peqLaserBeam.visible = true;
-          const laserDist = hitDist !== null ? hitDist : 45.0;
-          this.weaponRig.peqLaserBeam.scale.set(1, 1, Math.max(0.2, laserDist));
-          if (hitDist !== null) {
-            this.laserDotMesh.position
-              .copy(_rayOrigin)
-              .addScaledVector(_rayDir, hitDist - 0.02);
-            this.laserDotMesh.visible = true;
-          } else {
-            this.laserDotMesh.visible = false;
-          }
-        } else {
-          this.weaponRig.peqLaserBeam.visible = false;
-          this.laserDotMesh.visible = false;
-        }
-      }
-    } else {
-      this.aimRaycastTimer += dt;
-      if (!this.aimRaycastInitialized || this.aimRaycastTimer >= 0.033) {
-        this.aimRaycastInitialized = true;
-        this.aimRaycastTimer = 0;
-        this.camera.getWorldPosition(_rayOrigin);
-        this.camera.getWorldDirection(_rayDir);
-        this.raycaster.set(_rayOrigin, _rayDir);
-        this.raycaster.far =
-          this.state.laserActive && this.state.activeWeapon !== 'KNIFE_TACTICAL'
-            ? 45.0
-            : 7.5;
-        this.cachedAimHits = this.raycaster.intersectObjects(this.shootableMeshes, false);
-      }
-      const aimHits = this.cachedAimHits;
-
-      // 1. Wall avoidance tuck
-      const firstWall = aimHits.find(
-        (h) => h.distance <= 0.85 && h.object.userData.isEnvironment
-      );
-      const targetTuck = firstWall ? Math.max(0, 1 - firstWall.distance / 0.85) : 0;
-      this.state.wallTuckAmount = THREE.MathUtils.damp(
-        this.state.wallTuckAmount,
-        targetTuck,
-        14,
-        dt
-      );
-
-      // 2. Focused Wall Weapon pickup prompt
-      if (
-        aimHits.length > 0 &&
-        aimHits[0].distance <= 7.5 &&
-        aimHits[0].object.userData.wallWeaponId
-      ) {
-        this.state.focusedWallWeapon = aimHits[0].object.userData
-          .wallWeaponId as WeaponId;
-      } else {
-        this.state.focusedWallWeapon = null;
-      }
-
-      // 3. Green Laser Beam & World Impact Dot
-      if (this.state.laserActive && this.state.activeWeapon !== 'KNIFE_TACTICAL') {
-        this.weaponRig.peqLaserBeam.visible = true;
-        const laserDist = aimHits.length > 0 ? aimHits[0].distance : 45.0;
-        this.weaponRig.peqLaserBeam.scale.set(1, 1, Math.max(0.2, laserDist));
-        if (aimHits.length > 0) {
-          this.laserDotMesh.position
-            .copy(aimHits[0].point)
-            .addScaledVector(_rayDir, -0.02);
-          this.laserDotMesh.visible = true;
-        } else {
-          this.laserDotMesh.visible = false;
-        }
-      } else {
-        this.weaponRig.peqLaserBeam.visible = false;
-        this.laserDotMesh.visible = false;
-      }
-    }
-
-    // 4. Second-Order Sway, Walk Bob & Respiratory Figure-8 Curve
-    const horizSpeed = Math.hypot(this.playerVel.x, this.playerVel.z);
-    const bobFreq =
-      this.state.stance === 'SPRINT'
-        ? 12.5
-        : this.state.stance === 'CROUCH'
-          ? 6.5
-          : 9.2;
-    if (this.isGrounded && horizSpeed > 0.25 && this.slideTimer <= 0) {
-      const prevStepCycle = Math.floor(this.walkBobPhase / Math.PI);
-      this.walkBobPhase += dt * bobFreq;
-      const nextStepCycle = Math.floor(this.walkBobPhase / Math.PI);
-      if (nextStepCycle > prevStepCycle && this.state.stance !== 'PRONE') {
-        soundEngine.playFootstep(
-          this.state.stance === 'SPRINT',
-          this.state.stance === 'CROUCH'
-        );
-      }
-      if (this.walkBobPhase > Math.PI * 64) {
-        this.walkBobPhase -= Math.PI * 64;
-      }
-      this.walkBobAmp = THREE.MathUtils.damp(
-        this.walkBobAmp,
-        Math.min(1, horizSpeed / 5.0),
-        10,
-        dt
-      );
-    } else {
-      this.walkBobAmp = THREE.MathUtils.damp(this.walkBobAmp, 0, 10, dt);
-    }
-
-    updatePlayerSprintPantingAudio(
-      this.state.stance === 'SPRINT',
-      horizSpeed,
-      this.state.health > 0 && !this.isPlayerDying && !this.playerDeathTp?.isActive(),
-      dt
-    );
-
-    // Spring-damper mouse look sway
-    const clampedDt = Math.min(dt, 0.033);
-    this.swayPos.x += this.swayVel.x * clampedDt;
-    this.swayPos.y += this.swayVel.y * clampedDt;
-    this.swayVel.x += -this.swayPos.x * 120 * clampedDt;
-    this.swayVel.y += -this.swayPos.y * 120 * clampedDt;
-    this.swayVel.multiplyScalar(Math.exp(-16 * clampedDt));
-    this.swayPos.clampScalar(-0.025, 0.025);
-    if (this.swayPos.lengthSq() < 0.000005 && this.swayVel.lengthSq() < 0.00005) {
-      this.swayPos.set(0, 0);
-      this.swayVel.set(0, 0);
-    }
-
-    // Respiratory breathing Lissajous figure-8
-    const breathScale = this.state.isHoldingBreath
-      ? 0.08
-      : this.state.adsAlpha > 0.5
-        ? 0.38
-        : 1.0;
-    const breathX = Math.sin(this.elapsedTime * 1.45) * 0.0028 * breathScale;
-    const breathY = Math.cos(this.elapsedTime * 2.9) * 0.0022 * breathScale;
-
-    // Counter-Strike 2 (CS2) Viewmodel Framing (matches CS2 Desert Eagle bottom-right framing) vs Precision ADS Target Pose
-    const hipPos =
-      this.state.activeWeapon === 'P50_PISTOL' ? _hipPosPistol : _hipPosRifle;
-    const adsTransform = getOpticAdsTransform(
-      this.state.optic,
-      this.state.cantedActive,
-      this.state.activeWeapon
-    );
-
-    const basePosX = THREE.MathUtils.lerp(
-      hipPos.x,
-      adsTransform.pos.x,
-      this.state.adsAlpha
-    );
-    const basePosY = THREE.MathUtils.lerp(
-      hipPos.y,
-      adsTransform.pos.y,
-      this.state.adsAlpha
-    );
-    const basePosZ = THREE.MathUtils.lerp(
-      hipPos.z,
-      adsTransform.pos.z,
-      this.state.adsAlpha
-    );
-
-    const bobScale = THREE.MathUtils.lerp(1.0, 0.14, this.state.adsAlpha);
-    const bobX = Math.cos(this.walkBobPhase) * 0.011 * this.walkBobAmp * bobScale;
-    const bobY =
-      Math.abs(Math.sin(this.walkBobPhase)) * -0.012 * this.walkBobAmp * bobScale;
-
-    // Recoil decay
-    this.recoilKickZ = THREE.MathUtils.damp(this.recoilKickZ, 0, 22, dt);
-    this.recoilPitch = THREE.MathUtils.damp(this.recoilPitch, 0, 18, dt);
-    this.recoilYaw = THREE.MathUtils.damp(this.recoilYaw, 0, 18, dt);
-
-    // Sprint / Mag Check / Wall-Tuck / CS2 Hip-Angle Pose Modifiers (smoothly damped to prevent snap jitter)
-    const isSprinting = this.state.stance === 'SPRINT' && this.state.adsAlpha < 0.2;
-    this.sprintPoseAlpha = THREE.MathUtils.damp(
-      this.sprintPoseAlpha,
-      isSprinting ? 1 : 0,
-      12,
-      dt
-    );
-    const isAk47 =
-      this.state.activeWeapon === 'AK47_RIFLE' ||
-      this.state.activeWeapon === 'AK12_RIFLE';
-    const sprintRotX = (isAk47 ? -0.14 : -0.26) * this.sprintPoseAlpha;
-    const sprintRotY = (isAk47 ? 0.08 : 0.48) * this.sprintPoseAlpha;
-    const sprintRotZ = (isAk47 ? -0.08 : -0.24) * this.sprintPoseAlpha;
-    const sprintDropY = (isAk47 ? -0.032 : 0) * this.sprintPoseAlpha;
-
-    // CS2 inward barrel angle in hipfire (smoothly zeroes out in ADS)
-    const cs2HipRotY = (1 - this.state.adsAlpha) * 0.055;
-    const cs2HipRotX = (1 - this.state.adsAlpha) * 0.015;
-
-    const magCheckAlpha = this.state.reloadPhase === 'MAG_CHECK' ? 1 : 0;
-    const throwDipAlpha = this.grenadeSystem.isThrowing() ? 1 : 0;
-    const tuck = Math.max(this.state.wallTuckAmount, throwDipAlpha * 0.72);
-
-    // Procedural bolt-action chambering tilt on Sniper rifles while pulling the bolt handle
-    let boltTiltRotX = 0;
-    let boltTiltRotZ = 0;
-    let boltPullPosZ = 0;
-    let boltLiftPosY = 0;
-    if (this.sniperChamberTimer > 0 && this.sniperChamberDuration > 0.1) {
-      const boltP = 1 - this.sniperChamberTimer / this.sniperChamberDuration;
-      const boltWave = Math.sin(boltP * Math.PI);
-      const pullPulse = Math.sin(Math.min(1, Math.max(0, (boltP - 0.18) / 0.65)) * Math.PI);
-      boltTiltRotZ = boltWave * 0.22;
-      boltTiltRotX = boltWave * 0.08 + pullPulse * 0.06;
-      boltPullPosZ = pullPulse * 0.032;
-      boltLiftPosY = boltWave * 0.015;
-    }
-
-    this.weaponRig.root.position.set(
-      basePosX + bobX + this.swayPos.x * bobScale + breathX + magCheckAlpha * 0.025,
-      basePosY +
-        bobY +
-        this.swayPos.y * bobScale +
-        breathY +
-        this.landingDip * 0.35 +
-        magCheckAlpha * 0.032 +
-        boltLiftPosY +
-        sprintDropY -
-        tuck * 0.06 -
-        throwDipAlpha * 0.08,
-      basePosZ + this.recoilKickZ + boltPullPosZ + tuck * 0.14
-    );
-
-    const targetRotZ = THREE.MathUtils.lerp(
-      sprintRotZ - this.swayPos.x * 1.8,
-      adsTransform.rotZ,
-      this.state.adsAlpha
-    );
-
-    this.weaponRig.root.rotation.set(
-      cs2HipRotX + this.recoilPitch + sprintRotX + boltTiltRotX + tuck * 0.65 + magCheckAlpha * 0.24,
-      cs2HipRotY + this.recoilYaw + sprintRotY - this.swayPos.x * 1.2 - magCheckAlpha * 0.18,
-      targetRotZ + boltTiltRotZ - magCheckAlpha * 0.42
-    );
-
-    // Hide 3D weapon viewmodel ONLY when looking through full-screen sniper scopes or holding a grenade
-    const isSniperScoped =
-      (this.state.activeWeapon === 'SNIPER_BOLT' ||
-        this.state.activeWeapon === 'SNIPER_TACTICAL') &&
-      !this.state.cantedActive &&
-      this.state.adsAlpha > 0.82;
-    this.weaponRig.root.visible =
-      !this.isPlayerDying &&
-      !this.playerDeathTp?.isActive() &&
-      !isSniperScoped &&
-      !this.grenadeSystem.isBusyOrHolding();
-
-    // 5. Mechanical Sub-Component Animations (Bolt Carrier, Selector, Reticle Parallax)
-    if (this.state.boltLockedBack) {
-      this.weaponRig.boltCarrier.position.z = 0.052;
-    } else {
-      this.boltCycleOffset = THREE.MathUtils.damp(this.boltCycleOffset, 0, 35, dt);
-      this.weaponRig.boltCarrier.position.z = 0.005 + this.boltCycleOffset;
-    }
-
-    // Fire Selector Lever Angle
-    const selTargetX =
-      this.state.fireMode === 'SEMI'
-        ? 0
-        : this.state.fireMode === 'BURST'
-          ? Math.PI / 4
-          : Math.PI / 2;
-    this.weaponRig.fireSelector.rotation.x = THREE.MathUtils.damp(
-      this.weaponRig.fireSelector.rotation.x,
-      selTargetX,
-      20,
-      dt
-    );
-
-    // Trigger Shoe & Articulated GLB Index Finger Squeeze Animation
-    const triggerPressed =
-      this.mouseButtonsHeld.has(0) || this.touchFireHeld || this.fireCooldown > 0.04;
-    const targetTriggerRot = triggerPressed ? 0.52 : 0.22;
-    this.weaponRig.triggerMesh.rotation.x = THREE.MathUtils.damp(
-      this.weaponRig.triggerMesh.rotation.x,
-      targetTriggerRot,
-      28,
-      dt
-    );
-    const pullAlpha = (this.weaponRig.triggerMesh.rotation.x - 0.22) / 0.3;
-    this.weaponRig.setTriggerPull(THREE.MathUtils.clamp(pullAlpha, 0, 1));
-
-    const isMoving = this.isGrounded && horizSpeed > 0.35;
-    this.weaponRig.updateGlbAnimations(
-      dt,
-      isMoving,
-      canAds,
-      this.state.reloadPhase,
-      this.state.reloadProgress
-    );
-
-    // Proximity to 3D Wall Weapon Stands
-    let nearStand = false;
-    for (let i = 0; i < this.wallStandPositions.length; i++) {
-      const standPos = this.wallStandPositions[i];
-      const dx = this.playerPos.x - standPos.x;
-      const dz = this.playerPos.z - standPos.z;
-      if (dx * dx + dz * dz < 64.0) {
-        nearStand = true;
-        break;
-      }
-    }
-    this.state.nearWallStand = nearStand;
-
-    // LPVO Throw Lever Angle & Reticle Scale (~2 o'clock right side, matching Firefield reference)
-    this.weaponRig.lpvoThrowLever.rotation.z =
-      -1.05 - ((this.state.lpvoZoom - 1) / 3) * 0.45;
-
-    // Optical Parallax Projection on Holographic & Red Dot Reticles
-    const parallaxX = THREE.MathUtils.clamp(-this.swayPos.x * 0.18, -0.006, 0.006);
-    const parallaxY = THREE.MathUtils.clamp(-this.swayPos.y * 0.18, -0.006, 0.006);
-    this.weaponRig.holoReticleMesh.position.x = parallaxX;
-    this.weaponRig.holoReticleMesh.position.y = 0.03 + parallaxY;
-
-    // Muzzle Flash Visibility, Volumetric Expansion & HDR PointLight Decay
-    if (this.muzzleFlashTimer > 0) {
-      this.muzzleFlashTimer -= dt;
-      const maxFlashTime = this.state.suppressorAttached ? 0.022 : 0.056;
-      const flashAlpha = Math.max(0, this.muzzleFlashTimer / maxFlashTime);
-      this.weaponRig.muzzleFlashGroup.visible = !this.state.suppressorAttached;
-      this.weaponRig.muzzleLight.intensity = this.state.suppressorAttached
-        ? 2.2 * flashAlpha
-        : 15.5 * Math.pow(flashAlpha, 0.65);
-    } else {
-      this.weaponRig.muzzleFlashGroup.visible = false;
-      this.weaponRig.muzzleLight.intensity = 0;
-    }
+    runWeaponKinematics(this as any, dt);
   }
 
   private updateTargetsAndCombatAI(dt: number): void {
-    this.camera.getWorldPosition(_worldPos);
-
-    for (let i = 0; i < this.targets.length; i++) {
-      const t = this.targets[i];
-
-      // 1. Patrol Motion on Active Range Rail Targets Only (COMBAT_BOT uses full AI pursuit!)
-      if (t.type !== 'COMBAT_BOT' && !t.isDown && t.patrolAxis !== 'NONE' && t.patrolSpeed > 0) {
-        const offset =
-          Math.sin(this.elapsedTime * t.patrolSpeed * 1.45 + t.patrolOffset) *
-          t.patrolRange;
-        if (t.patrolAxis === 'X') {
-          t.root.position.x = t.basePosition.x + offset;
-        } else {
-          t.root.position.z = t.basePosition.z + offset;
-        }
-      }
-
-      // 2. Pop-Up Recovery in Free Range Mode
-      if (t.isDown) {
-        if (!t.root.userData?.hasSkeletalCharacter) {
-          t.pivotGroup.rotation.x = THREE.MathUtils.damp(
-            t.pivotGroup.rotation.x,
-            -Math.PI / 2,
-            14,
-            dt
-          );
-        }
-        if (this.state.drillMode === 'FREE_RANGE') {
-          t.downTimer -= dt;
-          if (t.downTimer <= 0) {
-            t.isDown = false;
-            t.health = t.maxHealth;
-            t.armorHealth = t.armorMesh ? 60 : 0;
-            if (t.armorMesh) t.armorMesh.visible = true;
-            soundEngine.playMechanicalSwitch(0.85);
-          }
-        }
-        continue;
-      }
-
-      // Spring-damper reactive impact wobble when standing (paper/steel targets)
-      t.hitTiltAngle += t.hitTiltVelocity * dt;
-      t.hitTiltVelocity += -t.hitTiltAngle * 145 * dt;
-      t.hitTiltVelocity *= Math.exp(-9 * dt);
-      if (!t.root.userData?.hasSkeletalCharacter) {
-        t.pivotGroup.rotation.x = t.hitTiltAngle;
-      }
-    }
-
-    // 3. Sistema Tático de Navegação, Ronda e Perseguição Implacável (5v5 Bomb, Tactical Wave e Killhouse)
-    const isBombMode =
-      this.state.drillMode === 'YARD_BOMB_5V5' ||
-      this.state.drillMode === 'DUST2_BOMB_5V5' ||
-      this.state.drillMode === 'ASSAULT_BOMB_5V5';
-
-    if (this.state.drillMode !== 'FREE_RANGE' && this.targets.length > 0) {
-      if (isOnlineMatchActive()) {
-        syncOnlineMatchFrame({
-          dt,
-          targets: this.targets as YardBotEntity[],
-          shootableMeshes: this.shootableMeshes,
-          playerPos: _worldPos,
-          yaw: this.yaw,
-          pitch: this.pitch,
-          activeWeapon: this.state.activeWeapon,
-          health: this.state.health,
-          isPlayerDead:
-            this.isPlayerDying ||
-            Boolean(this.playerDeathTp?.isActive()) ||
-            this.state.health <= 0,
-          isCrouching:
-            this.state.stance === 'CROUCH' || this.state.stance === 'PRONE',
-          isFiring: this.fireCooldown > 0,
-          yardBombSystem: this.yardBombSystem,
-          isBombMode,
-          getGroundHeight: (x, y, z) => this.getCurrentGroundHeight(x, y, z),
-        });
-        if (isBombMode) {
-          this.state.yardBomb = { ...this.yardBombSystem.info };
-        }
-      } else {
-        const activeGlbCollider =
-          this.state.drillMode === 'DUST2_BOMB_5V5'
-            ? this.dust2LevelData.collider
-            : this.state.drillMode === 'ASSAULT_BOMB_5V5'
-              ? this.assaultLevelData.collider
-              : null;
-
-        const playerAlive =
-          this.state.health > 0 &&
-          !this.isPlayerDying &&
-          !this.playerDeathTp?.isActive();
-
-        updateSmartBotNavigation(
-          this.targets as YardBotEntity[],
-          this.state.drillMode,
-          _worldPos,
-          this.yaw,
-          dt,
-          this.yardBombSystem,
-          this.fxPool,
-          this.grenadeSystem,
-          (dmg, isHeadshot, bot) => {
-            if (this.isPlayerDying || this.playerDeathTp?.isActive()) return;
-            if (isHeadshot) {
-              soundEngine.playImpact('HEADSHOT');
-            } else {
-              soundEngine.playImpact('TORSO');
-            }
-            mobileHardware.vibrateDamage();
-            playRealPlayerHitGrunt(isHeadshot);
-            this.state.health = Math.max(0, this.state.health - dmg);
-            this.state.damageFlashAlpha = isHeadshot ? 0.95 : 0.75;
-            this.cameraShake = isHeadshot ? 0.024 : 0.012;
-
-            if (this.state.health <= 0) {
-              this.triggerPlayerDeathSequence(
-                isHeadshot,
-                bot.callsign || 'KRAKEN-BT',
-                'BLACKTHORN',
-                bot.weaponId || 'AK47_RIFLE',
-                () => {
-                  if (!isBombMode) {
-                    this.state.screen = 'GAME_OVER';
-                    this.emitHud();
-                    return;
-                  }
-                  const specBot = this.playerDeathTp.startSpectating(
-                    this.targets as YardBotEntity[]
-                  );
-                  if (specBot && this.yardBombSystem.info.roundState === 'PLAYING') {
-                    this.yardBombSystem.info.isSpectating = true;
-                    this.yardBombSystem.info.spectatedCallsign =
-                      specBot.callsign || 'VANGUARD-02';
-                    this.yardBombSystem.info.spectatedWeapon =
-                      specBot.weaponId || 'M4_CARBINE';
-                    this.yardBombSystem.info.spectatedHealth = Math.max(0, specBot.health);
-                    this.state.damageFlashAlpha = 0;
-                  } else if (this.yardBombSystem.info.bombStatus !== 'PLANTED') {
-                    this.yardBombSystem.finishCurrentRound(
-                      'BLACKTHORN',
-                      isHeadshot
-                        ? 'ESQUADRÃO VANGUARD ELIMINADO COM HEADSHOT CRÍTICO!'
-                        : 'ESQUADRÃO VANGUARD NEUTRALIZADO EM COMBATE!',
-                      (xp, cash) => {
-                        this.addPlayerXp(xp);
-                        addPlayerCash(cash);
-                        this.state.score += xp;
-                      }
-                    );
-                  }
-                  this.state.yardBomb = { ...this.yardBombSystem.info };
-                  this.emitHud();
-                },
-                bot.root.position
-              );
-            }
-            this.emitHud();
-          },
-          this.colliders,
-          activeGlbCollider,
-          playerAlive,
-          this.registerKill.bind(this)
-        );
-      }
-    }
-
-    // 3.8. Áudio Tático 3D Estilo Call of Duty: Passos de Inimigos por Proximidade + Batimento Cardíaco
-    if (this.state.drillMode !== 'FREE_RANGE') {
-      const activeGlbCollider =
-        this.state.drillMode === 'DUST2_BOMB_5V5'
-          ? this.dust2LevelData.collider
-          : this.state.drillMode === 'ASSAULT_BOMB_5V5'
-            ? this.assaultLevelData.collider
-            : null;
-      updateSpatialBotFootstepsAndHeartbeat(
-        this.targets,
-        _worldPos,
-        this.yaw,
-        this.state.health,
-        this.isPlayerDying || this.playerDeathTp?.isActive() || this.state.health <= 0,
-        dt,
-        this.grenadeSystem,
-        this.colliders,
-        activeGlbCollider
-      );
-    }
-
-    // 4. Update Pro.Rifle.Pack.glb 3D Skeletal Bot Mixers & State Machines
-    if (this.state.drillMode !== 'FREE_RANGE') {
-      updateAllBotCharacters(
-        this.targets,
-        _worldPos,
-        dt,
-        this.isSoftwareGl
-      );
-      if (isOnlineMatchActive()) {
-        enforceUnusedBotVisibility(this.targets as YardBotEntity[]);
-      }
-    }
+    runTargetsCombatAI(this as any, dt);
   }
 
-  private emitHud(): void {
-    if (this.cachedRadarTargets.length !== this.targets.length) {
-      this.cachedRadarTargets = this.targets.map((t) => ({
-        id: t.id,
-        sector: t.sector,
-        x: t.root.position.x,
-        z: t.root.position.z,
-        isDown: t.isDown,
-        isAlly: (t as YardBotEntity).isAlly,
-      }));
-    } else {
-      for (let i = 0; i < this.targets.length; i++) {
-        const t = this.targets[i];
-        const c = this.cachedRadarTargets[i];
-        c.x = t.root.position.x;
-        c.z = t.root.position.z;
-        c.isDown = t.isDown;
-        c.isAlly = (t as YardBotEntity).isAlly;
-      }
-    }
-
-    this.state.playerPos.x = this.playerPos.x;
-    this.state.playerPos.y = this.playerPos.y;
-    this.state.playerPos.z = this.playerPos.z;
-    this.state.playerYaw = this.yaw;
-
-    this.onHudUpdate({
-      ...this.state,
-      primaryWeapon: this.primaryWeapon,
-      secondaryWeapon: 'P50_PISTOL',
-      playerPos: this.state.playerPos,
-      playerYaw: this.yaw,
-      radarTargets: this.cachedRadarTargets,
-    });
+  private emitHud(force = false): void {
+    if (force) this.hudForceEmit.value = true;
+    emitHudIfChanged(
+      {
+        state: this.state,
+        primaryWeapon: this.primaryWeapon,
+        playerPos: this.playerPos,
+        yaw: this.yaw,
+        targets: this.targets as Array<{
+          id: string;
+          sector: 'RANGE' | 'KILLHOUSE';
+          root: { position: { x: number; z: number } };
+          isDown: boolean;
+          isAlly?: boolean;
+        }>,
+        cachedRadarTargets: this.cachedRadarTargets,
+        lastFingerprint: this.hudFingerprint,
+        forceNext: this.hudForceEmit,
+      },
+      this.onHudUpdate
+    );
   }
 
   public dispose(): void {
     this.disposed = true;
+    disposeTacticalPostFx(this.postFx);
     this.unsubOnlineHits?.();
     this.unsubOnlineHits = null;
+    this.unsubOnlineClassSupport?.();
+    this.unsubOnlineClassSupport = null;
     cancelAnimationFrame(this.frameId);
     if (this.rankUpTimeoutId !== null) {
       window.clearTimeout(this.rankUpTimeoutId);
@@ -4820,6 +3591,8 @@ export class TacticalFPSEngine {
         }
       }
     });
+
+    clearSharedMaterialCache();
 
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode) {

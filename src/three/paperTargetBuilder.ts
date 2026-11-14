@@ -296,18 +296,19 @@ export function populateStanderTiroTargetsAndArmory(
 ): void {
   ensureSharedPaperTargetResources();
 
+  // Lane centers from shooting_range_2k TargetRail Xs; downrange toward -Z.
   const paperTargetDefs: PaperTargetDef[] = [
-    { id: 'paper_lane1_static', x: 2.6, z: -0.22, variant: 'BULLSEYE_PRO', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
-    { id: 'paper_lane2_static', x: 6.4, z: 1.26, variant: 'SILHOUETTE_RINGS', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
-    { id: 'paper_lane3_static', x: 1.8, z: 2.8, variant: 'BULLSEYE_PRO', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
-    { id: 'paper_lane4_static', x: 10.6, z: 4.27, variant: 'SILHOUETTE_RINGS', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
-    { id: 'paper_lane5_static', x: 15.2, z: 5.78, variant: 'BULLSEYE_PRO', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
-    { id: 'paper_mover_near_z', x: 4.5, z: 2.8, variant: 'BULLSEYE_PRO', patrolAxis: 'Z', patrolRange: 2.1, patrolSpeed: 1.55, patrolOffset: 0.0 },
-    { id: 'paper_mover_mid1_z', x: 8.5, z: 2.8, variant: 'SILHOUETTE_RINGS', patrolAxis: 'Z', patrolRange: 2.45, patrolSpeed: 1.85, patrolOffset: 1.7 },
-    { id: 'paper_mover_mid2_z', x: 12.8, z: 2.8, variant: 'BULLSEYE_PRO', patrolAxis: 'Z', patrolRange: 2.45, patrolSpeed: 1.35, patrolOffset: 3.1 },
-    { id: 'paper_mover_far_z', x: 18.4, z: 2.8, variant: 'SILHOUETTE_RINGS', patrolAxis: 'Z', patrolRange: 2.5, patrolSpeed: 2.1, patrolOffset: 0.9 },
-    { id: 'paper_mover_rail_x1', x: 9.2, z: 0.52, variant: 'BULLSEYE_PRO', patrolAxis: 'X', patrolRange: 2.6, patrolSpeed: 1.25, patrolOffset: 0.4 },
-    { id: 'paper_mover_rail_x2', x: 16.5, z: 4.95, variant: 'SILHOUETTE_RINGS', patrolAxis: 'X', patrolRange: 3.1, patrolSpeed: 1.4, patrolOffset: 2.2 },
+    { id: 'paper_lane1_static', x: -1.36, z: -12.5, variant: 'BULLSEYE_PRO', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
+    { id: 'paper_lane2_static', x: 0.39, z: -16.0, variant: 'SILHOUETTE_RINGS', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
+    { id: 'paper_lane3_static', x: 2.14, z: -20.5, variant: 'BULLSEYE_PRO', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
+    { id: 'paper_lane4_static', x: 3.89, z: -24.0, variant: 'SILHOUETTE_RINGS', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
+    { id: 'paper_lane5_static', x: 5.64, z: -28.5, variant: 'BULLSEYE_PRO', patrolAxis: 'NONE', patrolRange: 0, patrolSpeed: 0, patrolOffset: 0 },
+    { id: 'paper_mover_near_z', x: 2.14, z: -14.0, variant: 'BULLSEYE_PRO', patrolAxis: 'Z', patrolRange: 2.4, patrolSpeed: 1.55, patrolOffset: 0.0 },
+    { id: 'paper_mover_mid1_z', x: 5.64, z: -22.0, variant: 'SILHOUETTE_RINGS', patrolAxis: 'Z', patrolRange: 2.8, patrolSpeed: 1.85, patrolOffset: 1.7 },
+    { id: 'paper_mover_mid2_z', x: 7.39, z: -26.0, variant: 'BULLSEYE_PRO', patrolAxis: 'Z', patrolRange: 2.8, patrolSpeed: 1.35, patrolOffset: 3.1 },
+    { id: 'paper_mover_far_z', x: 9.09, z: -32.0, variant: 'SILHOUETTE_RINGS', patrolAxis: 'Z', patrolRange: 2.5, patrolSpeed: 2.1, patrolOffset: 0.9 },
+    { id: 'paper_mover_rail_x1', x: 3.89, z: -18.5, variant: 'BULLSEYE_PRO', patrolAxis: 'X', patrolRange: 2.6, patrolSpeed: 1.25, patrolOffset: 0.4 },
+    { id: 'paper_mover_rail_x2', x: 7.39, z: -30.0, variant: 'SILHOUETTE_RINGS', patrolAxis: 'X', patrolRange: 2.4, patrolSpeed: 1.4, patrolOffset: 2.2 },
   ];
 
   paperTargetDefs.forEach((def) => {
@@ -316,11 +317,11 @@ export function populateStanderTiroTargetsAndArmory(
     );
   });
 
-  [1.26, 4.27].forEach((zPos, idx) => {
+  [-1.36, 9.09].forEach((xPos, idx) => {
     const id = `stander_gong_${idx}`;
     const root = new THREE.Group();
-    root.position.set(23.6, 0, zPos);
-    root.rotation.y = -Math.PI / 2;
+    root.position.set(xPos, 0, -34.5);
+    root.rotation.y = 0;
     levelGroup.add(root);
 
     const pivotGroup = new THREE.Group();
@@ -342,7 +343,7 @@ export function populateStanderTiroTargetsAndArmory(
       pivotGroup,
       headMesh: gongDisc,
       torsoMesh: gongDisc,
-      basePosition: new THREE.Vector3(23.6, 0, zPos),
+      basePosition: new THREE.Vector3(xPos, 0, -34.5),
       patrolAxis: 'NONE',
       patrolRange: 0,
       patrolSpeed: 0,

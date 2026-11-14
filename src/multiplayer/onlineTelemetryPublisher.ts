@@ -1,20 +1,87 @@
+/**
+ * Online telemetry publisher.
+ * Combat hot-path = WebSocket only. Firestore is used for lobby load progress
+ * and deferred scoreboard/meta persistence (lethal / round boundary), never for
+ * per-frame transforms.
+ */
+
 import { doc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/firebaseClient';
 import { WeaponId } from '../types/game';
+import {
+  applyCombatHitToRoomState,
+  buildCombatHitEvent,
+  prepareCombatTransformSend,
+  resetCombatNetcodeThrottle,
+  sendCombatHitWs,
+  sendCombatTransformWs,
+} from './combatNetcode';
 import { OnlineHitEvent, OnlinePlayerState, OnlineRoomState } from './onlineTypes';
 
-let lastFirestoreTransformPushMs = 0;
+export { resetCombatNetcodeThrottle };
+
+/** Debounce Firestore scoreboard writes after lethal hits. */
+let pendingMetaTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingMetaRoomId: string | null = null;
+
+function scheduleScoreboardMetaPersist(room: OnlineRoomState): void {
+  pendingMetaRoomId = room.roomId;
+  if (pendingMetaTimer) return;
+  pendingMetaTimer = setTimeout(() => {
+    pendingMetaTimer = null;
+    const roomId = pendingMetaRoomId;
+    pendingMetaRoomId = null;
+    if (!roomId || !auth.currentUser) return;
+    // Persist compact scoreboard only (not transforms).
+    const scoreboard: Record<string, Partial<OnlinePlayerState>> = {};
+    Object.values(room.players).forEach((p) => {
+      scoreboard[p.uid] = {
+        kills: p.kills || 0,
+        deaths: p.deaths || 0,
+        assists: p.assists || 0,
+        headshots: p.headshots || 0,
+        health: p.health,
+        isDown: p.isDown,
+      };
+    });
+    const patch: Record<string, unknown> = { updatedAtMs: Date.now() };
+    Object.entries(scoreboard).forEach(([uid, stats]) => {
+      patch[`players.${uid}.kills`] = stats.kills;
+      patch[`players.${uid}.deaths`] = stats.deaths;
+      patch[`players.${uid}.assists`] = stats.assists;
+      patch[`players.${uid}.headshots`] = stats.headshots;
+      patch[`players.${uid}.health`] = stats.health;
+      patch[`players.${uid}.isDown`] = stats.isDown;
+    });
+    void updateDoc(doc(db, 'rooms', roomId), patch).catch(() => {});
+  }, 750);
+}
+
+function resolveLocalUid(
+  activeRoom: OnlineRoomState,
+  explicitUid?: string | null
+): string | null {
+  if (explicitUid && activeRoom.players[explicitUid]) return explicitUid;
+  const authUid = auth.currentUser?.uid;
+  if (authUid && activeRoom.players[authUid]) return authUid;
+  // Guest / fallback: first local-looking entry if only one, else null
+  const ids = Object.keys(activeRoom.players);
+  if (ids.length === 1) return ids[0];
+  return authUid || null;
+}
 
 export function publishRoomLoadProgress(
   activeRoom: OnlineRoomState | null,
   wsClient: WebSocket | null,
   emitRoomState: () => void,
   progressPct: number,
-  isLoaded: boolean
+  isLoaded: boolean,
+  localUid?: string | null
 ): void {
-  const user = auth.currentUser;
-  if (!user || !activeRoom) return;
-  const me = activeRoom.players[user.uid];
+  if (!activeRoom) return;
+  const uid = resolveLocalUid(activeRoom, localUid);
+  if (!uid) return;
+  const me = activeRoom.players[uid];
   if (!me) return;
   const clamped = Math.min(100, Math.max(0, Math.round(progressPct)));
   if (me.loadProgress === clamped && me.isLoaded === isLoaded) return;
@@ -24,22 +91,25 @@ export function publishRoomLoadProgress(
     isLoaded,
     updatedAtMs: Date.now(),
   };
-  activeRoom.players[user.uid] = updated;
+  activeRoom.players[uid] = updated;
   emitRoomState();
   if (wsClient && wsClient.readyState === WebSocket.OPEN) {
     wsClient.send(
       JSON.stringify({
         type: 'PLAYER_STATE',
         roomId: activeRoom.roomId,
-        uid: user.uid,
+        uid,
         player: updated,
       })
     );
   }
-  void updateDoc(doc(db, 'rooms', activeRoom.roomId), {
-    [`players.${user.uid}`]: updated,
-    updatedAtMs: Date.now(),
-  }).catch(() => {});
+  // Lobby-only Firestore: useful when peers join mid-load without WS yet.
+  if (auth.currentUser) {
+    void updateDoc(doc(db, 'rooms', activeRoom.roomId), {
+      [`players.${uid}`]: updated,
+      updatedAtMs: Date.now(),
+    }).catch(() => {});
+  }
 }
 
 export function publishRoomPlayerTransform(
@@ -56,52 +126,22 @@ export function publishRoomPlayerTransform(
     isDown: boolean;
     isCrouching: boolean;
     isFiring: boolean;
-  }
+  },
+  localUid?: string | null
 ): void {
-  const user = auth.currentUser;
-  if (!user || !activeRoom) return;
-  const me = activeRoom.players[user.uid];
+  if (!activeRoom) return;
+  const uid = resolveLocalUid(activeRoom, localUid);
+  if (!uid) return;
+  const me = activeRoom.players[uid];
   if (!me) return;
 
-  const nowMs = Date.now();
-  const updated: OnlinePlayerState = {
-    ...me,
-    x: Number(params.x.toFixed(2)),
-    y: Number(params.y.toFixed(2)),
-    z: Number(params.z.toFixed(2)),
-    yaw: Number(params.yaw.toFixed(3)),
-    pitch: Number(params.pitch.toFixed(3)),
-    weaponId: params.weaponId,
-    health: Math.max(0, Math.round(params.health)),
-    isDown: params.isDown,
-    isCrouching: params.isCrouching,
-    isFiring: params.isFiring,
-    lastShotAtMs: params.isFiring ? nowMs : me.lastShotAtMs,
-    updatedAtMs: nowMs,
-  };
-  activeRoom.players[user.uid] = updated;
+  const { updated, shouldSend } = prepareCombatTransformSend(me, params);
+  activeRoom.players[uid] = updated;
 
-  if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-    wsClient.send(
-      JSON.stringify({
-        type: 'PLAYER_STATE',
-        roomId: activeRoom.roomId,
-        uid: user.uid,
-        player: updated,
-      })
-    );
-  }
-  if (
-    nowMs - lastFirestoreTransformPushMs >= 110 ||
-    params.isFiring ||
-    params.isDown !== me.isDown
-  ) {
-    lastFirestoreTransformPushMs = nowMs;
-    void updateDoc(doc(db, 'rooms', activeRoom.roomId), {
-      [`players.${user.uid}`]: updated,
-      updatedAtMs: nowMs,
-    }).catch(() => {});
-  }
+  if (!shouldSend) return;
+
+  // Combat transforms: WebSocket only — never Firestore.
+  sendCombatTransformWs(wsClient, activeRoom, uid, updated);
 }
 
 export function publishRoomCombatHit(
@@ -110,47 +150,65 @@ export function publishRoomCombatHit(
   targetUid: string,
   damage: number,
   isHeadshot: boolean,
-  weaponId: WeaponId
-): void {
-  const user = auth.currentUser;
-  if (!user || !activeRoom) return;
-  const attacker = activeRoom.players[user.uid];
+  weaponId: WeaponId,
+  localUid?: string | null
+): OnlineHitEvent | null {
+  if (!activeRoom) return null;
+  const uid = resolveLocalUid(activeRoom, localUid);
+  if (!uid) return null;
+  const attacker = activeRoom.players[uid];
   const victim = activeRoom.players[targetUid];
-  if (!attacker || !victim || victim.isDown) return;
+  if (!attacker || !victim || victim.isDown) return null;
 
-  const nextVictimHp = Math.max(0, victim.health - damage);
-  const lethal = nextVictimHp <= 0;
-  const hitEvent: OnlineHitEvent = {
-    eventId: `${user.uid}_${targetUid}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    attackerUid: user.uid,
-    attackerCallsign: attacker.callsign,
-    attackerTeam: attacker.team,
+  const { hit, nextVictimHp, lethal } = buildCombatHitEvent(
+    attacker,
+    victim,
     targetUid,
-    targetCallsign: victim.callsign,
-    targetTeam: victim.team,
-    weaponId,
     damage,
     isHeadshot,
-    lethal,
-    ts: Date.now(),
-  };
+    weaponId
+  );
 
-  if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-    wsClient.send(
-      JSON.stringify({ type: 'COMBAT_HIT', roomId: activeRoom.roomId, hit: hitEvent })
-    );
+  applyCombatHitToRoomState(activeRoom, hit, nextVictimHp, lethal);
+
+  const sent = sendCombatHitWs(wsClient, activeRoom.roomId, hit);
+
+  // Fallback only if WS is down: single Firestore hit write so peers can still sync.
+  if (!sent && auth.currentUser) {
+    const updates: Record<string, unknown> = {
+      lastHitEvent: hit,
+      [`players.${targetUid}.health`]: nextVictimHp,
+      [`players.${targetUid}.isDown`]: lethal,
+      updatedAtMs: Date.now(),
+    };
+    if (lethal) {
+      updates[`players.${uid}.kills`] = attacker.kills || 0;
+      if (isHeadshot) updates[`players.${uid}.headshots`] = attacker.headshots || 0;
+      updates[`players.${targetUid}.deaths`] = victim.deaths || 0;
+    }
+    void updateDoc(doc(db, 'rooms', activeRoom.roomId), updates).catch(() => {});
+    return hit;
   }
 
-  const updates: Record<string, unknown> = {
-    lastHitEvent: hitEvent,
-    [`players.${targetUid}.health`]: nextVictimHp,
-    [`players.${targetUid}.isDown`]: lethal,
-    updatedAtMs: Date.now(),
-  };
+  // WS path: defer scoreboard meta so Firestore is not on the hit hot path.
   if (lethal) {
-    updates[`players.${user.uid}.kills`] = (attacker.kills || 0) + 1;
-    if (isHeadshot) updates[`players.${user.uid}.headshots`] = (attacker.headshots || 0) + 1;
-    updates[`players.${targetUid}.deaths`] = (victim.deaths || 0) + 1;
+    scheduleScoreboardMetaPersist(activeRoom);
   }
-  void updateDoc(doc(db, 'rooms', activeRoom.roomId), updates).catch(() => {});
+  return hit;
 }
+
+/** Explicit meta persist for round/match boundaries (call from bomb/round systems). */
+export function persistRoomMatchMeta(activeRoom: OnlineRoomState | null): void {
+  if (!activeRoom || !auth.currentUser) return;
+  void updateDoc(doc(db, 'rooms', activeRoom.roomId), {
+    currentRound: activeRoom.currentRound,
+    vanguardScore: activeRoom.vanguardScore,
+    blackthornScore: activeRoom.blackthornScore,
+    bombStatus: activeRoom.bombStatus,
+    plantedSite: activeRoom.plantedSite,
+    status: activeRoom.status,
+    updatedAtMs: Date.now(),
+  }).catch(() => {});
+}
+
+export type { OnlineHitEvent };

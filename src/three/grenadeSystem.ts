@@ -121,6 +121,7 @@ export class TacticalGrenadeSystem {
   private landingOuterRingMat: THREE.MeshBasicMaterial;
   private landingInnerDiscMat: THREE.MeshBasicMaterial;
   private lastTrajectoryUpdateMs = 0;
+  private lastBoundVmType: GrenadeType | null = null;
 
   // Active World Projectiles, Explosions & Volumetric Smoke Clouds
   private projectiles: ActiveProjectile[] = [];
@@ -469,59 +470,93 @@ export class TacticalGrenadeSystem {
     );
   }
 
-  private preloadGrenadeGlbModels(): void {
-    // 1. Frag Grenade GLB (Isolate ONLY the 1st upright grenade out of the 3 baked in the mesh!)
-    this.loadGlbWithFallback(FRAG_GLB_LOCAL_URL, FRAG_GLB_GITHUB_URL, (scene) => {
-      isolateSingleFragGrenadeInGlb(scene);
-      this.fragTemplate = this.normalizeGlbModel(scene, 0.112, false);
-      this.vmFragVisual.clear();
-      const vmClone = this.fragTemplate.clone(true);
-      const pinRing = new THREE.Mesh(
-        new THREE.TorusGeometry(0.013, 0.0024, 8, 16),
-        new THREE.MeshStandardMaterial({
-          color: 0xe2e8f0,
-          metalness: 0.92,
-          roughness: 0.22,
-        })
-      );
-      pinRing.name = 'Grenade_Pin';
-      pinRing.position.set(-0.02, 0.044, 0.01);
-      vmClone.add(pinRing);
-      this.vmFragVisual.add(vmClone);
-      if (this.heldGrenadeType === 'FRAG') {
-        this.bindViewmodelParts(this.vmFragVisual);
-      }
-    });
+  private grenadeAssetsPromise: Promise<void> | null = null;
 
-    // 2. S13 Smoke Grenade GLB (separated pin Grenade_smoke_9_low & lever Grenade_smoke_7_low)
-    this.loadGlbWithFallback(
-      S13_SMOKE_GLB_LOCAL_URL,
-      S13_SMOKE_GLB_GITHUB_URL,
-      (scene) => {
-        this.s13SmokeTemplate = this.normalizeGlbModel(scene, 0.132, false);
+  private loadGlbPromise(
+    localUrl: string,
+    githubUrl: string
+  ): Promise<THREE.Group | null> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (scene: THREE.Group | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(scene);
+      };
+      this.loadGlbWithFallback(localUrl, githubUrl, (scene) => done(scene));
+      // loadGlbWithFallback swallows final failure — timebox so match load can't hang.
+      window.setTimeout(() => done(null), 12000);
+    });
+  }
+
+  private preloadGrenadeGlbModels(): void {
+    void this.ensureGrenadeAssetsReady();
+  }
+
+  /**
+   * Awaitable warm of frag/smoke GLBs + viewmodel bind.
+   * Call during match prepare so the first HUD grenade tap is instant.
+   */
+  public ensureGrenadeAssetsReady(): Promise<void> {
+    if (this.fragTemplate && (this.s13SmokeTemplate || this.m18SmokeTemplate)) {
+      this.bindViewmodelParts(this.vmFragVisual);
+      this.bindViewmodelParts(this.vmSmokeVisual);
+      this.lastBoundVmType = null;
+      return Promise.resolve();
+    }
+    if (this.grenadeAssetsPromise) return this.grenadeAssetsPromise;
+
+    this.grenadeAssetsPromise = (async () => {
+      const [fragScene, s13Scene, m18Scene] = await Promise.all([
+        this.loadGlbPromise(FRAG_GLB_LOCAL_URL, FRAG_GLB_GITHUB_URL),
+        this.loadGlbPromise(S13_SMOKE_GLB_LOCAL_URL, S13_SMOKE_GLB_GITHUB_URL),
+        this.loadGlbPromise(M18_SMOKE_GLB_LOCAL_URL, M18_SMOKE_GLB_GITHUB_URL),
+      ]);
+
+      if (fragScene && !this.fragTemplate) {
+        isolateSingleFragGrenadeInGlb(fragScene);
+        this.fragTemplate = this.normalizeGlbModel(fragScene, 0.112, false);
+        this.vmFragVisual.clear();
+        const vmClone = this.fragTemplate.clone(true);
+        const pinRing = new THREE.Mesh(
+          new THREE.TorusGeometry(0.013, 0.0024, 8, 16),
+          new THREE.MeshStandardMaterial({
+            color: 0xe2e8f0,
+            metalness: 0.92,
+            roughness: 0.22,
+          })
+        );
+        pinRing.name = 'Grenade_Pin';
+        pinRing.position.set(-0.02, 0.044, 0.01);
+        vmClone.add(pinRing);
+        this.vmFragVisual.add(vmClone);
+      }
+
+      if (s13Scene && !this.s13SmokeTemplate) {
+        this.s13SmokeTemplate = this.normalizeGlbModel(s13Scene, 0.132, false);
         this.vmSmokeVisual.clear();
         this.vmSmokeVisual.add(this.s13SmokeTemplate.clone(true));
-        if (this.heldGrenadeType === 'SMOKE') {
-          this.bindViewmodelParts(this.vmSmokeVisual);
-        }
       }
-    );
 
-    // 3. M18 Smoke Grenade GLB (hiding showcase offset copies .001 & .002)
-    this.loadGlbWithFallback(
-      M18_SMOKE_GLB_LOCAL_URL,
-      M18_SMOKE_GLB_GITHUB_URL,
-      (scene) => {
-        this.m18SmokeTemplate = this.normalizeGlbModel(scene, 0.132, true);
+      if (m18Scene && !this.m18SmokeTemplate) {
+        this.m18SmokeTemplate = this.normalizeGlbModel(m18Scene, 0.132, true);
         if (!this.s13SmokeTemplate) {
           this.vmSmokeVisual.clear();
           this.vmSmokeVisual.add(this.m18SmokeTemplate.clone(true));
-          if (this.heldGrenadeType === 'SMOKE') {
-            this.bindViewmodelParts(this.vmSmokeVisual);
-          }
         }
       }
-    );
+
+      // Pre-bind both so first tap skips traverse hitch.
+      if (this.vmFragVisual.children.length > 0) {
+        this.bindViewmodelParts(this.vmFragVisual);
+      }
+      if (this.vmSmokeVisual.children.length > 0) {
+        this.bindViewmodelParts(this.vmSmokeVisual);
+      }
+      this.lastBoundVmType = null;
+    })();
+
+    return this.grenadeAssetsPromise;
   }
 
   private bindViewmodelParts(activeVisual: THREE.Group): void {
@@ -796,7 +831,8 @@ export class TacticalGrenadeSystem {
 
     this.heldGrenadeType = type;
     this.holdIdleTime = 0;
-    this.equipCooldownTimer = 0.08;
+    // Near-zero — old 80ms + HUD defer made the tap feel lagged before anything moved.
+    this.equipCooldownTimer = 0.02;
     this.projectileLaunchedInSequence = false;
     this.viewmodelGroup.visible = true;
     this.handRig.grenadeSocket.visible = true;
@@ -805,7 +841,23 @@ export class TacticalGrenadeSystem {
 
     const activeVisual =
       type === 'FRAG' ? this.vmFragVisual : this.vmSmokeVisual;
-    this.bindViewmodelParts(activeVisual);
+    // Cache pin/lever bind — full traverse on every tap was hitching mobile UI.
+    if (this.lastBoundVmType !== type || !this.vmPinMesh || !this.vmLeverMesh) {
+      this.bindViewmodelParts(activeVisual);
+      this.lastBoundVmType = type;
+    } else {
+      if (this.vmPinMesh.userData.restPos) {
+        this.vmPinMesh.position.copy(
+          this.vmPinMesh.userData.restPos as THREE.Vector3
+        );
+      }
+      this.vmPinMesh.visible = true;
+      if (this.vmLeverMesh.userData.restRot) {
+        this.vmLeverMesh.rotation.copy(
+          this.vmLeverMesh.userData.restRot as THREE.Euler
+        );
+      }
+    }
     this.handRig.updateHoldPose(0, 0);
 
     const indicatorColor = type === 'FRAG' ? 0xf97316 : 0x38bdf8;

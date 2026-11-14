@@ -7,6 +7,7 @@ import {
   subscribeOnlineRoom,
 } from '../multiplayer/onlineRoomService';
 import { OnlineRoomState } from '../multiplayer/onlineTypes';
+import { getPlayerInventoryState } from '../progression/loadoutSystem';
 import { DrillMode, WeaponId } from '../types/game';
 import { CompetitiveRanksModal } from './CompetitiveRanksModal';
 import { FactionFlagCanvas } from './FactionFlagCanvas';
@@ -21,6 +22,7 @@ import {
 import { RankedLeftWidgets } from './RankedLeftWidgets';
 import { RankedOperator3DCanvas } from './RankedOperator3DCanvas';
 import { RankedRightWidgets } from './RankedRightWidgets';
+import { thumbForDrillMode } from './mapSelectThumbs';
 
 interface CompetitiveRankedScreenProps {
   playerMmr: number;
@@ -231,6 +233,10 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
             [
               { id: 'DUST2_BOMB_5V5', label: 'DE_DUST2' },
               { id: 'ASSAULT_BOMB_5V5', label: 'CS_ASSAULT' },
+              { id: 'INDUSTRIA_BOMB_5V5', label: 'INDUSTRIA' },
+              { id: 'HANGAR_BOMB_5V5', label: 'HANGAR' },
+              { id: 'EASTERN_CITY_BOMB_5V5', label: 'EASTERN CITY' },
+              { id: 'MIRAGE_ANUBIS_BOMB_5V5', label: 'MIRAGE ANUBIS' },
             ] as const
           ).map((m) => (
             <button
@@ -241,12 +247,18 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
                 soundEngine.playMenuSelect();
                 setSelectedArena(m.id);
               }}
-              className={`px-2 py-0.5 rounded text-[8px] sm:text-[9px] font-mono font-bold uppercase transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-mono font-bold uppercase transition-all cursor-pointer ${
                 selectedArena === m.id
                   ? 'bg-sky-500 text-slate-950 shadow-[0_0_10px_rgba(56,189,248,0.65)]'
                   : 'bg-white/5 text-slate-300 hover:bg-white/15'
               } ${isSearching ? 'opacity-60 cursor-not-allowed' : ''}`}
             >
+              <img
+                src={thumbForDrillMode(m.id)}
+                alt=""
+                className="w-5 h-3.5 rounded-sm object-cover hidden sm:block"
+                draggable={false}
+              />
               {m.label}
             </button>
           ))}
@@ -273,7 +285,10 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
         {/* COLUNA CENTRAL: OPERADOR 3D (.GLB) DESTACADO NA FRENTE DA BANDEIRA AZUL 3D */}
         <div className="col-span-4 h-full min-h-0 relative flex flex-col items-center justify-end">
           <div className="w-full h-full relative z-20">
-            <RankedOperator3DCanvas activeWeapon={activeWeapon} />
+            <RankedOperator3DCanvas
+              activeWeapon={activeWeapon}
+              operatorClass={getPlayerInventoryState().selectedClass}
+            />
           </div>
           <span className="pointer-events-none text-[8px] font-mono uppercase tracking-[0.2em] text-sky-300/65 pb-0.5">
             ARRASTE PARA GIRAR O OPERADOR 3D

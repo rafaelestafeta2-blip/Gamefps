@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useRef, useState } from 'react';
+// startTransition is only used for same-screen HUD ticks — never for screen changes.
 import { applyAudioSettings, initAudioSystem } from './audio/audioSettings';
 import { AuthLoginScreen } from './components/AuthLoginScreen';
 import { GameShellModals } from './components/GameShellModals';
@@ -19,6 +20,7 @@ import { FpsLimit, GameSettings, getDefaultSettings, loadGameSettings, saveGameS
 import { mobileHardware } from './mobile/nativeHardware';
 import { getClassCombatModifiers } from './progression/loadoutSystem';
 import { TacticalFPSEngine } from './three/fpsEngine';
+import { prefetchMapAssetsForMode } from './three/mapAssetCatalog';
 import { DrillMode, GyroMode, HudState, OpticType, WeaponId } from './types/game';
 import { INITIAL_HUD_STATE } from './types/initialHudState';
 
@@ -79,6 +81,7 @@ export default function App() {
     engine.setLookSensitivity(next.lookSensitivity);
     engine.setAdsSensitivity(next.adsSensitivity);
     engine.setGyroSensitivity(next.gyroSensitivity);
+    engine.setAimAssistStrength(next.aimAssistStrength ?? 0.45);
     if (!prev || prev.gyroMode !== next.gyroMode) {
       void engine.setGyroMode(next.gyroMode);
     }
@@ -122,6 +125,8 @@ export default function App() {
       return;
     }
     if (hud.screen === 'MAIN_MENU' || targetMode !== hud.drillMode) {
+      // Kick GLB/Draco prefetch immediately so Loading 2 hits warm cache.
+      void prefetchMapAssetsForMode(targetMode);
       setLoadingBombMode(targetMode);
       return;
     }
@@ -129,8 +134,19 @@ export default function App() {
   };
 
   const handleStartWarfaceMatchmaking = (targetMode: DrillMode) => {
+    void prefetchMapAssetsForMode(targetMode);
     setMatchmakingTargetMode(targetMode);
   };
+
+  // Stable prepare callback — inline lambdas recreated every App render and
+  // restarted YardMatchLoadingModal's effect mid-download (stuck VS / 0%).
+  const prepareMapForMatch = useCallback(
+    (targetMode: DrillMode, onProg: (pct: number, statusLabel: string) => void) =>
+      engineRef.current
+        ? engineRef.current.prepareMapForMatch(targetMode, onProg)
+        : Promise.resolve(),
+    []
+  );
 
   const handleSelectWeapon = (weaponId: WeaponId) => {
     if (!engineRef.current) return;
@@ -142,7 +158,39 @@ export default function App() {
     const container = canvasMountRef.current;
     if (!container) return;
 
-    const engine = new TacticalFPSEngine(container, (nextHud) => setHud(nextHud));
+    // HUD bridge dirty-checks. Screen changes MUST be synchronous — deferring
+    // PLAYING with startTransition caused a one-frame MAIN_MENU flash after loading.
+    // Weapon/grenade equip must also be sync — startTransition made grenade taps feel lagged.
+    const hudScreenRef = { current: 'INTRO' as string };
+    const hudInteractionRef = {
+      equippedGrenade: null as string | null,
+      isThrowingGrenade: false,
+      activeWeapon: '' as string,
+    };
+    const engine = new TacticalFPSEngine(container, (nextHud) => {
+      if (nextHud.screen !== hudScreenRef.current) {
+        hudScreenRef.current = nextHud.screen;
+        hudInteractionRef.equippedGrenade = nextHud.equippedGrenade;
+        hudInteractionRef.isThrowingGrenade = nextHud.isThrowingGrenade;
+        hudInteractionRef.activeWeapon = nextHud.activeWeapon;
+        setHud(nextHud);
+        return;
+      }
+      const interactionChanged =
+        nextHud.equippedGrenade !== hudInteractionRef.equippedGrenade ||
+        nextHud.isThrowingGrenade !== hudInteractionRef.isThrowingGrenade ||
+        nextHud.activeWeapon !== hudInteractionRef.activeWeapon;
+      if (interactionChanged) {
+        hudInteractionRef.equippedGrenade = nextHud.equippedGrenade;
+        hudInteractionRef.isThrowingGrenade = nextHud.isThrowingGrenade;
+        hudInteractionRef.activeWeapon = nextHud.activeWeapon;
+        setHud(nextHud);
+        return;
+      }
+      startTransition(() => {
+        setHud(nextHud);
+      });
+    });
     engineRef.current = engine;
     const initialLoadout = getClassCombatModifiers();
     if (initialLoadout.primaryWeapon) {
@@ -254,15 +302,12 @@ export default function App() {
       {loadingBombMode && (
         <YardMatchLoadingModal
           mode={loadingBombMode}
-          onPrepareMap={(targetMode, onProg) =>
-            engineRef.current
-              ? engineRef.current.prepareMapForMatch(targetMode, onProg)
-              : Promise.resolve()
-          }
+          onPrepareMap={prepareMapForMatch}
           onComplete={() => {
             const targetMode = loadingBombMode;
-            setLoadingBombMode(null);
+            // Enter PLAYING first, then dismiss loading — avoids MAIN_MENU flash.
             launchMatchNow(targetMode);
+            setLoadingBombMode(null);
           }}
         />
       )}
@@ -297,7 +342,8 @@ export default function App() {
       {hud.screen === 'PLAYING' && (
         <>
           {!hud.yardBomb?.isSpectating &&
-            hud.yardBomb?.roundState !== 'MATCH_OVER' && (
+            hud.yardBomb?.roundState !== 'MATCH_OVER' &&
+            hud.yardBomb?.roundState !== 'EQUIP' && (
               <MobileTouchControls
               hud={hud}
               controlSettings={controlSettings}
@@ -331,6 +377,7 @@ export default function App() {
             onToggleLaser={() => engineRef.current?.toggleLaser()}
             onCycleFireMode={() => engineRef.current?.cycleFireMode()}
             onResupply={() => engineRef.current?.resupplyAmmo()}
+            onSupportHeld={(held) => engineRef.current?.setClassSupportHeld(held)}
             onThrowGrenade={(type) => engineRef.current?.throwGrenade(type)}
             onToggleMute={() => engineRef.current?.toggleMute()}
             onToggleDock={() => engineRef.current?.toggleDockCollapsed()}

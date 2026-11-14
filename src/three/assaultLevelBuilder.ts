@@ -168,7 +168,8 @@ export async function loadAssaultMapGeometry(
 
         child.material =
           optimizedMats.length === 1 ? optimizedMats[0] : optimizedMats;
-        bundle.shootableMeshes.push(child);
+        // World bullets use triangle collider — skip registering every GLB mesh
+        // into Three.js raycast lists (bots still push their hitboxes).
       }
     });
 

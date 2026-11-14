@@ -418,9 +418,25 @@ export class Dust2TriangleCollider {
     dir: THREE.Vector3,
     maxDist: number
   ): number | null {
+    const hit = this.raycastDetailed(origin, dir, maxDist);
+    return hit ? hit.distance : null;
+  }
+
+  /**
+   * Spatial-hash triangle raycast with hit point + face normal.
+   * Used for bullet world impacts without Three.js mesh traversal of the whole GLB.
+   */
+  public raycastDetailed(
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    maxDist: number,
+    outPoint?: THREE.Vector3,
+    outNormal?: THREE.Vector3
+  ): { distance: number } | null {
     if (!this.ready) return null;
     _ray.set(origin, dir);
     let closestDist = maxDist + 1;
+    let hitTri: Dust2TriEntry | null = null;
     const step = 1.45;
     const steps = Math.max(1, Math.ceil(maxDist / step));
     let lastKey = '';
@@ -442,7 +458,11 @@ export class Dust2TriangleCollider {
           if (py + step < w.minY || py - step > w.maxY) continue;
           if (_ray.intersectTriangle(w.a, w.b, w.c, false, _hitPt)) {
             const dist = origin.distanceTo(_hitPt);
-            if (dist <= maxDist && dist < closestDist) closestDist = dist;
+            if (dist <= maxDist && dist < closestDist) {
+              closestDist = dist;
+              hitTri = w;
+              if (outPoint) outPoint.copy(_hitPt);
+            }
           }
         }
       }
@@ -453,13 +473,27 @@ export class Dust2TriangleCollider {
           if (py + step < f.minY || py - step > f.maxY) continue;
           if (_ray.intersectTriangle(f.a, f.b, f.c, false, _hitPt)) {
             const dist = origin.distanceTo(_hitPt);
-            if (dist <= maxDist && dist < closestDist) closestDist = dist;
+            if (dist <= maxDist && dist < closestDist) {
+              closestDist = dist;
+              hitTri = f;
+              if (outPoint) outPoint.copy(_hitPt);
+            }
           }
         }
       }
     }
 
-    return closestDist <= maxDist ? closestDist : null;
+    if (closestDist > maxDist || !hitTri) return null;
+
+    if (outPoint) {
+      outPoint.copy(origin).addScaledVector(dir, closestDist);
+    }
+    if (outNormal) {
+      outNormal.copy(hitTri.normal);
+      // Ensure normal faces the shooter
+      if (outNormal.dot(dir) > 0) outNormal.negate();
+    }
+    return { distance: closestDist };
   }
 
   private sampleTriangleY(t: Dust2TriEntry, x: number, z: number): number | null {

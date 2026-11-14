@@ -9,16 +9,42 @@ import {
 } from '../audio/characterAndBombAudio';
 import { soundEngine } from '../audio/soundEngine';
 import { playSpatialBotGunshot } from '../audio/spatialCombatAudio';
-import { getPlayerCallsign, recordCombatTelemetryDelta } from '../firebase/playerCloudSync';
+import {
+  getCloudSyncState,
+  getPlayerCallsign,
+  recordCombatTelemetryDelta,
+} from '../firebase/playerCloudSync';
+import { canGrantMatchProgressionRewards } from '../progression/matchProgressionGate';
 import { mobileHardware } from '../mobile/nativeHardware';
 import { DrillMode, SquadOperatorStats, WeaponId, YardBombHudInfo } from '../types/game';
 import { BallisticsFXPool } from './ballisticsPool';
 import { triggerBotFireAnimation, triggerBotHitAnimation } from './botCharacterSystem';
 import { ASSAULT_BOMB_SITE_A, ASSAULT_BOMB_SITE_B, getAssaultCalloutForPos } from './assaultLevelBuilder';
 import { DUST2_BOMB_SITE_A, DUST2_BOMB_SITE_B, getDust2CalloutForPos } from './dust2LevelBuilder';
+import {
+  INDUSTRIA_BOMB_SITE_A,
+  INDUSTRIA_BOMB_SITE_B,
+  getIndustriaCalloutForPos,
+} from './industriaLevelBuilder';
+import {
+  HANGAR_BOMB_SITE_A,
+  HANGAR_BOMB_SITE_B,
+  getHangarCalloutForPos,
+} from './hangarLevelBuilder';
+import {
+  EASTERN_CITY_BOMB_SITE_A,
+  EASTERN_CITY_BOMB_SITE_B,
+  getEasternCityCalloutForPos,
+} from './easternCityLevelBuilder';
+import {
+  MIRAGE_ANUBIS_BOMB_SITE_A,
+  MIRAGE_ANUBIS_BOMB_SITE_B,
+  getMirageAnubisCalloutForPos,
+} from './mirageAnubisLevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
 import { getYardCalloutForPos, YARD_BOMB_SITE_A, YARD_BOMB_SITE_B } from './yardMapData';
 import { YardBotEntity } from './yardPropsBuilder';
+import { createPlantedC4Visual } from './c4BombProp';
 
 const _allyOrigin = new THREE.Vector3();
 const _enemyPos = new THREE.Vector3();
@@ -36,6 +62,7 @@ function createInitialSquadStats(): SquadOperatorStats[] {
 export class YardBombSystem {
   private c4MeshGroup: THREE.Group;
   private c4LedMesh: THREE.Mesh;
+  private c4EnsureLoaded: () => Promise<void>;
   private beepAccum = 0;
   private allyFireTimer = 0;
   private isPlantingHeld = false;
@@ -46,22 +73,28 @@ export class YardBombSystem {
     bombStatus: 'CARRIED', plantedSite: null, nearSite: null, plantProgress: 0,
     roundTimerSec: 125, c4TimerSec: 40, alliesAlive: 5, enemiesAlive: 5,
     calloutLabel: 'SPAWN VANGUARD (SUL · RUA DO HOTEL)', currentRound: 1, maxRounds: 6,
-    vanguardScore: 0, blackthornScore: 0, roundState: 'PLAYING', roundWinner: null,
-    roundWinReason: '', roundTransitionSec: 0, matchWinner: null,
+    vanguardScore: 0, blackthornScore: 0, roundState: 'EQUIP', roundWinner: null,
+    roundWinReason: '', roundTransitionSec: 0, equipTimerSec: 7, matchWinner: null,
     lastRoundXp: 0, lastRoundCash: 0, totalMatchXp: 0, totalMatchCash: 0,
     squadStats: createInitialSquadStats(),
   };
 
+  public captureMatchProgressSnapshot(): void {
+    const profile = getCloudSyncState().profile;
+    this.info.matchStartXp = profile.playerXp;
+    this.info.matchStartRank = profile.rankLevel;
+    this.info.matchStartCash = profile.playerCash;
+    this.info.matchStartUnlockedWeapons = [...(profile.unlockedWeapons || [])];
+  }
+
   constructor(sceneGroup: THREE.Object3D) {
-    this.c4MeshGroup = new THREE.Group();
-    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.24), new THREE.MeshStandardMaterial({ color: 0x3f4d34, roughness: 0.65, metalness: 0.25 }));
-    const keypad = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.1), new THREE.MeshBasicMaterial({ color: 0x111827 }));
-    keypad.position.set(0.05, 0.065, 0);
-    this.c4LedMesh = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 8), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
-    this.c4LedMesh.position.set(-0.08, 0.07, 0);
-    this.c4MeshGroup.add(pack, keypad, this.c4LedMesh);
+    const planted = createPlantedC4Visual();
+    this.c4MeshGroup = planted.group;
+    this.c4LedMesh = planted.ledMesh;
+    this.c4EnsureLoaded = planted.ensureLoaded;
     this.c4MeshGroup.visible = false;
     sceneGroup.add(this.c4MeshGroup);
+    void this.c4EnsureLoaded();
   }
 
   public resetRound(mode: DrillMode = 'YARD_BOMB_5V5', keepMatchScore = false): void {
@@ -81,6 +114,10 @@ export class YardBombSystem {
     const prevStats = keepMatchScore && this.info.squadStats
       ? this.info.squadStats.map((s) => ({ ...s }))
       : createInitialSquadStats();
+    const snapXp = keepMatchScore ? this.info.matchStartXp : undefined;
+    const snapRank = keepMatchScore ? this.info.matchStartRank : undefined;
+    const snapCash = keepMatchScore ? this.info.matchStartCash : undefined;
+    const snapUnlocks = keepMatchScore ? this.info.matchStartUnlockedWeapons : undefined;
 
     this.info = {
       bombStatus: 'CARRIED', plantedSite: null, nearSite: null, plantProgress: 0,
@@ -90,14 +127,31 @@ export class YardBombSystem {
           ? 'BASE VANGUARD (TR SPAWN · SUL)'
           : mode === 'ASSAULT_BOMB_5V5'
             ? 'BASE VANGUARD (CT STREET SPAWN)'
-            : 'BASE VANGUARD (SUL · RUA DO HOTEL)',
+            : mode === 'INDUSTRIA_BOMB_5V5'
+              ? 'BASE VANGUARD (APRON SUL · INDUSTRIA)'
+              : mode === 'HANGAR_BOMB_5V5'
+                ? 'BASE VANGUARD (PORTÃO SUL · HANGAR)'
+                : mode === 'EASTERN_CITY_BOMB_5V5'
+                  ? 'BASE VANGUARD (ENTRADA SUL · CIDADE LESTE)'
+                : mode === 'MIRAGE_ANUBIS_BOMB_5V5'
+                  ? 'BASE VANGUARD (ENTRADA SUL · MIRAGE ANUBIS)'
+                : 'BASE VANGUARD (SUL · RUA DO HOTEL)',
       currentRound: prevRound, maxRounds: 6, vanguardScore: prevVg, blackthornScore: prevBt,
-      roundState: 'PLAYING', roundWinner: null, roundWinReason: '', roundTransitionSec: 0,
+      // Warface-style equip window before every round (including first).
+      roundState: 'EQUIP',
+      equipTimerSec: 7,
+      roundWinner: null, roundWinReason: '', roundTransitionSec: 0,
       matchWinner: null, lastRoundXp: 0, lastRoundCash: 0,
       totalMatchXp: prevTotalXp, totalMatchCash: prevTotalCash,
+      matchStartXp: snapXp, matchStartRank: snapRank, matchStartCash: snapCash,
+      matchStartUnlockedWeapons: snapUnlocks,
       isSpectating: false, spectatedCallsign: undefined, spectatedWeapon: undefined, spectatedHealth: undefined,
       squadStats: prevStats,
     };
+
+    if (!keepMatchScore) {
+      this.captureMatchProgressSnapshot();
+    }
   }
 
   public recordKillEvent(
@@ -163,8 +217,9 @@ export class YardBombSystem {
     if (winner === 'VANGUARD') this.info.vanguardScore += 1;
     else this.info.blackthornScore += 1;
 
-    let roundXp = winner === 'VANGUARD' ? 180 : 75;
-    let roundCash = winner === 'VANGUARD' ? 400 : 150;
+    const progressionOk = canGrantMatchProgressionRewards();
+    let roundXp = progressionOk ? (winner === 'VANGUARD' ? 180 : 75) : 0;
+    let roundCash = progressionOk ? (winner === 'VANGUARD' ? 400 : 150) : 0;
 
     const roundsPlayed = this.info.vanguardScore + this.info.blackthornScore;
     const hasMajorityClinch = this.info.vanguardScore >= 4 || this.info.blackthornScore >= 4;
@@ -181,17 +236,22 @@ export class YardBombSystem {
       this.info.isSpectating = false;
       this.info.roundTransitionSec = 0;
 
-      const matchBonusXp = matchWinner === 'VANGUARD' ? 450 : 180;
-      const matchBonusCash = matchWinner === 'VANGUARD' ? 1200 : 450;
-      roundXp += matchBonusXp;
-      roundCash += matchBonusCash;
+      if (progressionOk) {
+        const matchBonusXp = matchWinner === 'VANGUARD' ? 450 : 180;
+        const matchBonusCash = matchWinner === 'VANGUARD' ? 1200 : 450;
+        roundXp += matchBonusXp;
+        roundCash += matchBonusCash;
+        recordCombatTelemetryDelta({
+          matchesPlayed: 1,
+          matchesWon: matchWinner === 'VANGUARD' ? 1 : 0,
+        });
+      }
 
       this.info.lastRoundXp = roundXp;
       this.info.lastRoundCash = roundCash;
       this.info.totalMatchXp += roundXp;
       this.info.totalMatchCash += roundCash;
 
-      recordCombatTelemetryDelta({ matchesPlayed: 1, matchesWon: matchWinner === 'VANGUARD' ? 1 : 0 });
       playMatchEndFanfare(matchWinner === 'VANGUARD');
       onReward(roundXp, roundCash, true);
     } else {
@@ -223,7 +283,9 @@ export class YardBombSystem {
       weaponId: WeaponId,
       isHeadshot: boolean
     ) => void,
-    playerAlive = true
+    playerAlive = true,
+    /** Local player still in Warface revive window (downed but not expired). */
+    playerPendingRevive = false
   ): void {
     if (this.info.roundState === 'ROUND_OVER') {
       this.info.roundTransitionSec = Math.max(0, this.info.roundTransitionSec - dt);
@@ -231,6 +293,16 @@ export class YardBombSystem {
         this.info.currentRound += 1;
         this.resetRound(this.activeMode, true);
         onAdvanceNextRound();
+      }
+      return;
+    }
+
+    if (this.info.roundState === 'EQUIP') {
+      this.info.equipTimerSec = Math.max(0, (this.info.equipTimerSec || 0) - dt);
+      if (this.info.equipTimerSec <= 0) {
+        this.info.roundState = 'PLAYING';
+        this.info.equipTimerSec = 0;
+        soundEngine.playMechanicalSwitch(1.2);
       }
       return;
     }
@@ -243,23 +315,74 @@ export class YardBombSystem {
 
     const isDust2 = this.activeMode === 'DUST2_BOMB_5V5';
     const isAssault = this.activeMode === 'ASSAULT_BOMB_5V5';
-    const siteA = isDust2 ? DUST2_BOMB_SITE_A : isAssault ? ASSAULT_BOMB_SITE_A : YARD_BOMB_SITE_A;
-    const siteB = isDust2 ? DUST2_BOMB_SITE_B : isAssault ? ASSAULT_BOMB_SITE_B : YARD_BOMB_SITE_B;
+    const isIndustria = this.activeMode === 'INDUSTRIA_BOMB_5V5';
+    const isHangar = this.activeMode === 'HANGAR_BOMB_5V5';
+    const isEasternCity = this.activeMode === 'EASTERN_CITY_BOMB_5V5';
+    const isMirageAnubis = this.activeMode === 'MIRAGE_ANUBIS_BOMB_5V5';
+    const siteA = isDust2
+      ? DUST2_BOMB_SITE_A
+      : isAssault
+        ? ASSAULT_BOMB_SITE_A
+        : isIndustria
+          ? INDUSTRIA_BOMB_SITE_A
+          : isHangar
+            ? HANGAR_BOMB_SITE_A
+            : isEasternCity
+              ? EASTERN_CITY_BOMB_SITE_A
+            : isMirageAnubis
+              ? MIRAGE_ANUBIS_BOMB_SITE_A
+            : YARD_BOMB_SITE_A;
+    const siteB = isDust2
+      ? DUST2_BOMB_SITE_B
+      : isAssault
+        ? ASSAULT_BOMB_SITE_B
+        : isIndustria
+          ? INDUSTRIA_BOMB_SITE_B
+          : isHangar
+            ? HANGAR_BOMB_SITE_B
+            : isEasternCity
+              ? EASTERN_CITY_BOMB_SITE_B
+            : isMirageAnubis
+              ? MIRAGE_ANUBIS_BOMB_SITE_B
+            : YARD_BOMB_SITE_B;
 
     this.info.calloutLabel = isDust2
       ? getDust2CalloutForPos(playerPos.x, playerPos.y, playerPos.z)
       : isAssault
         ? getAssaultCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
-        : getYardCalloutForPos(playerPos.x, playerPos.y, playerPos.z);
+        : isIndustria
+          ? getIndustriaCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
+          : isHangar
+            ? getHangarCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
+            : isEasternCity
+              ? getEasternCityCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
+            : isMirageAnubis
+              ? getMirageAnubisCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
+            : getYardCalloutForPos(playerPos.x, playerPos.y, playerPos.z);
 
     let enemies = 0;
     let allies = playerAlive ? 1 : 0;
     const enemyList: YardBotEntity[] = [];
     const allyList: YardBotEntity[] = [];
 
+    const nowSec = performance.now() / 1000;
+    let alliesPendingRevive = playerPendingRevive ? 1 : 0;
     for (let i = 0; i < targets.length; i++) {
       const bot = targets[i] as YardBotEntity;
-      if (bot.isDown) continue;
+      if (bot.isDown) {
+        // Living player medic can still clutch while corpses remain in the 40s window.
+        // Also count downed allies while the local player is themselves pending revive
+        // (teammate medic / bot can still clutch).
+        if (
+          bot.isAlly &&
+          !bot.reviveExpired &&
+          (bot.reviveUntilSec || 0) > nowSec &&
+          (playerAlive || playerPendingRevive)
+        ) {
+          alliesPendingRevive++;
+        }
+        continue;
+      }
       if (bot.isAlly) {
         allies++;
         allyList.push(bot);
@@ -276,7 +399,12 @@ export class YardBombSystem {
       return;
     }
 
-    if (allies === 0 && targets.length > 0 && this.info.bombStatus !== 'PLANTED') {
+    if (
+      allies === 0 &&
+      alliesPendingRevive === 0 &&
+      targets.length > 0 &&
+      this.info.bombStatus !== 'PLANTED'
+    ) {
       this.finishCurrentRound('BLACKTHORN', 'ESQUADRÃO VANGUARD ELIMINADO EM COMBATE!', onReward);
       return;
     }
@@ -317,8 +445,10 @@ export class YardBombSystem {
         }
         recordCombatTelemetryDelta({ bombsPlanted: 1 });
         const sitePos = this.info.plantedSite === 'A' ? siteA : siteB;
-        this.c4MeshGroup.position.set(sitePos.x, isDust2 || isAssault ? sitePos.y + 0.12 : 1.02, sitePos.z);
+        // Prefer site Y (+ pack thickness) for all bomb maps — hard-coded 1.02 buried C4 on Hangar/Mirage.
+        this.c4MeshGroup.position.set(sitePos.x, sitePos.y + 0.12, sitePos.z);
         this.c4MeshGroup.visible = true;
+        void this.c4EnsureLoaded();
         soundEngine.playMechanicalSwitch(1.45);
         playRealBombPlantedVoice();
         mobileHardware.vibrateHitConfirm(true);
@@ -327,8 +457,9 @@ export class YardBombSystem {
 
     if (this.info.bombStatus === 'PLANTED' && !this.c4MeshGroup.visible && this.info.plantedSite) {
       const sitePos = this.info.plantedSite === 'A' ? siteA : siteB;
-      this.c4MeshGroup.position.set(sitePos.x, isDust2 || isAssault ? sitePos.y + 0.12 : 1.02, sitePos.z);
+      this.c4MeshGroup.position.set(sitePos.x, sitePos.y + 0.12, sitePos.z);
       this.c4MeshGroup.visible = true;
+      void this.c4EnsureLoaded();
     }
 
     if (this.info.bombStatus === 'PLANTED') {
@@ -377,9 +508,12 @@ export class YardBombSystem {
           enemy.hitTiltVelocity = -12.0;
           triggerBotHitAnimation(enemy);
           if (enemy.health <= 0) {
+            const hs = Math.random() < 0.35;
             enemy.isDown = true;
+            enemy.lastDeathWasHeadshot = hs;
+            if (hs) enemy.hitTiltVelocity = -18.0;
             enemy.downTimer = 9999;
-            onRegisterKill?.(ally.callsign || 'RECON-02', 'VANGUARD', enemy.callsign || 'KRAKEN-BT', 'BLACKTHORN', ally.weaponId || 'M4_CARBINE', Math.random() < 0.35);
+            onRegisterKill?.(ally.callsign || 'RECON-02', 'VANGUARD', enemy.callsign || 'KRAKEN-BT', 'BLACKTHORN', ally.weaponId || 'M4_CARBINE', hs);
           }
         } else if (Math.random() < (playerAlive ? 0.18 : 0.36) && !ally.isDown) {
           triggerBotFireAnimation(enemy);
@@ -388,9 +522,16 @@ export class YardBombSystem {
           ally.hitTiltVelocity = -12.0;
           triggerBotHitAnimation(ally);
           if (ally.health <= 0) {
+            const hs = Math.random() < 0.25;
             ally.isDown = true;
+            ally.lastDeathWasHeadshot = hs;
+            if (hs) ally.hitTiltVelocity = -18.0;
             ally.downTimer = 9999;
-            onRegisterKill?.(enemy.callsign || 'KRAKEN-BT', 'BLACKTHORN', ally.callsign || 'RECON-02', 'VANGUARD', enemy.weaponId || 'AK47_RIFLE', Math.random() < 0.25);
+            const now = performance.now() / 1000;
+            ally.reviveUntilSec = now + 40;
+            ally.reviveExpired = false;
+            ally.root.visible = true;
+            onRegisterKill?.(enemy.callsign || 'KRAKEN-BT', 'BLACKTHORN', ally.callsign || 'RECON-02', 'VANGUARD', enemy.weaponId || 'AK47_RIFLE', hs);
           }
         }
       }

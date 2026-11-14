@@ -3,6 +3,10 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { WeaponId } from '../types/game';
 import { buildLevel3DWeaponPreviewGroup } from './botWeaponProps';
+import {
+  createSecondaryWebGLRenderer,
+  disposeSecondaryWebGLRenderer,
+} from './webglContextGuard';
 
 const THUMB_W = 480;
 const THUMB_H = 200;
@@ -26,11 +30,11 @@ function getSharedStudioRig(): SharedStudioRig | null {
   if (typeof document === 'undefined') return null;
 
   try {
-    const renderer = new THREE.WebGLRenderer({
+    const renderer = createSecondaryWebGLRenderer({
       alpha: true,
-      antialias: true,
+      antialias: false,
       preserveDrawingBuffer: true,
-      powerPreference: 'high-performance',
+      powerPreference: 'low-power',
     });
     renderer.setSize(THUMB_W, THUMB_H, false);
     renderer.setPixelRatio(1);

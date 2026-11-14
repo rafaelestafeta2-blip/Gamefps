@@ -9,6 +9,10 @@ import {
   getLocalOnlinePlayerState,
   publishLocalPlayerTransform,
 } from '../multiplayer/onlineRoomService';
+import {
+  pushPeerPose,
+  samplePeerPoseForRender,
+} from '../multiplayer/peerSnapshotBuffer';
 import { getTeamSpawnForArena, OnlinePlayerState } from '../multiplayer/onlineTypes';
 
 export interface OnlineMatchSyncContext {
@@ -106,7 +110,7 @@ export function syncOnlineMatchFrame(ctx: OnlineMatchSyncContext): void {
   const localPlayer = getLocalOnlinePlayerState();
   if (!room || !localPlayer) return;
 
-  // 1. Publish local player transform & state to WebSocket + Firestore
+  // 1. Publish local player transform over WebSocket (throttled in combatNetcode)
   publishLocalPlayerTransform({
     x: ctx.playerPos.x,
     y: ctx.playerPos.y,
@@ -155,6 +159,8 @@ export function syncOnlineMatchFrame(ctx: OnlineMatchSyncContext): void {
     bot.isAlly = isSameTeam;
     bot.health = remote.health;
     bot.maxHealth = 100;
+    bot.armorHealth = Math.max(0, remote.armor || 0);
+    if (bot.armorMesh) bot.armorMesh.visible = bot.armorHealth > 0;
     bot.isDown = remote.isDown || remote.health <= 0;
     bot.isTelegraphing = true;
 
@@ -162,32 +168,104 @@ export function syncOnlineMatchFrame(ctx: OnlineMatchSyncContext): void {
     syncShootableHitboxes(bot, ctx.shootableMeshes, !isSameTeam && !bot.isDown);
 
     if (bot.isDown) {
+      // Keep corpse visible for Warface revive window (same-team medics).
+      bot.root.visible = true;
+      const nowSec = performance.now() / 1000;
+      if (isSameTeam) {
+        if (!bot.reviveUntilSec && !bot.reviveExpired) {
+          bot.reviveUntilSec = nowSec + 40;
+          bot.reviveExpired = false;
+        }
+        if (bot.reviveExpired || (bot.reviveUntilSec || 0) <= nowSec) {
+          bot.reviveExpired = true;
+          bot.reviveUntilSec = 0;
+          bot.root.visible = false;
+          bot.root.position.set(0, -999, 0);
+        }
+      } else {
+        // Enemy corpses: hide (no revive).
+        bot.root.visible = false;
+        bot.root.position.set(0, -999, 0);
+      }
+      // Still update pose so medic finds the body at last known position.
+      if (bot.root.visible) {
+        pushPeerPose(remote.uid, {
+          x: remote.x,
+          y: remote.y,
+          z: remote.z,
+          yaw: remote.yaw,
+          pitch: remote.pitch,
+          isCrouching: remote.isCrouching,
+          ts: remote.updatedAtMs || Date.now(),
+        });
+        const corpsePose =
+          samplePeerPoseForRender(remote.uid, 90) || {
+            x: remote.x,
+            y: remote.y,
+            z: remote.z,
+            yaw: remote.yaw,
+            pitch: remote.pitch,
+            isCrouching: false,
+            ts: Date.now(),
+          };
+        const gy = ctx.getGroundHeight(corpsePose.x, corpsePose.y, corpsePose.z);
+        bot.root.position.set(corpsePose.x, gy, corpsePose.z);
+        bot.root.rotation.y = corpsePose.yaw + Math.PI;
+        bot.pivotGroup.position.y = 0;
+        bot.pivotGroup.rotation.x = -Math.PI * 0.5;
+      }
       continue;
     }
 
+    bot.reviveUntilSec = 0;
+    bot.reviveExpired = false;
+    bot.pivotGroup.position.y = 0;
+    bot.pivotGroup.rotation.x = 0;
     bot.root.visible = true;
 
-    const targetGroundY = ctx.getGroundHeight(remote.x, remote.y, remote.z);
-    const dx = remote.x - bot.root.position.x;
-    const dz = remote.z - bot.root.position.z;
+    // Snapshot buffer: store latest wire pose, render from delayed interp sample (~100ms).
+    pushPeerPose(remote.uid, {
+      x: remote.x,
+      y: remote.y,
+      z: remote.z,
+      yaw: remote.yaw,
+      pitch: remote.pitch,
+      isCrouching: remote.isCrouching,
+      ts: remote.updatedAtMs || Date.now(),
+    });
+    const renderPose =
+      samplePeerPoseForRender(remote.uid, 90) || {
+        x: remote.x,
+        y: remote.y,
+        z: remote.z,
+        yaw: remote.yaw,
+        pitch: remote.pitch,
+        isCrouching: remote.isCrouching,
+        ts: Date.now(),
+      };
+
+    const targetGroundY = ctx.getGroundHeight(renderPose.x, renderPose.y, renderPose.z);
+    const dx = renderPose.x - bot.root.position.x;
+    const dz = renderPose.z - bot.root.position.z;
     const planarDistSq = dx * dx + dz * dz;
 
     if (planarDistSq > 64 || bot.root.position.y < -100) {
-      bot.root.position.set(remote.x, targetGroundY, remote.z);
+      bot.root.position.set(renderPose.x, targetGroundY, renderPose.z);
     } else {
-      const interpAlpha = Math.min(1, ctx.dt * 14);
+      // Slightly snappier than before — buffer already smooths jitter.
+      const interpAlpha = Math.min(1, ctx.dt * 18);
       bot.root.position.x += dx * interpAlpha;
       bot.root.position.z += dz * interpAlpha;
       bot.root.position.y += (targetGroundY - bot.root.position.y) * interpAlpha;
     }
 
-    const targetModelYaw = remote.yaw + Math.PI;
-    bot.root.rotation.y = lerpAngleRadians(bot.root.rotation.y, targetModelYaw, ctx.dt * 15);
+    const targetModelYaw = renderPose.yaw + Math.PI;
+    bot.root.rotation.y = lerpAngleRadians(bot.root.rotation.y, targetModelYaw, ctx.dt * 16);
     bot.root.rotation.x = 0;
     bot.root.rotation.z = 0;
 
     if (bot.root.userData?.botAnimCtrl) {
-      bot.root.userData.botAnimCtrl.crouchStance = remote.isCrouching;
+      bot.root.userData.botAnimCtrl.crouchStance = renderPose.isCrouching;
     }
 
     // Trigger remote gunshot animation & spatial 3D audio

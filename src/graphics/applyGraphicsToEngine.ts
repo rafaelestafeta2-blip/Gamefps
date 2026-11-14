@@ -18,6 +18,13 @@ interface InternalEngineAccess {
     muzzleLight: THREE.PointLight;
   };
   currentRenderScale: number;
+  configurePostFx?: (opts: {
+    enabled: boolean;
+    sharpen?: number;
+    bloom?: number;
+    exposure?: number;
+    lift?: number;
+  }) => void;
   state: {
     fpsLimit: number;
     dynamicResolutionEnabled: boolean;
@@ -30,6 +37,8 @@ interface InternalEngineAccess {
 interface EngineGraphicsCache {
   lastShadowQuality: ShadowQuality | null;
   lastAcesToneMapping: boolean | null;
+  lastTextureQuality: GameSettings['textures'] | null;
+  lastAnisotropy: number | null;
   cachedEnvironmentTex: THREE.Texture | null;
 }
 
@@ -72,6 +81,8 @@ export function applyGraphicsToEngine(
     cache = {
       lastShadowQuality: null,
       lastAcesToneMapping: null,
+      lastTextureQuality: null,
+      lastAnisotropy: null,
       cachedEnvironmentTex: scene.environment || null,
     };
     engineCacheMap.set(rawEngine, cache);
@@ -80,6 +91,24 @@ export function applyGraphicsToEngine(
   // 0. Vibração (Haptics) — Fonte única de verdade
   engine.state.hapticsEnabled = settings.vibration;
   mobileHardware.hapticsEnabled = settings.vibration;
+
+  // Post-FX only on HIGH/ULTRA-ish paths; never with battery saver or 30fps LOW.
+  const postEnabled =
+    settings.tacticalPostFx &&
+    !settings.batterySaver &&
+    settings.fpsLimit !== 30 &&
+    settings.resolution !== 'SCALE_50';
+  if (typeof engine.configurePostFx === 'function') {
+    // Keep grit like Dust2 mid-alley: less lift/bloom, slight sharpen; avoid milky walls.
+    const acesOn = settings.acesToneMapping;
+    engine.configurePostFx({
+      enabled: postEnabled,
+      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.3 : 0.22,
+      bloom: settings.muzzleLight ? 0.1 : 0.06,
+      exposure: acesOn ? 0.98 : 0.96,
+      lift: acesOn ? 0.008 : 0.005,
+    });
+  }
 
   // Economia de bateria força fpsLimit 30, sombras no máximo LOW e muzzleLight desligada
   const effectiveFpsLimit = settings.batterySaver ? 30 : settings.fpsLimit;
@@ -153,7 +182,8 @@ export function applyGraphicsToEngine(
   ) {
     cache.lastAcesToneMapping = settings.acesToneMapping;
     renderer.toneMapping = targetToneMapping;
-    renderer.toneMappingExposure = settings.acesToneMapping ? 1.12 : 1.0;
+    // 1.12 + map fill lights blew sandstone/WebP atlases white; ~0.95 restores midtones.
+    renderer.toneMappingExposure = settings.acesToneMapping ? 0.95 : 1.0;
     forceAllMaterialsNeedsUpdate = true;
   }
 
@@ -172,6 +202,8 @@ export function applyGraphicsToEngine(
       renderer.shadowMap.type = THREE.PCFShadowMap;
       forceAllMaterialsNeedsUpdate = true;
     }
+    // Intermittent updates — full soft refresh every frame kills mid-range Android GPUs.
+    renderer.shadowMap.autoUpdate = false;
 
     let targetMapSize = 1024;
     switch (effectiveShadows) {
@@ -182,10 +214,13 @@ export function applyGraphicsToEngine(
         targetMapSize = 1024;
         break;
       case 'HIGH':
+        // Cap HIGH at 1536-equivalent via 1024 on very small viewports is handled by DRS;
+        // keep 2048 only when DPR ceiling is generous.
         targetMapSize = 2048;
         break;
       case 'ULTRA':
-        targetMapSize = 4096;
+        // 4096 shadow maps rarely pay off on mobile SoCs — soft-cap at 2048.
+        targetMapSize = 2048;
         break;
     }
 
@@ -200,6 +235,7 @@ export function applyGraphicsToEngine(
         keyLight.shadow.map = null;
       }
       cache.lastShadowQuality = effectiveShadows;
+      renderer.shadowMap.needsUpdate = true;
     }
   } else if (keyLight) {
     keyLight.castShadow = false;
@@ -232,9 +268,9 @@ export function applyGraphicsToEngine(
     scene.fog = null;
   } else if (!scene.fog) {
     const mode = (engine.state as { drillMode?: string }).drillMode;
-    if (mode === 'DUST2_BOMB_5V5') {
-      scene.fog = new THREE.FogExp2(0xdccbb1, 0.0038);
-    } else if (mode === 'ASSAULT_BOMB_5V5') {
+    if (mode === 'DUST2_BOMB_5V5' || mode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+      scene.fog = new THREE.FogExp2(0xdccbb1, 0.0032);
+    } else if (mode === 'ASSAULT_BOMB_5V5' || mode === 'INDUSTRIA_BOMB_5V5' || mode === 'HANGAR_BOMB_5V5' || mode === 'EASTERN_CITY_BOMB_5V5') {
       scene.fog = new THREE.FogExp2(0xcbd5e1, 0.0036);
     } else if (mode === 'YARD_BOMB_5V5') {
       scene.fog = new THREE.FogExp2(0xcbd5e1, 0.0052);
@@ -279,6 +315,17 @@ export function applyGraphicsToEngine(
   }
   const targetAnisotropy = Math.min(desiredAniso, hwMaxAnisotropy);
   const isLowTextures = settings.textures === 'LOW';
+  const texturesChanged =
+    cache.lastTextureQuality !== settings.textures ||
+    cache.lastAnisotropy !== targetAnisotropy;
+
+  // Skip full scene material walk unless tone/shadow/texture settings actually changed.
+  if (!forceAllMaterialsNeedsUpdate && !texturesChanged) {
+    return;
+  }
+
+  cache.lastTextureQuality = settings.textures;
+  cache.lastAnisotropy = targetAnisotropy;
 
   scene.traverse((obj) => {
     if (!(obj as THREE.Mesh).isMesh) return;

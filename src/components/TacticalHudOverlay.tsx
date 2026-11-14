@@ -8,6 +8,8 @@ import {
 import { HudBottomWeaponDock } from './HudBottomWeaponDock';
 import { HudTopRightControls } from './HudTopRightControls';
 import { bindTap, WeaponSilhouette } from './hudTapUtils';
+import { AllyNeedIndicators } from './AllyNeedIndicators';
+import { MedicReviveIndicators } from './MedicReviveIndicators';
 import { WarfaceKillfeed } from './WarfaceKillfeed';
 import { YardBombHudBar } from './YardBombHudBar';
 
@@ -23,6 +25,7 @@ interface TacticalHudOverlayProps {
   onToggleLaser: () => void;
   onCycleFireMode: () => void;
   onResupply: () => void;
+  onSupportHeld?: (held: boolean) => void;
   onThrowGrenade: (type: GrenadeType) => void;
   onToggleMute: () => void;
   onToggleDock: () => void;
@@ -45,6 +48,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
   onToggleLaser,
   onCycleFireMode,
   onResupply,
+  onSupportHeld,
   onThrowGrenade,
   onToggleMute,
   onToggleDock,
@@ -170,7 +174,11 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
       {/* TOP-CENTER: 5v5 PLANT THE BOMB HUD BAR (YARD, DE_DUST2 & CS_ASSAULT) */}
       {(hud.drillMode === 'YARD_BOMB_5V5' ||
         hud.drillMode === 'DUST2_BOMB_5V5' ||
-        hud.drillMode === 'ASSAULT_BOMB_5V5') &&
+        hud.drillMode === 'ASSAULT_BOMB_5V5' ||
+        hud.drillMode === 'INDUSTRIA_BOMB_5V5' ||
+        hud.drillMode === 'HANGAR_BOMB_5V5' ||
+        hud.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+        hud.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') &&
         hud.yardBomb && (
           <YardBombHudBar
             yardBomb={hud.yardBomb}
@@ -240,6 +248,9 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
         </div>
       )}
 
+      <MedicReviveIndicators hud={hud} />
+      <AllyNeedIndicators hud={hud} />
+
       {/* BOTTOM-CENTER: WEAPON SLOTS + GRENADE SLOTS + HP BAR (Hidden in Spectator Mode & Match Over) */}
       {!isSpectating && !isMatchOver && (
         <HudBottomWeaponDock
@@ -249,6 +260,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
           onInspectWeapon={onInspectWeapon}
           onCycleFireMode={onCycleFireMode}
           onResupply={onResupply}
+          onSupportHeld={onSupportHeld}
           onThrowGrenade={onThrowGrenade}
         />
       )}

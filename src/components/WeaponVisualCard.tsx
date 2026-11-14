@@ -1,7 +1,9 @@
 import React from 'react';
 import { getRequiredXpForWeapon } from '../progression/ranks';
+import { useGrenadeThumbnail3D } from '../three/grenadeThumbnail3D';
 import { useWeaponThumbnail3D } from '../three/weaponThumbnail3D';
-import { WeaponId } from '../types/game';
+import { GrenadeType, WeaponId } from '../types/game';
+import { FragGrenadeIcon, SmokeGrenadeIcon } from './hudTapUtils';
 
 interface WeaponVisualCardProps {
   weaponId: WeaponId;
@@ -323,6 +325,33 @@ export const WeaponPreview3D: React.FC<{
       className={`object-contain select-none transition-opacity duration-150 ${
         locked ? 'grayscale opacity-50' : 'drop-shadow-[0_3px_8px_rgba(0,0,0,0.7)]'
       } ${className}`}
+    />
+  );
+};
+
+/** Real GLB thumbnail for inventory grenade pockets (FRAG / SMOKE). */
+export const GrenadePreview3D: React.FC<{
+  type: GrenadeType;
+  className?: string;
+  alt?: string;
+}> = ({ type, className = 'w-full h-10', alt }) => {
+  const thumbUrl = useGrenadeThumbnail3D(type);
+
+  if (!thumbUrl) {
+    return (
+      <div className={`flex items-center justify-center text-slate-300 ${className}`}>
+        {type === 'FRAG' ? <FragGrenadeIcon /> : <SmokeGrenadeIcon />}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={thumbUrl}
+      alt={alt || type}
+      referrerPolicy="no-referrer"
+      draggable={false}
+      className={`object-contain select-none drop-shadow-[0_3px_8px_rgba(0,0,0,0.7)] ${className}`}
     />
   );
 };
