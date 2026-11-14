@@ -269,6 +269,7 @@ async function startServer(): Promise<void> {
           (msg.type === 'PLAYER_STATE' ||
             msg.type === 'COMBAT_HIT' ||
             msg.type === 'BOMB_EVENT' ||
+            msg.type === 'CLASS_SUPPORT' ||
             msg.type === 'ROUND_EVENT' ||
             msg.type === 'MATCH_START')
         ) {

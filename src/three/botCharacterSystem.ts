@@ -19,9 +19,15 @@ const PRO_RIFLE_FALLBACK_URL = 'https://github.com/rafaelestafeta2-blip/Gamesfps
 const SNIPER_OPERATOR_LOCAL_URL = '/models/characters/sniper_operator.glb';
 const VANGUARD_RIFLEMAN_LOCAL_URL = '/models/characters/vanguard_rifleman.glb';
 const VANGUARD_ENGINEER_LOCAL_URL = '/models/characters/vanguard_engineer.glb';
+const VANGUARD_MEDIC_LOCAL_URL = '/models/characters/vanguard_medic.glb';
 const DRACO_DECODER_PATH = 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/';
 
-export type CharacterAvatarKind = 'VANGUARD_FUZILEIRO' | 'VANGUARD_ENGENHEIRO' | 'SNIPER' | 'DEFAULT';
+export type CharacterAvatarKind =
+  | 'VANGUARD_FUZILEIRO'
+  | 'VANGUARD_ENGENHEIRO'
+  | 'VANGUARD_MEDICO'
+  | 'SNIPER'
+  | 'DEFAULT';
 
 let templateScene: THREE.Group | null = null;
 let sharedClips: BotClipMap | null = null;
@@ -45,6 +51,12 @@ let vanguardEngineerClips: BotClipMap | null = null;
 let vanguardEngineerShowcaseMatMap: Map<string, THREE.MeshStandardMaterial> | null = null;
 let vanguardEngineerAllyMatMap: Map<string, THREE.MeshStandardMaterial> | null = null;
 let vanguardEngineerEnemyMatMap: Map<string, THREE.MeshStandardMaterial> | null = null;
+
+let vanguardMedicTemplateScene: THREE.Group | null = null;
+let vanguardMedicClips: BotClipMap | null = null;
+let vanguardMedicShowcaseMatMap: Map<string, THREE.MeshStandardMaterial> | null = null;
+let vanguardMedicAllyMatMap: Map<string, THREE.MeshStandardMaterial> | null = null;
+let vanguardMedicEnemyMatMap: Map<string, THREE.MeshStandardMaterial> | null = null;
 
 let loadPromise: Promise<void> | null = null;
 let sharedInvisibleHitMat: THREE.MeshBasicMaterial | null = null;
@@ -75,7 +87,7 @@ export function resolveCharacterAvatarKind(
   if (classId === 'FRANCO_ATIRADOR') return 'SNIPER';
   if (classId === 'FUZILEIRO') return 'VANGUARD_FUZILEIRO';
   if (classId === 'ENGENHEIRO') return 'VANGUARD_ENGENHEIRO';
-  if (classId === 'MEDICO') return 'DEFAULT';
+  if (classId === 'MEDICO') return 'VANGUARD_MEDICO';
   if (isSniperWeaponId(weaponId)) return 'SNIPER';
   if (isAlly && isEngineerWeaponId(weaponId)) return 'VANGUARD_ENGENHEIRO';
   if (isAlly && isRiflemanWeaponId(weaponId)) return 'VANGUARD_FUZILEIRO';
@@ -167,6 +179,9 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
       if (vanguardEngineerClips) {
         vanguardEngineerClips = applyAnimPackOverlayToBotClips(vanguardEngineerClips);
       }
+      if (vanguardMedicClips) {
+        vanguardMedicClips = applyAnimPackOverlayToBotClips(vanguardMedicClips);
+      }
     };
 
     const loadCustomOperatorModel = async (
@@ -240,7 +255,12 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
           });
         });
 
-        const clips = buildProRiflePackClips(root, loaded.animations);
+        // Tripo mesh-only exports (medic) ship without embedded Mixamo clips —
+        // caller reuses rifleman/shared Mixamo clips (same bone names).
+        const clips =
+          loaded.animations && loaded.animations.length > 0
+            ? buildProRiflePackClips(root, loaded.animations)
+            : null;
         return { root, clips, showcaseMap, aMap, eMap };
       } catch (err) {
         console.warn(`${label} fallback:`, err);
@@ -249,11 +269,12 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
     };
 
     try {
-      const [, sniperRes, fuzileiroRes, engineerRes] = await Promise.all([
+      const [, sniperRes, fuzileiroRes, engineerRes, medicRes] = await Promise.all([
         loadRifleman(),
         loadCustomOperatorModel(SNIPER_OPERATOR_LOCAL_URL, 0xdce8f8, 'SniperOperatorCharacter'),
         loadCustomOperatorModel(VANGUARD_RIFLEMAN_LOCAL_URL, 0xffffff, 'VanguardRiflemanCharacter'),
         loadCustomOperatorModel(VANGUARD_ENGINEER_LOCAL_URL, 0xffffff, 'VanguardEngineerCharacter'),
+        loadCustomOperatorModel(VANGUARD_MEDIC_LOCAL_URL, 0xffffff, 'VanguardMedicCharacter'),
         preloadMixamoAnimPack(loadingManager).catch((err) => {
           console.warn('Mixamo Animaçao pack load failed:', err);
           return null;
@@ -279,6 +300,15 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
         vanguardEngineerShowcaseMatMap = engineerRes.showcaseMap;
         vanguardEngineerAllyMatMap = engineerRes.aMap;
         vanguardEngineerEnemyMatMap = engineerRes.eMap;
+      }
+      if (medicRes) {
+        vanguardMedicTemplateScene = medicRes.root;
+        // Mesh-only Tripo medic → reuse rifleman (or DEFAULT pack) Mixamo clips.
+        vanguardMedicClips =
+          medicRes.clips || vanguardRiflemanClips || sharedClips;
+        vanguardMedicShowcaseMatMap = medicRes.showcaseMap;
+        vanguardMedicAllyMatMap = medicRes.aMap;
+        vanguardMedicEnemyMatMap = medicRes.eMap;
       }
       applyPackOverlays();
     } finally {
@@ -393,6 +423,39 @@ export function cloneVanguardCharacterAvatar(
     };
   }
 
+  if (
+    desiredKind === 'VANGUARD_MEDICO' &&
+    vanguardMedicTemplateScene &&
+    vanguardMedicClips &&
+    vanguardMedicShowcaseMatMap
+  ) {
+    const cloned = SkeletonUtils.clone(vanguardMedicTemplateScene);
+    cloned.scale.setScalar(1.0);
+    cloned.position.set(0, 0, 0);
+    cloned.rotation.set(0, 0, 0);
+
+    cloned.traverse((child) => {
+      if (child.name && child.name.startsWith('mixamorig')) child.name = child.name.replace(':', '');
+      if ((child as THREE.Mesh).isMesh) {
+        const m = child as THREE.Mesh;
+        m.castShadow = !isSoftwareGl;
+        m.receiveShadow = false;
+        m.frustumCulled = false;
+        const std = m.material as THREE.MeshStandardMaterial;
+        if (std && vanguardMedicShowcaseMatMap!.has(std.name)) {
+          m.material = vanguardMedicShowcaseMatMap!.get(std.name)!;
+        }
+      }
+    });
+
+    return {
+      modelRoot: cloned,
+      clips: vanguardMedicClips,
+      isSniper: false,
+      avatarKind: 'VANGUARD_MEDICO',
+    };
+  }
+
   if (!templateScene || !sharedClips || !allyMatMap) return null;
   const cloned = SkeletonUtils.clone(templateScene);
   cloned.scale.setScalar(1.0);
@@ -458,8 +521,17 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
     !!sniperClips &&
     !!sniperAllyMatMap &&
     !!sniperEnemyMatMap;
+  const useVanguardMedic =
+    !useSniper &&
+    Boolean(bot.isAlly) &&
+    isMedicAlly &&
+    !!vanguardMedicTemplateScene &&
+    !!vanguardMedicClips &&
+    !!vanguardMedicAllyMatMap &&
+    !!vanguardMedicEnemyMatMap;
   const useVanguardEngineer =
     !useSniper &&
+    !useVanguardMedic &&
     Boolean(bot.isAlly) &&
     !isMedicAlly &&
     isEngineerWeaponId(chosenWeapon) &&
@@ -469,6 +541,7 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
     !!vanguardEngineerEnemyMatMap;
   const useVanguardFuzileiro =
     !useSniper &&
+    !useVanguardMedic &&
     !useVanguardEngineer &&
     Boolean(bot.isAlly) &&
     !isMedicAlly &&
@@ -480,28 +553,34 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
 
   const activeTemplate = useSniper
     ? sniperTemplateScene!
-    : useVanguardEngineer
-      ? vanguardEngineerTemplateScene!
-      : useVanguardFuzileiro
-        ? vanguardRiflemanTemplateScene!
-        : templateScene;
+    : useVanguardMedic
+      ? vanguardMedicTemplateScene!
+      : useVanguardEngineer
+        ? vanguardEngineerTemplateScene!
+        : useVanguardFuzileiro
+          ? vanguardRiflemanTemplateScene!
+          : templateScene;
   let activeClips = useSniper
     ? sniperClips!
-    : useVanguardEngineer
-      ? vanguardEngineerClips!
-      : useVanguardFuzileiro
-        ? vanguardRiflemanClips!
-        : sharedClips!;
+    : useVanguardMedic
+      ? vanguardMedicClips!
+      : useVanguardEngineer
+        ? vanguardEngineerClips!
+        : useVanguardFuzileiro
+          ? vanguardRiflemanClips!
+          : sharedClips!;
   if (chosenWeapon === 'P50_PISTOL') {
     activeClips = applyPistolLocoToBotClips(activeClips);
   }
   const matPalette = useSniper
     ? (bot.isAlly ? sniperAllyMatMap! : sniperEnemyMatMap!)
-    : useVanguardEngineer
-      ? (bot.isAlly ? vanguardEngineerAllyMatMap! : vanguardEngineerEnemyMatMap!)
-      : useVanguardFuzileiro
-        ? (bot.isAlly ? vanguardRiflemanAllyMatMap! : vanguardRiflemanEnemyMatMap!)
-        : (bot.isAlly ? allyMatMap : enemyMatMap);
+    : useVanguardMedic
+      ? (bot.isAlly ? vanguardMedicAllyMatMap! : vanguardMedicEnemyMatMap!)
+      : useVanguardEngineer
+        ? (bot.isAlly ? vanguardEngineerAllyMatMap! : vanguardEngineerEnemyMatMap!)
+        : useVanguardFuzileiro
+          ? (bot.isAlly ? vanguardRiflemanAllyMatMap! : vanguardRiflemanEnemyMatMap!)
+          : (bot.isAlly ? allyMatMap : enemyMatMap);
 
   const cloned = SkeletonUtils.clone(activeTemplate);
   cloned.scale.setScalar(1.0);
@@ -590,6 +669,14 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
 export function triggerBotFireAnimation(bot: TacticalTargetEntity): void {
   const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
   if (!ctrl || bot.isDown) return;
+  // Soft ammo pool for Fuzileiro ally-need indicators.
+  if ((bot as YardBotEntity).isAlly) {
+    const cur =
+      typeof bot.root.userData.ammoReserve === 'number'
+        ? bot.root.userData.ammoReserve
+        : 100;
+    bot.root.userData.ammoReserve = Math.max(0, cur - 1);
+  }
   ctrl.fireAnimTimer = 0.18;
   // Allow fire interrupt while locomoting / peeking — not only idle/aim.
   if (

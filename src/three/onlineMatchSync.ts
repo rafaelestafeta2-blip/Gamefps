@@ -159,6 +159,8 @@ export function syncOnlineMatchFrame(ctx: OnlineMatchSyncContext): void {
     bot.isAlly = isSameTeam;
     bot.health = remote.health;
     bot.maxHealth = 100;
+    bot.armorHealth = Math.max(0, remote.armor || 0);
+    if (bot.armorMesh) bot.armorMesh.visible = bot.armorHealth > 0;
     bot.isDown = remote.isDown || remote.health <= 0;
     bot.isTelegraphing = true;
 
@@ -166,9 +168,59 @@ export function syncOnlineMatchFrame(ctx: OnlineMatchSyncContext): void {
     syncShootableHitboxes(bot, ctx.shootableMeshes, !isSameTeam && !bot.isDown);
 
     if (bot.isDown) {
+      // Keep corpse visible for Warface revive window (same-team medics).
+      bot.root.visible = true;
+      const nowSec = performance.now() / 1000;
+      if (isSameTeam) {
+        if (!bot.reviveUntilSec && !bot.reviveExpired) {
+          bot.reviveUntilSec = nowSec + 40;
+          bot.reviveExpired = false;
+        }
+        if (bot.reviveExpired || (bot.reviveUntilSec || 0) <= nowSec) {
+          bot.reviveExpired = true;
+          bot.reviveUntilSec = 0;
+          bot.root.visible = false;
+          bot.root.position.set(0, -999, 0);
+        }
+      } else {
+        // Enemy corpses: hide (no revive).
+        bot.root.visible = false;
+        bot.root.position.set(0, -999, 0);
+      }
+      // Still update pose so medic finds the body at last known position.
+      if (bot.root.visible) {
+        pushPeerPose(remote.uid, {
+          x: remote.x,
+          y: remote.y,
+          z: remote.z,
+          yaw: remote.yaw,
+          pitch: remote.pitch,
+          isCrouching: remote.isCrouching,
+          ts: remote.updatedAtMs || Date.now(),
+        });
+        const corpsePose =
+          samplePeerPoseForRender(remote.uid, 90) || {
+            x: remote.x,
+            y: remote.y,
+            z: remote.z,
+            yaw: remote.yaw,
+            pitch: remote.pitch,
+            isCrouching: false,
+            ts: Date.now(),
+          };
+        const gy = ctx.getGroundHeight(corpsePose.x, corpsePose.y, corpsePose.z);
+        bot.root.position.set(corpsePose.x, gy, corpsePose.z);
+        bot.root.rotation.y = corpsePose.yaw + Math.PI;
+        bot.pivotGroup.position.y = 0;
+        bot.pivotGroup.rotation.x = -Math.PI * 0.5;
+      }
       continue;
     }
 
+    bot.reviveUntilSec = 0;
+    bot.reviveExpired = false;
+    bot.pivotGroup.position.y = 0;
+    bot.pivotGroup.rotation.x = 0;
     bot.root.visible = true;
 
     // Snapshot buffer: store latest wire pose, render from delayed interp sample (~100ms).

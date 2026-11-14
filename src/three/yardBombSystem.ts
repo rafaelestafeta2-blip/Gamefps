@@ -245,7 +245,9 @@ export class YardBombSystem {
       weaponId: WeaponId,
       isHeadshot: boolean
     ) => void,
-    playerAlive = true
+    playerAlive = true,
+    /** Local player still in Warface revive window (downed but not expired). */
+    playerPendingRevive = false
   ): void {
     if (this.info.roundState === 'ROUND_OVER') {
       this.info.roundTransitionSec = Math.max(0, this.info.roundTransitionSec - dt);
@@ -290,16 +292,18 @@ export class YardBombSystem {
     const allyList: YardBotEntity[] = [];
 
     const nowSec = performance.now() / 1000;
-    let alliesPendingRevive = 0;
+    let alliesPendingRevive = playerPendingRevive ? 1 : 0;
     for (let i = 0; i < targets.length; i++) {
       const bot = targets[i] as YardBotEntity;
       if (bot.isDown) {
         // Living player medic can still clutch while corpses remain in the 40s window.
+        // Also count downed allies while the local player is themselves pending revive
+        // (teammate medic / bot can still clutch).
         if (
-          playerAlive &&
           bot.isAlly &&
           !bot.reviveExpired &&
-          (bot.reviveUntilSec || 0) > nowSec
+          (bot.reviveUntilSec || 0) > nowSec &&
+          (playerAlive || playerPendingRevive)
         ) {
           alliesPendingRevive++;
         }

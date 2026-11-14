@@ -166,6 +166,8 @@ export interface HudState {
   supportMaxCharges: number;
   supportCooldownSec: number;
   supportPrompt: string;
+  /** 0..1 progress while channeling ammo/heal/armor kit (~15s). */
+  kitChannelProgress: number;
   reviveChargeProgress: number;
   reviveMarkers: Array<{
     id: string;
@@ -173,6 +175,16 @@ export interface HudState {
     bearingRad: number;
     distanceM: number;
     remainingSec: number;
+    inRange: boolean;
+  }>;
+  /** Class-filtered ally need edge icons (HP / ammo / armor). */
+  allyNeedMarkers: Array<{
+    id: string;
+    callsign: string;
+    need: 'HP' | 'AMMO' | 'ARMOR';
+    bearingRad: number;
+    distanceM: number;
+    severity: number;
     inRange: boolean;
   }>;
   stamina: number; // 0..100 for breath hold & sprint

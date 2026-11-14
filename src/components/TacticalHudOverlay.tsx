@@ -8,6 +8,7 @@ import {
 import { HudBottomWeaponDock } from './HudBottomWeaponDock';
 import { HudTopRightControls } from './HudTopRightControls';
 import { bindTap, WeaponSilhouette } from './hudTapUtils';
+import { AllyNeedIndicators } from './AllyNeedIndicators';
 import { MedicReviveIndicators } from './MedicReviveIndicators';
 import { WarfaceKillfeed } from './WarfaceKillfeed';
 import { YardBombHudBar } from './YardBombHudBar';
@@ -244,6 +245,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
       )}
 
       <MedicReviveIndicators hud={hud} />
+      <AllyNeedIndicators hud={hud} />
 
       {/* BOTTOM-CENTER: WEAPON SLOTS + GRENADE SLOTS + HP BAR (Hidden in Spectator Mode & Match Over) */}
       {!isSpectating && !isMatchOver && (

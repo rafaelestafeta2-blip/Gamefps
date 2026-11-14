@@ -270,9 +270,12 @@ export function getKitPutDownClip(): THREE.AnimationClip | null {
   return packCache?.get('KIT_PUT_DOWN') ?? null;
 }
 
+/** Warface-style class kit channel duration (self or ally apply). */
+export const KIT_CHANNEL_TOTAL_SEC = 15;
+
 /**
- * Gameplay-clamped timings for 1P kit present sequence
- * (pick up → hold → put down / apply).
+ * Gameplay timings for kit channel: pick up → loop hold (~13s) → put down / apply.
+ * Hold is stretched so total ≈ {@link KIT_CHANNEL_TOTAL_SEC}.
  */
 export function getKitUseTimings(): {
   pickup: number;
@@ -281,12 +284,10 @@ export function getKitUseTimings(): {
   total: number;
 } {
   const pickupRaw = getKitPickupClip()?.duration ?? 0.75;
-  const holdRaw = getKitHoldClip()?.duration ?? 1.2;
   const putRaw = getKitPutDownClip()?.duration ?? 0.9;
-  // Keep support snappy vs full Mixamo lengths (torch idle is often long).
-  const pickup = THREE.MathUtils.clamp(pickupRaw, 0.45, 0.9);
-  const hold = THREE.MathUtils.clamp(Math.min(holdRaw, 0.85), 0.35, 0.85);
+  const pickup = THREE.MathUtils.clamp(pickupRaw, 0.45, 0.95);
   const putDown = THREE.MathUtils.clamp(putRaw, 0.5, 1.1);
+  const hold = Math.max(0.8, KIT_CHANNEL_TOTAL_SEC - pickup - putDown);
   return { pickup, hold, putDown, total: pickup + hold + putDown };
 }
 

@@ -4,6 +4,12 @@ import { getCloudSyncState } from '../firebase/playerCloudSync';
 import { DrillMode, WeaponId } from '../types/game';
 import { applyIncomingPlayerState } from './combatNetcode';
 import {
+  buildClassSupportEvent,
+  ClassSupportNetKind,
+  ClassSupportPacket,
+  sendClassSupportWs,
+} from './classSupportNetcode';
+import {
   persistRoomMatchMeta,
   publishRoomCombatHit,
   publishRoomLoadProgress,
@@ -14,10 +20,13 @@ import { getTeamSpawnForArena, MatchQueueType, OnlineHitEvent, OnlinePlayerState
 
 type RoomSubscriber = (room: OnlineRoomState | null) => void;
 type HitSubscriber = (hit: OnlineHitEvent) => void;
+type ClassSupportSubscriber = (evt: ClassSupportPacket) => void;
 
 const roomSubscribers = new Set<RoomSubscriber>();
 const hitSubscribers = new Set<HitSubscriber>();
+const classSupportSubscribers = new Set<ClassSupportSubscriber>();
 const processedHitIds = new Set<string>();
+const processedClassSupportIds = new Set<string>();
 
 let activeRoom: OnlineRoomState | null = null;
 let roomUnsub: Unsubscribe | null = null;
@@ -184,6 +193,37 @@ function connectWebSocketForRoom(room: OnlineRoomState, player: OnlinePlayerStat
           if (msg.bombStatus) activeRoom.bombStatus = msg.bombStatus;
           if (msg.plantedSite) activeRoom.plantedSite = msg.plantedSite;
           activeRoom.updatedAtMs = Date.now();
+        } else if (msg.type === 'CLASS_SUPPORT') {
+          const evt = msg as unknown as ClassSupportPacket;
+          if (!evt?.eventId || processedClassSupportIds.has(evt.eventId)) return;
+          processedClassSupportIds.add(evt.eventId);
+          if (processedClassSupportIds.size > 200) {
+            const first = processedClassSupportIds.values().next().value;
+            if (first) processedClassSupportIds.delete(first);
+          }
+          // Optimistic vitals only on APPLY (or revive). START/CANCEL are channel sync.
+          const phase = evt.phase || 'APPLY';
+          const target = activeRoom.players[evt.targetUid];
+          if (phase === 'APPLY' || evt.kind === 'REVIVE') {
+            if (target && evt.kind === 'REVIVE') {
+              target.isDown = false;
+              target.health = Math.max(target.health, Math.round(evt.amount || 55));
+              target.updatedAtMs = evt.ts || Date.now();
+            } else if (target && evt.kind === 'HEAL' && !target.isDown) {
+              target.health = Math.min(
+                100,
+                target.health + Math.max(0, Math.round(evt.amount || 45))
+              );
+              target.updatedAtMs = evt.ts || Date.now();
+            } else if (target && evt.kind === 'ARMOR' && !target.isDown) {
+              target.armor = Math.min(
+                100,
+                (target.armor || 0) + Math.max(0, Math.round(evt.amount || 40))
+              );
+              target.updatedAtMs = evt.ts || Date.now();
+            }
+          }
+          classSupportSubscribers.forEach((fn) => fn(evt));
         } else if (msg.type === 'SERVER_MATCH_READY' && msg.serverConfirmed) {
           if (msg.roomId) activeRoom.roomId = msg.roomId;
           if (msg.arenaMode) activeRoom.arenaMode = msg.arenaMode;
@@ -431,6 +471,41 @@ export function publishBombStateChange(bombStatus: 'CARRIED' | 'PLANTED' | 'DEFU
   persistRoomMatchMeta(activeRoom);
 }
 
+export function publishClassSupportEvent(
+  targetUid: string,
+  kind: ClassSupportNetKind,
+  amount?: number,
+  phase: import('./classSupportNetcode').ClassSupportPhase = 'APPLY'
+): void {
+  if (!activeRoom) return;
+  const fromUid = getEffectiveLocalUid();
+  if (!fromUid) return;
+  const packet = buildClassSupportEvent(
+    activeRoom.roomId,
+    fromUid,
+    targetUid,
+    kind,
+    amount,
+    phase
+  );
+  processedClassSupportIds.add(packet.eventId);
+  // Apply optimistic vitals only when the channel completes (or revive).
+  const applyNow = phase === 'APPLY' || kind === 'REVIVE';
+  const target = activeRoom.players[targetUid];
+  if (applyNow && target && kind === 'REVIVE') {
+    target.isDown = false;
+    target.health = Math.max(target.health, Math.round(amount || 55));
+  } else if (applyNow && target && kind === 'HEAL') {
+    target.health = Math.min(100, target.health + Math.max(0, Math.round(amount || 45)));
+  } else if (applyNow && target && kind === 'ARMOR') {
+    target.armor = Math.min(
+      100,
+      (target.armor || 0) + Math.max(0, Math.round(amount || 40))
+    );
+  }
+  sendClassSupportWs(wsClient, packet);
+}
+
 export async function leaveActiveRoom(): Promise<void> {
   if (roomUnsub) {
     roomUnsub();
@@ -474,6 +549,13 @@ export function subscribeOnlineRoom(fn: RoomSubscriber): () => void {
   roomSubscribers.add(fn);
   fn(activeRoom);
   return () => roomSubscribers.delete(fn);
+}
+
+export function subscribeOnlineClassSupport(
+  fn: ClassSupportSubscriber
+): () => void {
+  classSupportSubscribers.add(fn);
+  return () => classSupportSubscribers.delete(fn);
 }
 
 export function subscribeOnlineHitEvents(fn: HitSubscriber): () => void {

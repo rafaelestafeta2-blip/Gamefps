@@ -388,6 +388,12 @@ export class PlayerDeathThirdPersonController {
     return this.active;
   }
 
+  /** Corpse world position for medic revive range checks. */
+  public getCorpsePosition(out?: THREE.Vector3): THREE.Vector3 {
+    const v = out || new THREE.Vector3();
+    return v.copy(this.rootGroup.position);
+  }
+
   public stop(
     camera: THREE.PerspectiveCamera,
     weaponRigRoot: THREE.Object3D

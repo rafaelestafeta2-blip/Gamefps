@@ -104,6 +104,7 @@ import {
   leaveActiveRoom,
   publishBombStateChange,
   publishCombatHit,
+  subscribeOnlineClassSupport,
   subscribeOnlineHitEvents,
 } from '../multiplayer/onlineRoomService';
 import {
@@ -165,9 +166,12 @@ import { updateWeaponKinematicsAndOptics as runWeaponKinematics } from './weapon
 import { updateTargetsAndCombatAI as runTargetsCombatAI } from './targetsCombatAiSystem';
 import { createMantleState, MantleState } from './playerMantleSystem';
 import {
+  applyIncomingClassSupportToLocal,
   applyPlayerCombatDamage,
   createClassSupportRuntime,
+  isLocalPlayerPendingRevive,
   markAllyDownForRevive,
+  markLocalPlayerDownForRevive,
   resetClassSupportForRound,
   setClassSupportHeld,
   updateClassSupport,
@@ -186,6 +190,12 @@ export class TacticalFPSEngine {
   private container: HTMLElement;
   private onHudUpdate: (state: HudState) => void;
   private unsubOnlineHits: (() => void) | null = null;
+  private unsubOnlineClassSupport: (() => void) | null = null;
+  /** Warface local-player revive window (bomb modes). */
+  private playerReviveUntilSec = 0;
+  private playerReviveExpired = false;
+  private playerCorpsePos: THREE.Vector3 | null = null;
+  private _allyReviveCharge = 0;
 
   public readonly isSoftwareGl: boolean;
   private renderer: THREE.WebGLRenderer;
@@ -383,8 +393,10 @@ export class TacticalFPSEngine {
     supportMaxCharges: 2,
     supportCooldownSec: 0,
     supportPrompt: '',
+    kitChannelProgress: 0,
     reviveChargeProgress: 0,
     reviveMarkers: [],
+    allyNeedMarkers: [],
     stamina: 100,
     isHoldingBreath: false,
     isAds: false,
@@ -737,7 +749,12 @@ export class TacticalFPSEngine {
         );
       }
       if (localOp && hit.targetUid === localOp.uid) {
-        if (this.isPlayerDying || this.playerDeathTp?.isActive()) return;
+        if (
+          this.isPlayerDying ||
+          this.playerDeathTp?.isActive() ||
+          isLocalPlayerPendingRevive(this as any)
+        )
+          return;
         soundEngine.playImpact(hit.isHeadshot ? 'HEADSHOT' : 'TORSO');
         mobileHardware.vibrateDamage();
         playRealPlayerHitGrunt(hit.isHeadshot);
@@ -765,6 +782,27 @@ export class TacticalFPSEngine {
             hit.attackerTeam,
             hit.weaponId,
             () => {
+              const bomb =
+                this.state.drillMode === 'YARD_BOMB_5V5' ||
+                this.state.drillMode === 'DUST2_BOMB_5V5' ||
+                this.state.drillMode === 'ASSAULT_BOMB_5V5';
+              if (bomb) {
+                const specBot = this.playerDeathTp.startSpectating(
+                  this.targets as YardBotEntity[]
+                );
+                if (specBot && this.yardBombSystem.info.roundState === 'PLAYING') {
+                  this.yardBombSystem.info.isSpectating = true;
+                  this.yardBombSystem.info.spectatedCallsign =
+                    specBot.callsign || 'VANGUARD-02';
+                  this.yardBombSystem.info.spectatedWeapon =
+                    specBot.weaponId || 'M4_CARBINE';
+                  this.yardBombSystem.info.spectatedHealth = Math.max(
+                    0,
+                    specBot.health
+                  );
+                  this.state.damageFlashAlpha = 0;
+                }
+              }
               this.emitHud();
             },
             killerPos
@@ -772,6 +810,20 @@ export class TacticalFPSEngine {
         }
         this.emitHud();
       }
+    });
+
+    this.unsubOnlineClassSupport?.();
+    this.unsubOnlineClassSupport = subscribeOnlineClassSupport((evt) => {
+      if (!isOnlineMatchActive()) return;
+      const localOp = getLocalOnlinePlayerState();
+      if (!localOp || evt.targetUid !== localOp.uid) return;
+      if (evt.fromUid === localOp.uid) return;
+      applyIncomingClassSupportToLocal(
+        this as any,
+        evt.kind,
+        evt.amount,
+        evt.phase || 'APPLY'
+      );
     });
   }
 
@@ -963,6 +1015,19 @@ export class TacticalFPSEngine {
     this.cameraShake = isHeadshot ? 0.048 : 0.028;
     this.state.damageFlashAlpha = 1.0;
     this.grenadeSystem?.unequipFromHand();
+
+    const isBombMode =
+      this.state.drillMode === 'YARD_BOMB_5V5' ||
+      this.state.drillMode === 'DUST2_BOMB_5V5' ||
+      this.state.drillMode === 'ASSAULT_BOMB_5V5';
+    if (isBombMode) {
+      markLocalPlayerDownForRevive(this as any);
+    } else {
+      this.playerReviveUntilSec = 0;
+      this.playerReviveExpired = true;
+      this.playerCorpsePos = null;
+      this._allyReviveCharge = 0;
+    }
 
     this.playerDeathTp.startDeathSequence(
       this.playerPos,
@@ -1876,6 +1941,15 @@ export class TacticalFPSEngine {
     const loadoutMod = getClassCombatModifiers();
     this.state.drillMode = mode;
     resetClassSupportForRound(this as any);
+    this.playerReviveUntilSec = 0;
+    this.playerReviveExpired = false;
+    this.playerCorpsePos = null;
+    this._allyReviveCharge = 0;
+    try {
+      this.classKitProps?.hide?.();
+    } catch {
+      /* optional */
+    }
     this.state.stamina = 100;
     this.isPlayerDying = false;
     this.deathAnimElapsed = 0;
@@ -2878,7 +2952,8 @@ export class TacticalFPSEngine {
           this.returnToMainMenu();
         },
         this.registerKill.bind(this),
-        playerAlive
+        playerAlive,
+        isLocalPlayerPendingRevive(this as any)
       );
 
       // Pre-round equip freeze: look OK, no combat / sprint / plant.
@@ -3156,6 +3231,8 @@ export class TacticalFPSEngine {
     disposeTacticalPostFx(this.postFx);
     this.unsubOnlineHits?.();
     this.unsubOnlineHits = null;
+    this.unsubOnlineClassSupport?.();
+    this.unsubOnlineClassSupport = null;
     cancelAnimationFrame(this.frameId);
     if (this.rankUpTimeoutId !== null) {
       window.clearTimeout(this.rankUpTimeoutId);
