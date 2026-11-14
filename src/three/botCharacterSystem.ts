@@ -196,7 +196,17 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
 
             const showcaseMat = std.clone();
             showcaseMat.color.setHex(0xffffff);
-            showcaseMat.envMapIntensity = 0.72;
+            // Menu/inventory showcase — punchier env response; match bots stay on ally/enemy maps.
+            showcaseMat.envMapIntensity = 1.25;
+            if (showcaseMat.map) {
+              showcaseMat.map.anisotropy = 16;
+              showcaseMat.map.colorSpace = THREE.SRGBColorSpace;
+              showcaseMat.map.needsUpdate = true;
+            }
+            if (showcaseMat.normalMap) {
+              showcaseMat.normalMap.anisotropy = 16;
+              showcaseMat.normalMap.needsUpdate = true;
+            }
             showcaseMat.needsUpdate = true;
             showcaseMap.set(std.name, showcaseMat);
 

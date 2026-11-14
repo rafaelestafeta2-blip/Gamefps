@@ -88,56 +88,75 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = isBlackthorn ? 1.32 : 1.28;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 1.5));
+    // Showcase only — keep midtones readable so 2K albedos don't look muddy.
+    renderer.toneMappingExposure = isBlackthorn ? 1.12 : 1.08;
+    renderer.setPixelRatio(
+      isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 2)
+    );
     renderer.setSize(width, height);
     renderer.setClearColor(0x000000, 0);
+    if (!isSoftwareGl) {
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    }
 
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    const envTex = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+    const envTex = pmremGenerator.fromScene(new RoomEnvironment(), 0.028).texture;
     scene.environment = envTex;
+    scene.environmentIntensity = 1.15;
     pmremGenerator.dispose();
 
-    // Iluminação de estúdio temática (BLACKTHORN Carmesim ou VANGUARD Azul)
+    // Premium studio: white key + soft colored rims (don't crush albedo with neon).
     const hemiLight = new THREE.HemisphereLight(
-      isBlackthorn ? 0xffe4e6 : 0xbae6fd,
-      isBlackthorn ? 0x280609 : 0x0f172a,
-      isBlackthorn ? 1.55 : 1.3
+      isBlackthorn ? 0xfff1f2 : 0xf0f9ff,
+      isBlackthorn ? 0x1c0a0d : 0x0b1220,
+      0.95
     );
     scene.add(hemiLight);
 
-    const keyLight = new THREE.DirectionalLight(
-      isBlackthorn ? 0xfff5f5 : 0xf0f9ff,
-      isBlackthorn ? 3.2 : 2.7
-    );
-    keyLight.position.set(1.8, 3.1, 3.2);
+    const keyLight = new THREE.DirectionalLight(0xfffaf5, 2.15);
+    keyLight.position.set(2.1, 3.4, 2.6);
+    keyLight.castShadow = !isSoftwareGl;
+    if (keyLight.castShadow) {
+      keyLight.shadow.mapSize.set(1024, 1024);
+      keyLight.shadow.camera.near = 0.5;
+      keyLight.shadow.camera.far = 12;
+      keyLight.shadow.camera.left = -2.5;
+      keyLight.shadow.camera.right = 2.5;
+      keyLight.shadow.camera.top = 3.2;
+      keyLight.shadow.camera.bottom = -0.4;
+      keyLight.shadow.bias = -0.00025;
+    }
     scene.add(keyLight);
 
-    const primaryRimLight = new THREE.PointLight(
-      isBlackthorn ? 0xff1e2d : 0x38bdf8,
-      isBlackthorn ? 6.8 : 5.4,
-      7.5
+    const fillLight = new THREE.DirectionalLight(
+      isBlackthorn ? 0xfecdd3 : 0xbae6fd,
+      0.55
     );
-    primaryRimLight.position.set(-1.4, 1.5, -1.0);
+    fillLight.position.set(-1.6, 1.8, 2.4);
+    scene.add(fillLight);
+
+    const primaryRimLight = new THREE.PointLight(
+      isBlackthorn ? 0xfb7185 : 0x38bdf8,
+      isBlackthorn ? 2.4 : 2.1,
+      8.5
+    );
+    primaryRimLight.position.set(-1.5, 1.55, -1.15);
     scene.add(primaryRimLight);
 
     const secondaryRimLight = new THREE.PointLight(
-      isBlackthorn ? 0xef4444 : 0x6366f1,
-      isBlackthorn ? 5.6 : 4.2,
-      7.5
+      isBlackthorn ? 0xf87171 : 0x818cf8,
+      isBlackthorn ? 1.6 : 1.45,
+      8.0
     );
-    secondaryRimLight.position.set(1.4, 1.25, -1.1);
+    secondaryRimLight.position.set(1.45, 1.2, -1.2);
     scene.add(secondaryRimLight);
 
-    const frontBottomFill = new THREE.PointLight(
-      isBlackthorn ? 0xef4444 : 0x0ea5e9,
-      isBlackthorn ? 2.4 : 1.7,
-      5.5
-    );
-    frontBottomFill.position.set(0, 0.25, 2.0);
+    const frontBottomFill = new THREE.PointLight(0xfff7ed, 0.85, 5.5);
+    frontBottomFill.position.set(0, 0.35, 2.15);
     scene.add(frontBottomFill);
 
     // Pedestal / Reflexo no asfalto molhado sob as botas do Operador 3D
@@ -145,12 +164,25 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
     pedestalGroup.position.set(0, 0.01, 0);
     scene.add(pedestalGroup);
 
+    const floorGeo = new THREE.CircleGeometry(0.72, 48);
+    floorGeo.rotateX(-Math.PI / 2);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: isBlackthorn ? 0x1a0b0e : 0x0b1524,
+      metalness: 0.55,
+      roughness: 0.35,
+      envMapIntensity: 0.85,
+    });
+    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+    floorMesh.receiveShadow = !isSoftwareGl;
+    floorMesh.position.y = -0.008;
+    pedestalGroup.add(floorMesh);
+
     const ringGeo = new THREE.RingGeometry(0.46, 0.52, 48);
     ringGeo.rotateX(-Math.PI / 2);
     const ringMat = new THREE.MeshBasicMaterial({
       color: isBlackthorn ? 0xef4444 : 0x38bdf8,
       transparent: true,
-      opacity: isBlackthorn ? 0.18 : 0.7,
+      opacity: isBlackthorn ? 0.22 : 0.55,
       side: THREE.DoubleSide,
     });
     const ringMesh = new THREE.Mesh(ringGeo, ringMat);
@@ -161,10 +193,10 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
     const innerDiscMat = new THREE.MeshBasicMaterial({
       color: isBlackthorn ? 0xdc2626 : 0x0284c7,
       transparent: true,
-      opacity: isBlackthorn ? 0.28 : 0.22,
+      opacity: isBlackthorn ? 0.18 : 0.16,
     });
     const innerDisc = new THREE.Mesh(innerDiscGeo, innerDiscMat);
-    innerDisc.position.y = -0.005;
+    innerDisc.position.y = -0.004;
     pedestalGroup.add(innerDisc);
 
     // Grupo raiz do Operador .glb
@@ -219,14 +251,46 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
 
         if ((child as THREE.Mesh).isMesh) {
           const m = child as THREE.Mesh;
-          const std = m.material as THREE.MeshStandardMaterial;
-          if (avatarKind === 'DEFAULT' && std && std.clone) {
-            const customMat = std.clone();
-            customMat.color.setHex(isBlackthorn ? 0xccb8b8 : 0x9fb8d8);
-            customMat.roughness = isBlackthorn ? 0.46 : 0.48;
-            customMat.metalness = isBlackthorn ? 0.34 : 0.28;
-            m.material = customMat;
+          m.castShadow = !isSoftwareGl;
+          m.receiveShadow = false;
+          const mats = Array.isArray(m.material) ? m.material : [m.material];
+          for (let mi = 0; mi < mats.length; mi++) {
+            const std = mats[mi] as THREE.MeshStandardMaterial;
+            if (!std?.isMeshStandardMaterial) continue;
+            // Keep 2K albedo readable — only a light team wash on DEFAULT pack.
+            if (avatarKind === 'DEFAULT') {
+              const customMat = std.clone();
+              customMat.color.setHex(isBlackthorn ? 0xf3e8e8 : 0xe8eef6);
+              customMat.roughness = Math.min(0.72, Math.max(0.28, customMat.roughness ?? 0.5));
+              customMat.metalness = Math.min(0.45, Math.max(0.08, customMat.metalness ?? 0.2));
+              customMat.envMapIntensity = 1.15;
+              if (customMat.map) {
+                customMat.map.anisotropy = 16;
+                customMat.map.colorSpace = THREE.SRGBColorSpace;
+                customMat.map.needsUpdate = true;
+              }
+              if (customMat.normalMap) {
+                customMat.normalMap.anisotropy = 16;
+                customMat.normalMap.needsUpdate = true;
+              }
+              customMat.needsUpdate = true;
+              mats[mi] = customMat;
+            } else {
+              std.envMapIntensity = Math.max(std.envMapIntensity || 0, 1.2);
+              if (std.map) {
+                std.map.anisotropy = 16;
+                std.map.colorSpace = THREE.SRGBColorSpace;
+                std.map.needsUpdate = true;
+              }
+              if (std.normalMap) {
+                std.normalMap.anisotropy = 16;
+                std.normalMap.needsUpdate = true;
+              }
+              std.needsUpdate = true;
+            }
           }
+          if (Array.isArray(m.material)) m.material = mats;
+          else m.material = mats[0];
         }
       });
 
@@ -366,6 +430,8 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       window.removeEventListener('resize', handleResize);
       resizeObserver?.disconnect();
       envTex.dispose();
+      floorGeo.dispose();
+      floorMat.dispose();
       ringGeo.dispose();
       ringMat.dispose();
       innerDiscGeo.dispose();
