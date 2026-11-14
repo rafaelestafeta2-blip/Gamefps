@@ -122,10 +122,19 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
+    private static final String CHROME_MOBILE_UA =
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36";
+
     private Dialog oauthDialog;
     private WebView oauthWebView;
     private boolean oauthResultDelivered = false;
@@ -147,22 +156,30 @@ public class MainActivity extends BridgeActivity {
             WebSettings settings = mainWebView.getSettings();
             settings.setJavaScriptEnabled(true);
             settings.setDomStorageEnabled(true);
-            settings.setUserAgentString(buildCleanChromeUserAgent(settings.getUserAgentString()));
+            settings.setUserAgentString(CHROME_MOBILE_UA);
             CookieManager.getInstance().setAcceptCookie(true);
             CookieManager.getInstance().setAcceptThirdPartyCookies(mainWebView, true);
             mainWebView.addJavascriptInterface(new KineticNativeAuthBridge(), "KineticNativeAuth");
         }
     }
 
-    private String buildCleanChromeUserAgent(String rawUa) {
-        if (rawUa == null || rawUa.isEmpty()) {
-            return "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
-        }
-        String cleaned = rawUa.replace("; wv", "").replaceAll("Version/\\\\d+\\\\.\\\\d+\\\\s*", "");
-        if (!cleaned.contains("Chrome/")) {
-            return "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
-        }
-        return cleaned;
+    private boolean isOAuthCallback(String url) {
+        if (url == null || !url.contains("/__/auth/handler")) return false;
+        return url.contains("code=")
+            || url.contains("id_token=")
+            || url.contains("access_token=")
+            || url.contains("error=");
+    }
+
+    private boolean isGoogleAuthHost(String host) {
+        if (host == null) return false;
+        return host.equals("accounts.google.com")
+            || host.equals("google.com")
+            || host.equals("googleapis.com")
+            || host.equals("gstatic.com")
+            || host.endsWith(".google.com")
+            || host.endsWith(".googleapis.com")
+            || host.endsWith(".gstatic.com");
     }
 
     public class KineticNativeAuthBridge {
@@ -228,7 +245,7 @@ public class MainActivity extends BridgeActivity {
         WebSettings ws = oauthWebView.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
-        ws.setUserAgentString(buildCleanChromeUserAgent(ws.getUserAgentString()));
+        ws.setUserAgentString(CHROME_MOBILE_UA);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(oauthWebView, true);
         oauthWebView.addJavascriptInterface(new KineticPopupBridge(), "KineticPopupBridge");
@@ -238,10 +255,12 @@ public class MainActivity extends BridgeActivity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String reqUrl = request.getUrl().toString();
                 if (reqUrl.contains("/__/auth/handler")) {
-                    String html = "<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"></head>"
-                        + "<body style=\\"background:#06080c;color:#fbbf24;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\\">"
+                    String html = "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
+                        + "<body style='background:#06080c;color:#fbbf24;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;'>"
                         + "<div>AUTENTICANDO CONTA GOOGLE NO KINETIC...</div>"
-                        + "<script>if(window.KineticPopupBridge){window.KineticPopupBridge.onCallbackUrl(window.location.href);}</script>"
+                        + "<script>(function(){var href=window.location.href;if(!window.KineticPopupBridge)return;"
+                        + "if(href.indexOf('code=')<0&&href.indexOf('id_token=')<0&&href.indexOf('access_token=')<0&&href.indexOf('error=')<0)return;"
+                        + "window.KineticPopupBridge.onCallbackUrl(href);})();</script>"
                         + "</body></html>";
                     return new WebResourceResponse(
                         "text/html",
@@ -249,13 +268,15 @@ public class MainActivity extends BridgeActivity {
                         new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8))
                     );
                 }
+                WebResourceResponse proxied = proxyGoogleGet(request);
+                if (proxied != null) return proxied;
                 return super.shouldInterceptRequest(view, request);
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
-                if (url.contains("/__/auth/handler") && (url.contains("id_token=") || url.contains("access_token=") || url.contains("error="))) {
+                if (isOAuthCallback(url)) {
                     deliverOAuthUrlToMainWebView(url);
                     return true;
                 }
@@ -268,7 +289,7 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
-                if (url != null && url.contains("/__/auth/handler") && (url.contains("id_token=") || url.contains("access_token=") || url.contains("error="))) {
+                if (isOAuthCallback(url)) {
                     deliverOAuthUrlToMainWebView(url);
                 }
             }
@@ -276,12 +297,20 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                if (isOAuthCallback(url)) {
+                    deliverOAuthUrlToMainWebView(url);
+                    return;
+                }
                 if (url != null && url.contains("/__/auth/handler")) {
                     view.evaluateJavascript(
                         "(function(){return window.location.href;})()",
                         val -> {
-                            if (val != null && (val.contains("id_token=") || val.contains("access_token=") || val.contains("error="))) {
-                                String unquoted = val.replaceAll("^\\"|\\"$", "");
+                            if (val == null) return;
+                            String unquoted = val;
+                            if (unquoted.length() >= 2 && unquoted.charAt(0) == '"' && unquoted.charAt(unquoted.length() - 1) == '"') {
+                                unquoted = unquoted.substring(1, unquoted.length() - 1);
+                            }
+                            if (isOAuthCallback(unquoted)) {
                                 deliverOAuthUrlToMainWebView(unquoted);
                             }
                         }
@@ -305,8 +334,111 @@ public class MainActivity extends BridgeActivity {
         oauthWebView.loadUrl(oauthUrl);
     }
 
+    private WebResourceResponse proxyGoogleGet(WebResourceRequest request) {
+        if (request == null || request.getUrl() == null) return null;
+        if (!"GET".equalsIgnoreCase(request.getMethod())) return null;
+        String url = request.getUrl().toString();
+        if (url.contains("/__/auth/handler")) return null;
+        if (!isGoogleAuthHost(request.getUrl().getHost())) return null;
+
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(20000);
+            conn.setRequestProperty("User-Agent", CHROME_MOBILE_UA);
+            Map<String, String> headers = request.getRequestHeaders();
+            if (headers != null) {
+                for (Map.Entry<String, String> entry : headers.entrySet()) {
+                    String key = entry.getKey();
+                    if (key == null) continue;
+                    if (key.equalsIgnoreCase("X-Requested-With")) continue;
+                    if (key.equalsIgnoreCase("User-Agent")) continue;
+                    if (key.equalsIgnoreCase("Accept-Encoding")) continue;
+                    if (key.equalsIgnoreCase("Host")) continue;
+                    conn.setRequestProperty(key, entry.getValue());
+                }
+            }
+            String cookie = CookieManager.getInstance().getCookie(url);
+            if (cookie != null && !cookie.isEmpty()) {
+                conn.setRequestProperty("Cookie", cookie);
+            }
+            conn.connect();
+
+            int status = conn.getResponseCode();
+            Map<String, List<String>> headerFields = conn.getHeaderFields();
+            if (headerFields != null) {
+                List<String> setCookies = headerFields.get("Set-Cookie");
+                if (setCookies == null) setCookies = headerFields.get("set-cookie");
+                if (setCookies != null) {
+                    for (String setCookie : setCookies) {
+                        if (setCookie != null) {
+                            CookieManager.getInstance().setCookie(url, setCookie);
+                        }
+                    }
+                    CookieManager.getInstance().flush();
+                }
+            }
+
+            Map<String, String> responseHeaders = new HashMap<>();
+            if (headerFields != null) {
+                for (Map.Entry<String, List<String>> entry : headerFields.entrySet()) {
+                    String key = entry.getKey();
+                    if (key == null) continue;
+                    if (key.equalsIgnoreCase("Content-Encoding")) continue;
+                    if (key.equalsIgnoreCase("Content-Length")) continue;
+                    List<String> values = entry.getValue();
+                    if (values == null || values.isEmpty() || values.get(0) == null) continue;
+                    responseHeaders.put(key, values.get(0));
+                }
+            }
+
+            String contentType = conn.getContentType();
+            String mime = "text/html";
+            String encoding = "utf-8";
+            if (contentType != null) {
+                String[] parts = contentType.split(";");
+                if (parts.length > 0 && !parts[0].trim().isEmpty()) {
+                    mime = parts[0].trim();
+                }
+                for (int i = 1; i < parts.length; i++) {
+                    String part = parts[i].trim();
+                    if (part.toLowerCase().startsWith("charset=")) {
+                        encoding = part.substring("charset=".length()).trim().replace("\\"", "");
+                    }
+                }
+            }
+
+            InputStream stream;
+            try {
+                stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            } catch (Exception streamError) {
+                stream = conn.getErrorStream();
+            }
+            if (stream == null) {
+                stream = new ByteArrayInputStream(new byte[0]);
+            }
+
+            String reason = conn.getResponseMessage();
+            if (reason == null || reason.isEmpty()) reason = "OK";
+            WebResourceResponse response = new WebResourceResponse(mime, encoding, stream);
+            response.setStatusCodeAndReasonPhrase(status, reason);
+            response.setResponseHeaders(responseHeaders);
+            return response;
+        } catch (Exception ignored) {
+            if (conn != null) {
+                try {
+                    conn.disconnect();
+                } catch (Exception ignoredDisconnect) {}
+            }
+            return null;
+        }
+    }
+
     private void deliverOAuthUrlToMainWebView(String callbackUrl) {
         if (oauthResultDelivered) return;
+        if (!isOAuthCallback(callbackUrl)) return;
         oauthResultDelivered = true;
         closeOAuthDialogCleanly();
         if (getBridge() != null && getBridge().getWebView() != null) {
