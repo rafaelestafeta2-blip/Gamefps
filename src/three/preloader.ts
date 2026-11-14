@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { soundEngine } from '../audio/soundEngine';
 import { preloadProRifleBotCharacter } from './botCharacterSystem';
+import {
+  enableMapAssetCache,
+  prefetchDracoDecoder,
+} from './mapAssetCatalog';
 
 export interface PreloadProgressCallback {
   (progressPercent: number, statusLabel: string): void;
@@ -34,7 +38,10 @@ export class AssetPreloader {
     };
 
     report(6, 'INICIALIZANDO CONTEXTO WEBGL2 E THREE.LOADINGMANAGER DO LOBBY...');
+    enableMapAssetCache();
     void preloadProRifleBotCharacter();
+    // Warm Draco early so Loading 2 map decode is fluid (Warface-style).
+    void prefetchDracoDecoder();
 
     // 1. Carrega ícones de classes e artes de UI usando THREE.LoadingManager real (6% -> 40%)
     await new Promise<void>((resolve) => {

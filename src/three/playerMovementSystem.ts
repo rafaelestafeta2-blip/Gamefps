@@ -61,6 +61,8 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
                 ? engine.hangarLevelData.collider
                 : engine.state.drillMode === 'EASTERN_CITY_BOMB_5V5'
                   ? engine.easternCityLevelData.collider
+                : engine.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
+                  ? engine.mirageAnubisLevelData.collider
                 : null;
 
       const activeColliders =
@@ -122,6 +124,12 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
       );
     } else if (engine.state.drillMode === 'EASTERN_CITY_BOMB_5V5') {
       lowCeilingAbove = engine.easternCityLevelData.collider.hasLowCeiling(
+        engine.playerPos.x,
+        engine.playerPos.y,
+        engine.playerPos.z
+      );
+    } else if (engine.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+      lowCeilingAbove = engine.mirageAnubisLevelData.collider.hasLowCeiling(
         engine.playerPos.x,
         engine.playerPos.y,
         engine.playerPos.z
@@ -316,6 +324,7 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     const isIndustria = engine.state.drillMode === 'INDUSTRIA_BOMB_5V5';
     const isHangar = engine.state.drillMode === 'HANGAR_BOMB_5V5';
     const isEasternCity = engine.state.drillMode === 'EASTERN_CITY_BOMB_5V5';
+    const isMirageAnubis = engine.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5';
     const activeGlbCollider = isDust2
       ? engine.dust2LevelData.collider
       : isAssault
@@ -326,6 +335,8 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
             ? engine.hangarLevelData.collider
             : isEasternCity
               ? engine.easternCityLevelData.collider
+            : isMirageAnubis
+              ? engine.mirageAnubisLevelData.collider
             : null;
 
     const activeLadder = activeGlbCollider

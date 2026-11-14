@@ -174,6 +174,7 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
   const isHangar = mode === 'HANGAR_BOMB_5V5';
   const isEasternCity = mode === 'EASTERN_CITY_BOMB_5V5';
+  const isMirageAnubis = mode === 'MIRAGE_ANUBIS_BOMB_5V5';
   const mapCodeLabel =
     mode === 'DUST2_BOMB_5V5'
       ? 'DE_DUST2'
@@ -183,6 +184,8 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
           ? 'HANGAR'
           : mode === 'EASTERN_CITY_BOMB_5V5'
             ? 'EASTERN CITY'
+          : mode === 'MIRAGE_ANUBIS_BOMB_5V5'
+            ? 'MIRAGE ANUBIS'
           : mode === 'ASSAULT_BOMB_5V5'
           ? 'CS_ASSAULT'
           : mode === 'FREE_RANGE'
@@ -192,7 +195,7 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
               : mode === 'TACTICAL_WAVE'
                 ? 'CONTRA IA'
                 : 'YARD';
-  const bgScreenshot = isDust2 ? DUST2_BG_SCREENSHOT : isAssault || isIndustria || isHangar || isEasternCity ? ASSAULT_BG_SCREENSHOT : YARD_BG_SCREENSHOT;
+  const bgScreenshot = isDust2 || isMirageAnubis ? DUST2_BG_SCREENSHOT : isAssault || isIndustria || isHangar || isEasternCity ? ASSAULT_BG_SCREENSHOT : YARD_BG_SCREENSHOT;
   const isOnline = isOnlineMatchActive();
 
   const finishLoading = () => {

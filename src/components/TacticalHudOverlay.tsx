@@ -177,7 +177,8 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
         hud.drillMode === 'ASSAULT_BOMB_5V5' ||
         hud.drillMode === 'INDUSTRIA_BOMB_5V5' ||
         hud.drillMode === 'HANGAR_BOMB_5V5' ||
-        hud.drillMode === 'EASTERN_CITY_BOMB_5V5') &&
+        hud.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+        hud.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') &&
         hud.yardBomb && (
           <YardBombHudBar
             yardBomb={hud.yardBomb}

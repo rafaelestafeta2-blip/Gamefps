@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
+import { prefetchMapAssetsForMode } from '../three/mapAssetCatalog';
 import { DrillMode } from '../types/game';
 
 interface MatchmakingModalProps {
@@ -16,6 +17,11 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
   const [selectedMap, setSelectedMap] = useState<DrillMode>('ASSAULT_BOMB_5V5');
   const selectedMapRef = useRef<DrillMode>(selectedMap);
   selectedMapRef.current = selectedMap;
+
+  // Prefetch selected arena GLB + Draco while the queue UI runs (Warface-style).
+  useEffect(() => {
+    void prefetchMapAssetsForMode(selectedMap);
+  }, [selectedMap]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -196,6 +202,26 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
                 Cidade Leste · 2K
               </div>
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playMechanicalSwitch(1.05);
+                setSelectedMap('MIRAGE_ANUBIS_BOMB_5V5');
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                selectedMap === 'MIRAGE_ANUBIS_BOMB_5V5'
+                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
+              }`}
+            >
+              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
+                MIRAGE ANUBIS
+              </div>
+              <div className="text-[8px] font-mono text-slate-300 truncate">
+                Deserto · WebP 2K
+              </div>
+            </button>
           </div>
         </div>
 
@@ -212,6 +238,8 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
                     ? 'HANGAR (.GLB)'
                     : selectedMap === 'EASTERN_CITY_BOMB_5V5'
                       ? 'EASTERN CITY (.GLB)'
+                    : selectedMap === 'MIRAGE_ANUBIS_BOMB_5V5'
+                      ? 'MIRAGE ANUBIS (.GLB)'
                     : 'DE_DUST2 (.GLB)'}
             </span>
           </div>

@@ -234,6 +234,7 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
               { id: 'INDUSTRIA_BOMB_5V5', label: 'INDUSTRIA' },
               { id: 'HANGAR_BOMB_5V5', label: 'HANGAR' },
               { id: 'EASTERN_CITY_BOMB_5V5', label: 'EASTERN CITY' },
+              { id: 'MIRAGE_ANUBIS_BOMB_5V5', label: 'MIRAGE ANUBIS' },
             ] as const
           ).map((m) => (
             <button

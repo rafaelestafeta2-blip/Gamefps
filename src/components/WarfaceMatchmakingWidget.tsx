@@ -96,6 +96,8 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
           ? 'HANGAR'
           : selectedMode === 'EASTERN_CITY_BOMB_5V5'
             ? 'EASTERN CITY'
+          : selectedMode === 'MIRAGE_ANUBIS_BOMB_5V5'
+            ? 'MIRAGE ANUBIS'
           : 'DE_DUST2';
 
   const handleCancel = async () => {
@@ -161,6 +163,8 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
                         ? 'HANGAR_BOMB_5V5'
                         : selectedMode === 'HANGAR_BOMB_5V5'
                           ? 'EASTERN_CITY_BOMB_5V5'
+                        : selectedMode === 'EASTERN_CITY_BOMB_5V5'
+                          ? 'MIRAGE_ANUBIS_BOMB_5V5'
                         : 'DUST2_BOMB_5V5'
                 );
               }}

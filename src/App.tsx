@@ -20,6 +20,7 @@ import { FpsLimit, GameSettings, getDefaultSettings, loadGameSettings, saveGameS
 import { mobileHardware } from './mobile/nativeHardware';
 import { getClassCombatModifiers } from './progression/loadoutSystem';
 import { TacticalFPSEngine } from './three/fpsEngine';
+import { prefetchMapAssetsForMode } from './three/mapAssetCatalog';
 import { DrillMode, GyroMode, HudState, OpticType, WeaponId } from './types/game';
 import { INITIAL_HUD_STATE } from './types/initialHudState';
 
@@ -124,6 +125,8 @@ export default function App() {
       return;
     }
     if (hud.screen === 'MAIN_MENU' || targetMode !== hud.drillMode) {
+      // Kick GLB/Draco prefetch immediately so Loading 2 hits warm cache.
+      void prefetchMapAssetsForMode(targetMode);
       setLoadingBombMode(targetMode);
       return;
     }
@@ -131,6 +134,7 @@ export default function App() {
   };
 
   const handleStartWarfaceMatchmaking = (targetMode: DrillMode) => {
+    void prefetchMapAssetsForMode(targetMode);
     setMatchmakingTargetMode(targetMode);
   };
 

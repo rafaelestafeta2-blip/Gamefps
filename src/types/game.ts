@@ -44,7 +44,8 @@ export type DrillMode =
   | 'ASSAULT_BOMB_5V5'
   | 'INDUSTRIA_BOMB_5V5'
   | 'HANGAR_BOMB_5V5'
-  | 'EASTERN_CITY_BOMB_5V5';
+  | 'EASTERN_CITY_BOMB_5V5'
+  | 'MIRAGE_ANUBIS_BOMB_5V5';
 export type QualityPreset = 'COMPETITIVE_120' | 'BALANCED_60' | 'ULTRA_PBR';
 export type GyroMode = 'OFF' | 'ADS_ONLY' | 'ALWAYS';
 

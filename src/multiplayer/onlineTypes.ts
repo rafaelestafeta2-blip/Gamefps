@@ -112,6 +112,13 @@ export function getTeamSpawnForArena(
     return { x: -6.0 + offsetX, y: 0.2, z: 48.0 - offsetZ, yaw: Math.PI };
   }
 
+  if (mode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+    if (team === 'VANGUARD') {
+      return { x: -33.0 + offsetX, y: 0.2, z: -72.0 + offsetZ, yaw: 0 };
+    }
+    return { x: -20.0 + offsetX, y: 0.2, z: 12.0 - offsetZ, yaw: Math.PI };
+  }
+
   // YARD_BOMB_5V5 default
   if (team === 'VANGUARD') {
     return { x: 0 + offsetX, y: 0, z: 34.5 + offsetZ, yaw: 0 };

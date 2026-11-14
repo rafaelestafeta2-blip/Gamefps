@@ -162,6 +162,8 @@ export function executeSingleShot(engine: any): void {
                 ? engine.hangarLevelData.collider
                 : engine.state.drillMode === 'EASTERN_CITY_BOMB_5V5'
                   ? engine.easternCityLevelData.collider
+                : engine.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
+                  ? engine.mirageAnubisLevelData.collider
                 : null;
       const hit = raycastCombatShot(
         engine.raycaster,

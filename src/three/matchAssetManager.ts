@@ -27,7 +27,15 @@ import {
   disposeEasternCityMapGeometry,
   loadEasternCityMapGeometry,
 } from './easternCityLevelBuilder';
+import {
+  disposeMirageAnubisMapGeometry,
+  loadMirageAnubisMapGeometry,
+} from './mirageAnubisLevelBuilder';
 import { TacticalLevelData } from './levelBuilder';
+import {
+  enableMapAssetCache,
+  prefetchMapAssetsForMode,
+} from './mapAssetCatalog';
 import {
   markGroupStatic,
   optimizeSceneGraph,
@@ -54,6 +62,7 @@ export interface MatchArenaPrepareParams {
   industriaLevelData: Dust2LevelBundle;
   hangarLevelData: Dust2LevelBundle;
   easternCityLevelData: Dust2LevelBundle;
+  mirageAnubisLevelData: Dust2LevelBundle;
   skySystem: TacticalSkySystem;
   grenadeSystem: TacticalGrenadeSystem;
   onProgress: (pct: number, statusLabel: string) => void;
@@ -84,6 +93,7 @@ export async function prepareMatchArena(
     industriaLevelData,
     hangarLevelData,
     easternCityLevelData,
+    mirageAnubisLevelData,
     skySystem,
     grenadeSystem,
     onProgress,
@@ -94,20 +104,28 @@ export async function prepareMatchArena(
   const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
   const isHangar = mode === 'HANGAR_BOMB_5V5';
   const isEasternCity = mode === 'EASTERN_CITY_BOMB_5V5';
+  const isMirageAnubis = mode === 'MIRAGE_ANUBIS_BOMB_5V5';
   const isYard = mode === 'YARD_BOMB_5V5';
   const isFreeRange = mode === 'FREE_RANGE';
 
-  onProgress(4, 'INICIALIZANDO THREE.LOADINGMANAGER & DRACOLOADER...');
+  enableMapAssetCache();
+  onProgress(3, 'INICIALIZANDO CACHE DE ARENA + DECODER DRACO...');
+  await prefetchMapAssetsForMode(mode, (ratio, label) => {
+    onProgress(3 + ratio * 12, label);
+  });
+
+  onProgress(16, 'INICIALIZANDO THREE.LOADINGMANAGER & DRACOLOADER...');
 
   standerTiroLevelData.levelGroup.visible = isFreeRange;
   facilityLevelData.levelGroup.visible =
-    !isDust2 && !isAssault && !isIndustria && !isHangar && !isEasternCity && !isYard && !isFreeRange;
+    !isDust2 && !isAssault && !isIndustria && !isHangar && !isEasternCity && !isMirageAnubis && !isYard && !isFreeRange;
   yardLevelData.levelGroup.visible = isYard;
   dust2LevelData.levelGroup.visible = isDust2;
   assaultLevelData.levelGroup.visible = isAssault;
   industriaLevelData.levelGroup.visible = isIndustria;
   hangarLevelData.levelGroup.visible = isHangar;
   easternCityLevelData.levelGroup.visible = isEasternCity;
+  mirageAnubisLevelData.levelGroup.visible = isMirageAnubis;
 
   const loadingManager = new THREE.LoadingManager();
   let lastReportedPct = 4;
@@ -123,7 +141,9 @@ export async function prepareMatchArena(
       const mappedPct = 6 + ratio * 52;
       const shortName =
         url.split('/').pop() ||
-        (isEasternCity
+        (isMirageAnubis
+          ? 'mirage_anubis_2k.glb'
+          : isEasternCity
           ? 'eastern_city_2k.glb'
           : isHangar
           ? 'hangar_2k.glb'
@@ -236,6 +256,25 @@ export async function prepareMatchArena(
       70,
       `COLISORES BOX3 (${easternCityLevelData.collider.boundingBoxes.length}) E ${easternCityLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
     );
+  } else if (isMirageAnubis) {
+    reportProgress(8, 'BAIXANDO ARENA 3D MIRAGE_ANUBIS_2K.GLB VIA GLTFLOADER + DRACO...');
+    await loadMirageAnubisMapGeometry(
+      mirageAnubisLevelData,
+      isSoftwareGl,
+      loadingManager,
+      (byteRatio) => {
+        const mappedPct = 8 + byteRatio * 52;
+        reportProgress(
+          mappedPct,
+          `TRANSFERINDO MALHA 3D MIRAGE_ANUBIS_2K.GLB (${Math.round(byteRatio * 100)}%)...`
+        );
+      }
+    );
+
+    reportProgress(
+      70,
+      `COLISORES BOX3 (${mirageAnubisLevelData.collider.boundingBoxes.length}) E ${mirageAnubisLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
+    );
 } else if (isFreeRange) {
     reportProgress(12, 'BAIXANDO ARENA 3D SHOOTING_RANGE_2K.GLB VIA GLTFLOADER + DRACO...');
     await loadStanderTiroMapGeometry(
@@ -265,6 +304,8 @@ export async function prepareMatchArena(
             ? hangarLevelData.targets
             : isEasternCity
               ? easternCityLevelData.targets
+            : isMirageAnubis
+              ? mirageAnubisLevelData.targets
             : isYard
             ? yardLevelData.targets
             : facilityLevelData.targets;
@@ -292,6 +333,8 @@ export async function prepareMatchArena(
           ? hangarLevelData.levelGroup
           : isEasternCity
             ? easternCityLevelData.levelGroup
+          : isMirageAnubis
+            ? mirageAnubisLevelData.levelGroup
           : isYard
           ? yardLevelData.levelGroup
           : isFreeRange
@@ -306,6 +349,7 @@ export async function prepareMatchArena(
     (isIndustria && industriaLevelData.mapGeometryGroup) ||
     (isHangar && hangarLevelData.mapGeometryGroup) ||
     (isEasternCity && easternCityLevelData.mapGeometryGroup) ||
+    (isMirageAnubis && mirageAnubisLevelData.mapGeometryGroup) ||
     null;
 
   if (mapOnlyGroup) {
@@ -401,6 +445,7 @@ export function cleanupMatchArenaAssets(
   industriaLevelData: Dust2LevelBundle,
   hangarLevelData: Dust2LevelBundle,
   easternCityLevelData: Dust2LevelBundle,
+  mirageAnubisLevelData: Dust2LevelBundle,
   grenadeSystem?: TacticalGrenadeSystem
 ): void {
   // 1. Oculta arenas de partida e reativa apenas o Stander de Tiro do Lobby
@@ -409,6 +454,7 @@ export function cleanupMatchArenaAssets(
   industriaLevelData.levelGroup.visible = false;
   hangarLevelData.levelGroup.visible = false;
   easternCityLevelData.levelGroup.visible = false;
+  mirageAnubisLevelData.levelGroup.visible = false;
   yardLevelData.levelGroup.visible = false;
   facilityLevelData.levelGroup.visible = false;
   standerTiroLevelData.levelGroup.visible = true;
@@ -419,6 +465,7 @@ export function cleanupMatchArenaAssets(
   disposeIndustriaMapGeometry(industriaLevelData);
   disposeHangarMapGeometry(hangarLevelData);
   disposeEasternCityMapGeometry(easternCityLevelData);
+  disposeMirageAnubisMapGeometry(mirageAnubisLevelData);
 
   // 3. Limpa granadas ativas, fumaça e luzes temporárias
   grenadeSystem?.clearAll();

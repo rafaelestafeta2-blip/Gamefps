@@ -87,6 +87,12 @@ import {
   loadEasternCityMapGeometry,
 } from './easternCityLevelBuilder';
 import {
+  MIRAGE_ANUBIS_ATTACKER_SPAWN,
+  MIRAGE_ANUBIS_SPAWN_YAW,
+  buildMirageAnubisLevel,
+  loadMirageAnubisMapGeometry,
+} from './mirageAnubisLevelBuilder';
+import {
   buildDust2Level,
   Dust2LevelBundle,
   DUST2_T_SPAWN,
@@ -229,6 +235,7 @@ export class TacticalFPSEngine {
   private industriaLevelData: Dust2LevelBundle;
   private hangarLevelData: Dust2LevelBundle;
   private easternCityLevelData: Dust2LevelBundle;
+  private mirageAnubisLevelData: Dust2LevelBundle;
   private yardBombSystem: YardBombSystem;
   private colliders: ColliderBox[] = [];
   private targets: TacticalTargetEntity[] = [];
@@ -633,6 +640,10 @@ export class TacticalFPSEngine {
     this.easternCityLevelData.levelGroup.visible = false;
     this.scene.add(this.easternCityLevelData.levelGroup);
 
+    this.mirageAnubisLevelData = buildMirageAnubisLevel(this.isSoftwareGl);
+    this.mirageAnubisLevelData.levelGroup.visible = false;
+    this.scene.add(this.mirageAnubisLevelData.levelGroup);
+
     this.yardBombSystem = new YardBombSystem(this.scene);
 
     this.colliders = standerData.colliders;
@@ -737,6 +748,7 @@ export class TacticalFPSEngine {
       industriaLevelData: this.industriaLevelData,
       hangarLevelData: this.hangarLevelData,
       easternCityLevelData: this.easternCityLevelData,
+      mirageAnubisLevelData: this.mirageAnubisLevelData,
       skySystem: this.skySystem,
       grenadeSystem: this.grenadeSystem,
       onProgress,
@@ -758,6 +770,7 @@ export class TacticalFPSEngine {
       this.industriaLevelData,
       this.hangarLevelData,
       this.easternCityLevelData,
+      this.mirageAnubisLevelData,
       this.grenadeSystem
     );
     this.colliders = this.standerTiroLevelData.colliders;
@@ -824,7 +837,8 @@ export class TacticalFPSEngine {
                 this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
                 this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
                 this.state.drillMode === 'HANGAR_BOMB_5V5' ||
-      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5';
+                this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5';
               if (bomb) {
                 const specBot = this.playerDeathTp.startSpectating(
                   this.targets as YardBotEntity[]
@@ -938,6 +952,9 @@ export class TacticalFPSEngine {
     if (this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') {
       return this.easternCityLevelData.collider.getGroundHeight(x, y, z);
     }
+    if (this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+      return this.mirageAnubisLevelData.collider.getGroundHeight(x, y, z);
+    }
     let groundHeight = 0;
     const r = 0.15;
     for (let i = 0; i < this.colliders.length; i++) {
@@ -979,7 +996,8 @@ export class TacticalFPSEngine {
         this.state.drillMode !== 'ASSAULT_BOMB_5V5' &&
         this.state.drillMode !== 'INDUSTRIA_BOMB_5V5' &&
         this.state.drillMode !== 'HANGAR_BOMB_5V5' &&
-        this.state.drillMode !== 'EASTERN_CITY_BOMB_5V5')
+        this.state.drillMode !== 'EASTERN_CITY_BOMB_5V5' &&
+        this.state.drillMode !== 'MIRAGE_ANUBIS_BOMB_5V5')
     ) {
       return;
     }
@@ -1037,7 +1055,8 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
       this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
       this.state.drillMode === 'HANGAR_BOMB_5V5' ||
-      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5'
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
     ) {
       this.yardBombSystem?.recordKillEvent(
         killerName,
@@ -1076,7 +1095,8 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
       this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
       this.state.drillMode === 'HANGAR_BOMB_5V5' ||
-      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5';
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5';
     if (isBombMode) {
       markLocalPlayerDownForRevive(this as any);
     } else {
@@ -1658,7 +1678,8 @@ export class TacticalFPSEngine {
         this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
         this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
         this.state.drillMode === 'HANGAR_BOMB_5V5' ||
-      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5'
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
       ) {
         const remaining = this.targets.filter(
           (t) =>
@@ -2060,8 +2081,9 @@ export class TacticalFPSEngine {
     const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
     const isHangar = mode === 'HANGAR_BOMB_5V5';
     const isEasternCity = mode === 'EASTERN_CITY_BOMB_5V5';
+    const isMirageAnubis = mode === 'MIRAGE_ANUBIS_BOMB_5V5';
     const isFreeRange = mode === 'FREE_RANGE';
-    const isBombMode = isYard || isDust2 || isAssault || isIndustria || isHangar || isEasternCity;
+    const isBombMode = isYard || isDust2 || isAssault || isIndustria || isHangar || isEasternCity || isMirageAnubis;
 
     if (isFreeRange && !this.standerTiroLevelData.isLoaded) {
       void loadStanderTiroMapGeometry(
@@ -2078,6 +2100,7 @@ export class TacticalFPSEngine {
     this.industriaLevelData.levelGroup.visible = isIndustria;
     this.hangarLevelData.levelGroup.visible = isHangar;
     this.easternCityLevelData.levelGroup.visible = isEasternCity;
+    this.mirageAnubisLevelData.levelGroup.visible = isMirageAnubis;
 
     const activeLevel = isDust2
       ? this.dust2LevelData
@@ -2089,6 +2112,8 @@ export class TacticalFPSEngine {
             ? this.hangarLevelData
             : isEasternCity
               ? this.easternCityLevelData
+            : isMirageAnubis
+              ? this.mirageAnubisLevelData
             : isYard
               ? this.yardLevelData
               : isFreeRange
@@ -2273,6 +2298,40 @@ export class TacticalFPSEngine {
       this.yaw = EASTERN_CITY_SPAWN_YAW;
       this.pitch = 0;
       this.yardBombSystem.resetRound('EASTERN_CITY_BOMB_5V5', keepMatchScore);
+      this.state.yardBomb = { ...this.yardBombSystem.info };
+    } else if (isMirageAnubis) {
+      if (!this.mirageAnubisLevelData.isLoaded) {
+        void loadMirageAnubisMapGeometry(
+          this.mirageAnubisLevelData,
+          this.isSoftwareGl,
+          new THREE.LoadingManager()
+        ).then(() => {
+          if (this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+            this.playerPos.y = this.mirageAnubisLevelData.collider.getGroundHeight(
+              this.playerPos.x,
+              this.playerPos.y,
+              this.playerPos.z
+            );
+            this.playerVel.y = 0;
+            this.isGrounded = true;
+          }
+        });
+      }
+      const startY = this.mirageAnubisLevelData.collider.ready
+        ? this.mirageAnubisLevelData.collider.getGroundHeight(
+            MIRAGE_ANUBIS_ATTACKER_SPAWN.x,
+            MIRAGE_ANUBIS_ATTACKER_SPAWN.y,
+            MIRAGE_ANUBIS_ATTACKER_SPAWN.z
+          )
+        : MIRAGE_ANUBIS_ATTACKER_SPAWN.y;
+      this.playerPos.set(
+        MIRAGE_ANUBIS_ATTACKER_SPAWN.x,
+        startY,
+        MIRAGE_ANUBIS_ATTACKER_SPAWN.z
+      );
+      this.yaw = MIRAGE_ANUBIS_SPAWN_YAW;
+      this.pitch = 0;
+      this.yardBombSystem.resetRound('MIRAGE_ANUBIS_BOMB_5V5', keepMatchScore);
       this.state.yardBomb = { ...this.yardBombSystem.info };
     } else if (isYard) {
       this.playerPos.set(
@@ -2471,7 +2530,8 @@ export class TacticalFPSEngine {
             this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
             this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
             this.state.drillMode === 'HANGAR_BOMB_5V5' ||
-      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') &&
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') &&
           this.yardBombSystem.info.nearSite &&
           this.yardBombSystem.info.bombStatus === 'CARRIED'
         ) {
@@ -2485,7 +2545,8 @@ export class TacticalFPSEngine {
             this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
             this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
             this.state.drillMode === 'HANGAR_BOMB_5V5' ||
-      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') &&
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') &&
           this.yardBombSystem.info.nearSite &&
           this.yardBombSystem.info.bombStatus === 'CARRIED'
         ) {
@@ -3107,7 +3168,8 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
       this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
       this.state.drillMode === 'HANGAR_BOMB_5V5' ||
-      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5'
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
     ) {
       this.state.courseTimerSec += dt;
     }
@@ -3118,7 +3180,8 @@ export class TacticalFPSEngine {
       this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
       this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
       this.state.drillMode === 'HANGAR_BOMB_5V5' ||
-      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5'
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
     ) {
       const playerAlive =
         this.state.health > 0 &&
@@ -3350,7 +3413,8 @@ export class TacticalFPSEngine {
         this.state.drillMode === 'ASSAULT_BOMB_5V5' ||
         this.state.drillMode === 'INDUSTRIA_BOMB_5V5' ||
         this.state.drillMode === 'HANGAR_BOMB_5V5' ||
-      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') &&
+      this.state.drillMode === 'EASTERN_CITY_BOMB_5V5' ||
+      this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') &&
       this.yardBombSystem?.info.bombStatus === 'PLANTING';
     this.c4PlantView?.setPlanting(Boolean(planting));
     this.c4PlantView?.update(dt);
