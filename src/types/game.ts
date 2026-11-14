@@ -156,6 +156,25 @@ export interface HudState {
   // Player Stance, Position & Radar Telemetry
   health: number;
   maxHealth: number;
+  /** Separate vest pool (engineer repairs; soaks damage before HP). */
+  armor: number;
+  maxArmor: number;
+  /** Active Warface class for HUD support kit. */
+  playerClass: 'FUZILEIRO' | 'MEDICO' | 'ENGENHEIRO' | 'FRANCO_ATIRADOR';
+  supportKind: 'AMMO' | 'HEAL' | 'ARMOR' | 'NONE';
+  supportCharges: number;
+  supportMaxCharges: number;
+  supportCooldownSec: number;
+  supportPrompt: string;
+  reviveChargeProgress: number;
+  reviveMarkers: Array<{
+    id: string;
+    callsign: string;
+    bearingRad: number;
+    distanceM: number;
+    remainingSec: number;
+    inRange: boolean;
+  }>;
   stamina: number; // 0..100 for breath hold & sprint
   isHoldingBreath: boolean;
   isAds: boolean;

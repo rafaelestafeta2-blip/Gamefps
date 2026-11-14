@@ -23,6 +23,7 @@ import {
   syncOnlineMatchFrame,
 } from './onlineMatchSync';
 import { YardBotEntity } from './yardPropsBuilder';
+import { applyPlayerCombatDamage } from './classSupportSystem';
 
 
 /**
@@ -141,7 +142,7 @@ export function updateTargetsAndCombatAI(engine: any, dt: number): void {
             }
             mobileHardware.vibrateDamage();
             playRealPlayerHitGrunt(isHeadshot);
-            engine.state.health = Math.max(0, engine.state.health - dmg);
+            applyPlayerCombatDamage(engine, dmg, isHeadshot);
             engine.state.damageFlashAlpha = isHeadshot ? 0.95 : 0.75;
             {
               const flinchMod =

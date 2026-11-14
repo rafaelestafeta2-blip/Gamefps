@@ -544,6 +544,12 @@ export function updateSmartBotNavigation(
               visibleEnemyBot.lastDeathWasHeadshot = isHeadshot;
               if (isHeadshot) visibleEnemyBot.hitTiltVelocity = -18.0;
               visibleEnemyBot.downTimer = 9999;
+              if (visibleEnemyBot.isAlly) {
+                const now = performance.now() / 1000;
+                visibleEnemyBot.reviveUntilSec = now + 40;
+                visibleEnemyBot.reviveExpired = false;
+                visibleEnemyBot.root.visible = true;
+              }
               onRegisterKill?.(bot.callsign || (bot.isAlly ? 'RECON-02' : 'KRAKEN-BT'), bot.isAlly ? 'VANGUARD' : 'BLACKTHORN', visibleEnemyBot.callsign || (visibleEnemyBot.isAlly ? 'RECON-02' : 'KRAKEN-BT'), visibleEnemyBot.isAlly ? 'VANGUARD' : 'BLACKTHORN', weapon, isHeadshot);
             }
           }

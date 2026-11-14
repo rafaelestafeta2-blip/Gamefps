@@ -292,9 +292,22 @@ export class YardBombSystem {
     const enemyList: YardBotEntity[] = [];
     const allyList: YardBotEntity[] = [];
 
+    const nowSec = performance.now() / 1000;
+    let alliesPendingRevive = 0;
     for (let i = 0; i < targets.length; i++) {
       const bot = targets[i] as YardBotEntity;
-      if (bot.isDown) continue;
+      if (bot.isDown) {
+        // Living player medic can still clutch while corpses remain in the 40s window.
+        if (
+          playerAlive &&
+          bot.isAlly &&
+          !bot.reviveExpired &&
+          (bot.reviveUntilSec || 0) > nowSec
+        ) {
+          alliesPendingRevive++;
+        }
+        continue;
+      }
       if (bot.isAlly) {
         allies++;
         allyList.push(bot);
@@ -311,7 +324,12 @@ export class YardBombSystem {
       return;
     }
 
-    if (allies === 0 && targets.length > 0 && this.info.bombStatus !== 'PLANTED') {
+    if (
+      allies === 0 &&
+      alliesPendingRevive === 0 &&
+      targets.length > 0 &&
+      this.info.bombStatus !== 'PLANTED'
+    ) {
       this.finishCurrentRound('BLACKTHORN', 'ESQUADRÃO VANGUARD ELIMINADO EM COMBATE!', onReward);
       return;
     }
@@ -431,6 +449,10 @@ export class YardBombSystem {
             ally.lastDeathWasHeadshot = hs;
             if (hs) ally.hitTiltVelocity = -18.0;
             ally.downTimer = 9999;
+            const now = performance.now() / 1000;
+            ally.reviveUntilSec = now + 40;
+            ally.reviveExpired = false;
+            ally.root.visible = true;
             onRegisterKill?.(enemy.callsign || 'KRAKEN-BT', 'BLACKTHORN', ally.callsign || 'RECON-02', 'VANGUARD', enemy.weaponId || 'AK47_RIFLE', hs);
           }
         }

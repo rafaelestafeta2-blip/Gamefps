@@ -8,6 +8,7 @@ import {
 import { HudBottomWeaponDock } from './HudBottomWeaponDock';
 import { HudTopRightControls } from './HudTopRightControls';
 import { bindTap, WeaponSilhouette } from './hudTapUtils';
+import { MedicReviveIndicators } from './MedicReviveIndicators';
 import { WarfaceKillfeed } from './WarfaceKillfeed';
 import { YardBombHudBar } from './YardBombHudBar';
 
@@ -23,6 +24,7 @@ interface TacticalHudOverlayProps {
   onToggleLaser: () => void;
   onCycleFireMode: () => void;
   onResupply: () => void;
+  onSupportHeld?: (held: boolean) => void;
   onThrowGrenade: (type: GrenadeType) => void;
   onToggleMute: () => void;
   onToggleDock: () => void;
@@ -45,6 +47,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
   onToggleLaser,
   onCycleFireMode,
   onResupply,
+  onSupportHeld,
   onThrowGrenade,
   onToggleMute,
   onToggleDock,
@@ -240,6 +243,8 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
         </div>
       )}
 
+      <MedicReviveIndicators hud={hud} />
+
       {/* BOTTOM-CENTER: WEAPON SLOTS + GRENADE SLOTS + HP BAR (Hidden in Spectator Mode & Match Over) */}
       {!isSpectating && !isMatchOver && (
         <HudBottomWeaponDock
@@ -249,6 +254,7 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
           onInspectWeapon={onInspectWeapon}
           onCycleFireMode={onCycleFireMode}
           onResupply={onResupply}
+          onSupportHeld={onSupportHeld}
           onThrowGrenade={onThrowGrenade}
         />
       )}

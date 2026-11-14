@@ -367,6 +367,7 @@ export default function App() {
             onToggleLaser={() => engineRef.current?.toggleLaser()}
             onCycleFireMode={() => engineRef.current?.cycleFireMode()}
             onResupply={() => engineRef.current?.resupplyAmmo()}
+            onSupportHeld={(held) => engineRef.current?.setClassSupportHeld(held)}
             onThrowGrenade={(type) => engineRef.current?.throwGrenade(type)}
             onToggleMute={() => engineRef.current?.toggleMute()}
             onToggleDock={() => engineRef.current?.toggleDockCollapsed()}

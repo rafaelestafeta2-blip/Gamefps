@@ -653,7 +653,12 @@ export function updateAllBotCharacters(
 
       if (ctrl.deathElapsed > 2.4) {
         t.pivotGroup.position.y = -Math.min(1, (ctrl.deathElapsed - 2.4) / 0.5) * 0.45;
-        if (ctrl.deathElapsed >= 2.9) t.root.visible = false;
+        // Allies in bomb modes stay visible for medic revive window (~40s).
+        const reviveOpen =
+          Boolean(t.isAlly) &&
+          !t.reviveExpired &&
+          (t.reviveUntilSec || 0) > performance.now() / 1000;
+        if (ctrl.deathElapsed >= 2.9 && !reviveOpen) t.root.visible = false;
       }
       continue;
     }

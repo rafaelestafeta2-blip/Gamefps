@@ -164,6 +164,16 @@ import { checkHorizontalCollision as runHorizontalCollision } from './playerColl
 import { updateWeaponKinematicsAndOptics as runWeaponKinematics } from './weaponKinematicsSystem';
 import { updateTargetsAndCombatAI as runTargetsCombatAI } from './targetsCombatAiSystem';
 import { createMantleState, MantleState } from './playerMantleSystem';
+import {
+  applyPlayerCombatDamage,
+  createClassSupportRuntime,
+  markAllyDownForRevive,
+  resetClassSupportForRound,
+  setClassSupportHeld,
+  updateClassSupport,
+  useClassSupport,
+  ClassSupportRuntime,
+} from './classSupportSystem';
 
 export class TacticalFPSEngine {
   private container: HTMLElement;
@@ -272,6 +282,8 @@ export class TacticalFPSEngine {
   private mantle: MantleState = createMantleState();
   /** Set by movement when horizontal resolve blocks intended forward motion. */
   private mantleWallBlocked = false;
+  /** Warface class support kits (ammo / heal+revive / armor). */
+  private classSupport: ClassSupportRuntime = createClassSupportRuntime();
 
   // Weapon & Recoil Spring Kinematics
   private swayPos = new THREE.Vector2();
@@ -350,6 +362,16 @@ export class TacticalFPSEngine {
 
     health: 100,
     maxHealth: 100,
+    armor: 15,
+    maxArmor: 15,
+    playerClass: 'FUZILEIRO',
+    supportKind: 'AMMO',
+    supportCharges: 2,
+    supportMaxCharges: 2,
+    supportCooldownSec: 0,
+    supportPrompt: '',
+    reviveChargeProgress: 0,
+    reviveMarkers: [],
     stamina: 100,
     isHoldingBreath: false,
     isAds: false,
@@ -697,7 +719,7 @@ export class TacticalFPSEngine {
         soundEngine.playImpact(hit.isHeadshot ? 'HEADSHOT' : 'TORSO');
         mobileHardware.vibrateDamage();
         playRealPlayerHitGrunt(hit.isHeadshot);
-        this.state.health = Math.max(0, this.state.health - hit.damage);
+        applyPlayerCombatDamage(this as any, hit.damage, hit.isHeadshot);
         this.state.damageFlashAlpha = hit.isHeadshot ? 0.95 : 0.75;
         {
           const flinch = getWeaponFeel(this.state.activeWeapon).flinchScale;
@@ -1325,22 +1347,13 @@ export class TacticalFPSEngine {
     this.emitHud();
   }
 
+  /** Class support kit (ammo crate / medkit+defib / armor). Key U / dock +. */
   public resupplyAmmo(): void {
-    const cap = this.state.magCapacity;
-    this.state.magazines =
-      this.state.activeWeapon === 'L49_LMG'
-        ? [cap, cap, cap]
-        : [cap, cap, cap, cap];
-    this.state.currentMagRounds = cap;
-    this.state.chambered = 1;
-    this.state.fragGrenades = 3;
-    this.state.smokeGrenades = 3;
-    this.state.boltLockedBack = false;
-    this.state.reloadPhase = 'IDLE';
-    this.state.reloadTypeLabel = `MUNIÇÃO + GRANADAS REABASTECIDAS (${cap} TIROS | 3 FRAG | 3 SMOKE)`;
-    this.magCheckTimer = 1.6;
-    soundEngine.playReloadStage('MAG_IN');
-    this.emitHud();
+    useClassSupport(this as any);
+  }
+
+  public setClassSupportHeld(held: boolean): void {
+    setClassSupportHeld(this as any, held);
   }
 
   private lastGrenadeEquipTime = 0;
@@ -1840,8 +1853,7 @@ export class TacticalFPSEngine {
   public resetScenario(mode: DrillMode, keepMatchScore = false): void {
     const loadoutMod = getClassCombatModifiers();
     this.state.drillMode = mode;
-    this.state.maxHealth = loadoutMod.totalMaxHealth;
-    this.state.health = loadoutMod.totalMaxHealth;
+    resetClassSupportForRound(this as any);
     this.state.stamina = 100;
     this.isPlayerDying = false;
     this.deathAnimElapsed = 0;
@@ -2018,6 +2030,8 @@ export class TacticalFPSEngine {
     this.targets.forEach((t) => {
       t.isDown = false;
       t.lastDeathWasHeadshot = false;
+      t.reviveUntilSec = 0;
+      t.reviveExpired = false;
       t.downTimer = 0;
       t.health = t.maxHealth;
       t.armorHealth = t.armorMesh ? 60 : 0;
@@ -2166,6 +2180,7 @@ export class TacticalFPSEngine {
         break;
       case 'KeyU':
         this.resupplyAmmo();
+        this.setClassSupportHeld(true);
         break;
       case 'KeyM':
         this.toggleMute();
@@ -2242,6 +2257,9 @@ export class TacticalFPSEngine {
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keysHeld.delete(e.code);
+    if (e.code === 'KeyU') {
+      this.setClassSupportHeld(false);
+    }
   };
 
   private onMouseDown = (e: MouseEvent) => {
@@ -3030,6 +3048,9 @@ export class TacticalFPSEngine {
 
     // 6. Reactive Targets & Killhouse Combat Bot AI
     this.updateTargetsAndCombatAI(dt);
+
+    // 6b. Warface class support (ammo / heal+revive / armor) + medic markers
+    updateClassSupport(this as any, dt);
 
     // 7. Update Pooled Brass Casings, Dropped Magazines, Sparks, Tracers & 3D Grenades
     this.fxPool.update(dt);
