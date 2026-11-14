@@ -11,6 +11,7 @@ export type BotAnimState =
   | 'RIFLE_RUN'
   | 'RIFLE_RUN_LEFT'
   | 'RIFLE_RUN_RIGHT'
+  | 'RIFLE_SPRINT'
   | 'RIFLE_AIM'
   | 'RIFLE_FIRE'
   | 'RIFLE_THROW'
@@ -171,7 +172,8 @@ export function buildProRiflePackClips(
   const walkLeft = byName.get('RIFLE_WALK_LEFT') || walk;
   const walkRight = byName.get('RIFLE_WALK_RIGHT') || walk;
   const walkBack = byName.get('RIFLE_WALK_BACK') || walk;
-  const run = byName.get('RIFLE_RUN') || byName.get('RIFLE_SPRINT') || walk;
+  const run = byName.get('RIFLE_RUN') || walk;
+  const sprint = byName.get('RIFLE_SPRINT') || run;
   const runLeft = byName.get('RIFLE_RUN_LEFT') || run;
   const runRight = byName.get('RIFLE_RUN_RIGHT') || run;
   const crouch = byName.get('RIFLE_CROUCH') || aim;
@@ -197,6 +199,7 @@ export function buildProRiflePackClips(
     RIFLE_RUN: run,
     RIFLE_RUN_LEFT: runLeft,
     RIFLE_RUN_RIGHT: runRight,
+    RIFLE_SPRINT: sprint,
     RIFLE_CROUCH: crouch,
     RIFLE_CROUCH_WALK: crouchWalk,
     RIFLE_FIRE: fire,

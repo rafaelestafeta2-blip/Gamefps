@@ -260,6 +260,12 @@ export class TacticalFPSEngine {
   private sprintExhausted = false;
   private landingDip = 0;
   private landingDipVel = 0;
+  /** FOV punch from jump/land/slide exit — decays in movement loop. */
+  private cameraFovPunch = 0;
+  /** Base camera roll before head-bob polish in kinematics. */
+  private cameraBaseRoll = 0;
+  /** True when slide forced crouch toggle on entry (auto-clear on exit). */
+  private slideForcedCrouch = false;
 
   // Weapon & Recoil Spring Kinematics
   private swayPos = new THREE.Vector2();
@@ -1635,13 +1641,15 @@ export class TacticalFPSEngine {
       this.slideTimer <= 0;
 
     if (isMovingForwardFast && !this.state.isCrouchingToggled && !this.state.isProneToggled) {
-      this.slideTimer = 0.68;
+      this.slideTimer = 0.72;
       this.camera.getWorldDirection(_forward);
       _forward.y = 0;
       _forward.normalize();
       this.slideDir.copy(_forward);
+      this.slideForcedCrouch = !this.state.isCrouchingToggled;
       this.state.isCrouchingToggled = true;
       this.state.isProneToggled = false;
+      this.cameraFovPunch = Math.min(this.cameraFovPunch + 3.2, 7);
       soundEngine.playPlayerSlide();
     } else if (this.state.isProneToggled) {
       // Stand up from Prone

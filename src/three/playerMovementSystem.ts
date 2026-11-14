@@ -148,6 +148,19 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     if (engine.slideTimer > 0) {
       engine.slideTimer -= dt;
       engine.state.stance = 'SLIDE';
+      if (engine.slideTimer <= 0) {
+        // Exit slide: keep crouch only if player still wants low stance.
+        const stillWantsCrouch =
+          lowCeilingAbove ||
+          engine.keysHeld.has('KeyC') ||
+          engine.keysHeld.has('ControlLeft') ||
+          (engine.state.isCrouchingToggled && !engine.slideForcedCrouch);
+        if (engine.slideForcedCrouch && !stillWantsCrouch) {
+          engine.state.isCrouchingToggled = false;
+        }
+        engine.slideForcedCrouch = false;
+        engine.cameraFovPunch = Math.min((engine.cameraFovPunch || 0) + 2.5, 6);
+      }
     } else if (engine.state.isProneToggled || engine.keysHeld.has('KeyZ')) {
       engine.state.stance = 'PRONE';
     } else if (crouchHeld) {
@@ -197,7 +210,19 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     _right.set(Math.cos(engine.yaw), 0, -Math.sin(engine.yaw)).normalize();
 
     if (engine.slideTimer > 0) {
-      const slideSpeed = 7.8 * (0.4 + 0.6 * (engine.slideTimer / 0.68));
+      // Soft steer during slide — COD-like course correction without full air-strafe.
+      _moveVec
+        .copy(engine.slideDir)
+        .addScaledVector(_forward, forwardInput * 0.35)
+        .addScaledVector(_right, rightInput * 0.85);
+      if (_moveVec.lengthSq() > 0.0001) _moveVec.normalize();
+      engine.slideDir.x = THREE.MathUtils.damp(engine.slideDir.x, _moveVec.x, 8, dt);
+      engine.slideDir.z = THREE.MathUtils.damp(engine.slideDir.z, _moveVec.z, 8, dt);
+      const slideLen = Math.hypot(engine.slideDir.x, engine.slideDir.z) || 1;
+      engine.slideDir.x /= slideLen;
+      engine.slideDir.z /= slideLen;
+
+      const slideSpeed = 8.2 * (0.38 + 0.62 * (engine.slideTimer / 0.72));
       engine.playerVel.x = engine.slideDir.x * slideSpeed;
       engine.playerVel.z = engine.slideDir.z * slideSpeed;
     } else {
@@ -207,22 +232,30 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
         .addScaledVector(_right, rightInput);
       if (_moveVec.lengthSq() > 1) _moveVec.normalize();
 
-      let maxSpeed = 4.6;
-      if (engine.state.stance === 'SPRINT') maxSpeed = 6.8;
-      else if (engine.state.stance === 'CROUCH') maxSpeed = 2.65;
-      else if (engine.state.stance === 'PRONE') maxSpeed = 1.25;
-      if (engine.state.isAds) maxSpeed *= 0.68;
+      let maxSpeed = 4.85;
+      if (engine.state.stance === 'SPRINT') maxSpeed = 7.15;
+      else if (engine.state.stance === 'CROUCH') maxSpeed = 2.55;
+      else if (engine.state.stance === 'PRONE') maxSpeed = 1.2;
+      if (engine.state.isAds) maxSpeed *= 0.62;
+
+      // Asymmetric feel: snappy accel, heavier stop (COD weight).
+      const hasInput = _moveVec.lengthSq() > 0.01;
+      const accelLambda = hasInput
+        ? engine.state.stance === 'SPRINT'
+          ? 20
+          : 17
+        : 9;
 
       engine.playerVel.x = THREE.MathUtils.damp(
         engine.playerVel.x,
         _moveVec.x * maxSpeed,
-        12,
+        accelLambda,
         dt
       );
       engine.playerVel.z = THREE.MathUtils.damp(
         engine.playerVel.z,
         _moveVec.z * maxSpeed,
-        12,
+        accelLambda,
         dt
       );
     }
@@ -290,10 +323,19 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
       }
     } else {
       if (engine.jumpBufferTimer > 0 && engine.coyoteTimer > 0) {
-        engine.playerVel.y = 5.4;
+        // Jump-cancel slide (COD muscle memory).
+        if (engine.slideTimer > 0) {
+          engine.slideTimer = 0;
+          if (engine.slideForcedCrouch) {
+            engine.state.isCrouchingToggled = false;
+            engine.slideForcedCrouch = false;
+          }
+        }
+        engine.playerVel.y = 5.55;
         engine.isGrounded = false;
         engine.coyoteTimer = 0;
         engine.jumpBufferTimer = 0;
+        engine.cameraFovPunch = Math.min((engine.cameraFovPunch || 0) + 1.8, 5);
         soundEngine.playPlayerJump();
       }
 
@@ -412,7 +454,16 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
         engine.playerPos.y - groundHeight < 0.35)
     ) {
       if (!wasGrounded && engine.playerVel.y < -2.0) {
-        engine.landingDipVel = Math.max(engine.playerVel.y * 0.03, -0.12);
+        const impact = Math.min(1.4, Math.abs(engine.playerVel.y) / 8);
+        engine.landingDipVel = Math.max(engine.playerVel.y * 0.045, -0.22);
+        engine.cameraFovPunch = Math.min(
+          (engine.cameraFovPunch || 0) + 2.2 * impact,
+          7
+        );
+        engine.cameraShake = Math.min(
+          (engine.cameraShake || 0) + 0.006 * impact,
+          0.02
+        );
         soundEngine.playFootstep(true, false);
       }
       engine.playerPos.y = groundHeight;
@@ -432,7 +483,7 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     engine.landingDip += engine.landingDipVel * clampedDt;
     engine.landingDipVel += -engine.landingDip * 130 * clampedDt;
     engine.landingDipVel *= Math.exp(-18 * clampedDt);
-    engine.landingDip = THREE.MathUtils.clamp(engine.landingDip, -0.06, 0.03);
+    engine.landingDip = THREE.MathUtils.clamp(engine.landingDip, -0.12, 0.04);
     if (Math.abs(engine.landingDip) < 0.0002 && Math.abs(engine.landingDipVel) < 0.001) {
       engine.landingDip = 0;
       engine.landingDipVel = 0;
@@ -463,8 +514,13 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     const shakePitch = engine.cameraShake > 0.0001 ? Math.sin(engine.elapsedTime * 42) * engine.cameraShake : 0;
     const shakeYaw = engine.cameraShake > 0.0001 ? Math.cos(engine.elapsedTime * 34) * engine.cameraShake * 0.5 : 0;
 
-    const slideRoll = engine.slideTimer > 0 ? -0.08 : 0;
-    engine.camera.rotation.z = -engine.leanCurrent * 0.24 + slideRoll;
+    // Head bob / slide roll applied after walkBobPhase advances in weapon kinematics;
+    // stash base pose here, kinematics finishes camera polish.
+    const slideProgress =
+      engine.slideTimer > 0 ? Math.min(1, engine.slideTimer / 0.72) : 0;
+    const slideRoll = slideProgress > 0 ? -0.14 * (0.35 + 0.65 * slideProgress) : 0;
+    engine.cameraBaseRoll = -engine.leanCurrent * 0.24 + slideRoll;
+    engine.camera.rotation.z = engine.cameraBaseRoll;
 
     engine.yawObject.position.set(
       leanWorldX,
@@ -475,4 +531,7 @@ export function updatePlayerMovementAndCollision(engine: any, dt: number): void 
     engine.pitchObject.rotation.x = engine.pitch + shakePitch;
 
     engine.cameraShake = THREE.MathUtils.damp(engine.cameraShake, 0, 24, dt);
+    if (typeof engine.cameraFovPunch === 'number' && engine.cameraFovPunch > 0) {
+      engine.cameraFovPunch = THREE.MathUtils.damp(engine.cameraFovPunch, 0, 10, dt);
+    }
 }

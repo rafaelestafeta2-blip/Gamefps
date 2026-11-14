@@ -34,7 +34,9 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
 
     let targetFov = 72;
     if (engine.state.stance === 'SPRINT') {
-      targetFov = 78;
+      targetFov = 82;
+    } else if (engine.state.stance === 'SLIDE') {
+      targetFov = 80;
     } else if (canAds) {
       if (engine.state.cantedActive) {
         targetFov = 60;
@@ -52,8 +54,10 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
       }
     }
 
-    if (Math.abs(engine.camera.fov - targetFov) > 0.05) {
-      engine.camera.fov = THREE.MathUtils.damp(engine.camera.fov, targetFov, 14, dt);
+    const punch = typeof engine.cameraFovPunch === 'number' ? engine.cameraFovPunch : 0;
+    const desiredFov = targetFov + punch;
+    if (Math.abs(engine.camera.fov - desiredFov) > 0.05) {
+      engine.camera.fov = THREE.MathUtils.damp(engine.camera.fov, desiredFov, 16, dt);
       engine.camera.updateProjectionMatrix();
     }
 
@@ -179,10 +183,10 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
     const horizSpeed = Math.hypot(engine.playerVel.x, engine.playerVel.z);
     const bobFreq =
       engine.state.stance === 'SPRINT'
-        ? 12.5
+        ? 13.4
         : engine.state.stance === 'CROUCH'
-          ? 6.5
-          : 9.2;
+          ? 6.2
+          : 9.6;
     if (engine.isGrounded && horizSpeed > 0.25 && engine.slideTimer <= 0) {
       const prevStepCycle = Math.floor(engine.walkBobPhase / Math.PI);
       engine.walkBobPhase += dt * bobFreq;
@@ -261,9 +265,43 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
     );
 
     const bobScale = THREE.MathUtils.lerp(1.0, 0.14, engine.state.adsAlpha);
-    const bobX = Math.cos(engine.walkBobPhase) * 0.011 * engine.walkBobAmp * bobScale;
+    const bobAmpScale =
+      engine.state.stance === 'SPRINT' ? 1.25 : engine.state.stance === 'CROUCH' ? 0.7 : 1;
+    const bobX =
+      Math.cos(engine.walkBobPhase) * 0.013 * engine.walkBobAmp * bobScale * bobAmpScale;
     const bobY =
-      Math.abs(Math.sin(engine.walkBobPhase)) * -0.012 * engine.walkBobAmp * bobScale;
+      Math.abs(Math.sin(engine.walkBobPhase)) *
+      -0.014 *
+      engine.walkBobAmp *
+      bobScale *
+      bobAmpScale;
+
+    // Camera head bob + roll polish (COD weight) — applied on top of movement pose.
+    const headBobScale = THREE.MathUtils.lerp(1.0, 0.2, engine.state.adsAlpha);
+    const headBobY =
+      Math.abs(Math.sin(engine.walkBobPhase)) *
+      0.016 *
+      engine.walkBobAmp *
+      headBobScale *
+      bobAmpScale;
+    const headBobRoll =
+      Math.sin(engine.walkBobPhase) *
+      0.012 *
+      engine.walkBobAmp *
+      headBobScale *
+      bobAmpScale;
+    const headBobPitch =
+      Math.cos(engine.walkBobPhase * 2) *
+      0.004 *
+      engine.walkBobAmp *
+      headBobScale;
+    if (engine.yawObject) {
+      engine.yawObject.position.y += headBobY;
+    }
+    engine.pitchObject.rotation.x += headBobPitch;
+    engine.camera.rotation.z =
+      (typeof engine.cameraBaseRoll === 'number' ? engine.cameraBaseRoll : 0) +
+      headBobRoll;
 
     // Recoil decay
     const recovery = typeof engine.weaponFeelRecovery === 'number' ? engine.weaponFeelRecovery : 1;
@@ -273,19 +311,23 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
 
     // Sprint / Mag Check / Wall-Tuck / CS2 Hip-Angle Pose Modifiers (smoothly damped to prevent snap jitter)
     const isSprinting = engine.state.stance === 'SPRINT' && engine.state.adsAlpha < 0.2;
+    const isSliding = engine.state.stance === 'SLIDE';
     engine.sprintPoseAlpha = THREE.MathUtils.damp(
       engine.sprintPoseAlpha,
-      isSprinting ? 1 : 0,
-      12,
+      isSprinting || isSliding ? 1 : 0,
+      isSliding ? 18 : 12,
       dt
     );
     const isAk47 =
       engine.state.activeWeapon === 'AK47_RIFLE' ||
       engine.state.activeWeapon === 'AK12_RIFLE';
-    const sprintRotX = (isAk47 ? -0.14 : -0.26) * engine.sprintPoseAlpha;
+    const slideBoost = isSliding ? 1.35 : 1;
+    const sprintRotX = (isAk47 ? -0.14 : -0.26) * engine.sprintPoseAlpha * slideBoost;
     const sprintRotY = (isAk47 ? 0.08 : 0.48) * engine.sprintPoseAlpha;
-    const sprintRotZ = (isAk47 ? -0.08 : -0.24) * engine.sprintPoseAlpha;
-    const sprintDropY = (isAk47 ? -0.032 : 0) * engine.sprintPoseAlpha;
+    const sprintRotZ =
+      ((isAk47 ? -0.08 : -0.24) - (isSliding ? 0.12 : 0)) * engine.sprintPoseAlpha;
+    const sprintDropY =
+      ((isAk47 ? -0.032 : 0) - (isSliding ? 0.04 : 0)) * engine.sprintPoseAlpha;
 
     // CS2 inward barrel angle in hipfire (smoothly zeroes out in ADS)
     const cs2HipRotY = (1 - engine.state.adsAlpha) * 0.055;
@@ -316,7 +358,7 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
         bobY +
         engine.swayPos.y * bobScale +
         breathY +
-        engine.landingDip * 0.35 +
+        engine.landingDip * 0.55 +
         magCheckAlpha * 0.032 +
         boltLiftPosY +
         sprintDropY -

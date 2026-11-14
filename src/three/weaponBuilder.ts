@@ -2125,7 +2125,7 @@ export function buildTacticalWeaponRig(
   let sniperBoltHandTimer = 0;
   let shotgunPumpTimer = 0;
 
-  const triggerFireAnimation = (_isAds = false) => {
+  const triggerFireAnimation = (isAds = false) => {
     const activeEntry = weaponPacks[activeWeapon];
     const speed =
       activeWeapon === 'SNIPER_BOLT'
@@ -2138,6 +2138,19 @@ export function buildTacticalWeaponRig(
     }
     if (activeWeapon === 'SHOTGUN_12') {
       shotgunPumpTimer = 0.56;
+    }
+    // Prefer Aim_Fire clip on AK-47 when ADS (clip already in pack).
+    if (
+      activeWeapon === 'AK47_RIFLE' &&
+      isAds &&
+      activeEntry?.actions['RIG_UE5_Comando_AK_Aim_Fire']
+    ) {
+      activeEntry.actions['Fire'] = activeEntry.actions['RIG_UE5_Comando_AK_Aim_Fire'];
+    } else if (
+      activeWeapon === 'AK47_RIFLE' &&
+      activeEntry?.actions['RIG_UE5_Comando_AK_Fire']
+    ) {
+      activeEntry.actions['Fire'] = activeEntry.actions['RIG_UE5_Comando_AK_Fire'];
     }
     playWeaponPackAction(activeEntry, 'Fire', undefined, speed);
   };
@@ -2177,9 +2190,9 @@ export function buildTacticalWeaponRig(
   // =========================================================================
   const updateGlbAnimations = (
     dt: number,
-    _isMoving = false,
-    _isAds = false,
-    _reloadPhase: ReloadPhase = 'IDLE',
+    isMoving = false,
+    isAds = false,
+    reloadPhase: ReloadPhase = 'IDLE',
     _reloadProgress = 0
   ) => {
     animElapsed += dt;
@@ -2196,6 +2209,46 @@ export function buildTacticalWeaponRig(
       }
     }
     if (activeEntry && activeEntry.loaded && activeEntry.mixer) {
+      // AK-47 pack includes Walk / Run / Idle_Aim — play looping locomotion when idle of oneshots.
+      if (activeWeapon === 'AK47_RIFLE' && reloadPhase === 'IDLE') {
+        const busy =
+          activeEntry.actions['Fire']?.isRunning() ||
+          activeEntry.actions['Reload']?.isRunning() ||
+          activeEntry.actions['Draw']?.isRunning();
+        if (!busy) {
+          const walk = activeEntry.actions['RIG_UE5_Comando_AK_Walk'];
+          const walkAim = activeEntry.actions['RIG_UE5_Comando_AK_Walk_Aim'];
+          const run = activeEntry.actions['RIG_UE5_Comando_AK__Run'];
+          const idle = activeEntry.actions['RIG_UE5_Comando_AK_Idle'];
+          const idleAim = activeEntry.actions['RIG_UE5_Comando_AK_Idle_Aim'];
+          let loco: THREE.AnimationAction | undefined;
+          if (isMoving && isAds) loco = walkAim || walk;
+          else if (isMoving) loco = run || walk;
+          else if (isAds) loco = idleAim || idle;
+          else loco = idle;
+          if (loco) {
+            Object.entries(activeEntry.actions).forEach(([, act]) => {
+              if (act !== loco && act.isRunning() && act.loop !== THREE.LoopRepeat) {
+                // oneshots own the mixer — leave them
+              } else if (act !== loco && act.loop === THREE.LoopRepeat) {
+                act.weight = 0;
+                act.stop();
+              }
+            });
+            if (!loco.isRunning() || loco.loop !== THREE.LoopRepeat) {
+              loco.setLoop(THREE.LoopRepeat, Infinity);
+              loco.clampWhenFinished = false;
+              loco.weight = 1;
+              loco.reset();
+              loco.play();
+            } else {
+              loco.weight = 1;
+            }
+            loco.timeScale = isMoving ? (isAds ? 0.95 : 1.15) : 1.0;
+          }
+        }
+      }
+
       activeEntry.mixer.update(dt);
 
       if (activeEntry.mainBoneNode && activeEntry.mainBoneRestPos) {

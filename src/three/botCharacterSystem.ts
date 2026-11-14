@@ -672,6 +672,9 @@ export function updateAllBotCharacters(
       ctrl.fireAnimTimer -= dt;
     } else if (t.isTelegraphing && speed <= 0.22) {
       transitionBotAnim(ctrl, wantTacticalCrouch ? 'RIFLE_CROUCH' : 'RIFLE_AIM', 0.2);
+    } else if (ctrl.crouchStance && speed > 0.12) {
+      if (ctrl.fireAnimTimer > 0) ctrl.fireAnimTimer = Math.max(0, ctrl.fireAnimTimer - dt);
+      transitionBotAnim(ctrl, 'RIFLE_CROUCH_WALK', 0.18);
     } else if (t.isTelegraphing && speed > 0.22) {
       if (ctrl.fireAnimTimer > 0) ctrl.fireAnimTimer = Math.max(0, ctrl.fireAnimTimer - dt);
       const sinY = Math.sin(t.root.rotation.y);
@@ -683,9 +686,16 @@ export function updateAllBotCharacters(
         const leftState = speed > 1.7 ? 'RIFLE_RUN_LEFT' : 'RIFLE_WALK_LEFT';
         const rightState = speed > 1.7 ? 'RIFLE_RUN_RIGHT' : 'RIFLE_WALK_RIGHT';
         transitionBotAnim(ctrl, sideDot > 0 ? leftState : rightState, 0.2);
+      } else if (fwdDot < -0.25) {
+        transitionBotAnim(ctrl, 'RIFLE_WALK_BACK', 0.2);
+      } else if (speed > 3.4) {
+        transitionBotAnim(ctrl, 'RIFLE_SPRINT', 0.18);
       } else {
-        transitionBotAnim(ctrl, fwdDot >= -0.25 ? 'RIFLE_RUN' : 'RIFLE_WALK_BACK', 0.2);
+        transitionBotAnim(ctrl, 'RIFLE_RUN', 0.2);
       }
+    } else if (speed > 3.4) {
+      if (ctrl.fireAnimTimer > 0) ctrl.fireAnimTimer = Math.max(0, ctrl.fireAnimTimer - dt);
+      transitionBotAnim(ctrl, 'RIFLE_SPRINT', 0.18);
     } else if (speed > 1.35) {
       if (ctrl.fireAnimTimer > 0) ctrl.fireAnimTimer = Math.max(0, ctrl.fireAnimTimer - dt);
       transitionBotAnim(ctrl, 'RIFLE_RUN', 0.2);
@@ -698,8 +708,12 @@ export function updateAllBotCharacters(
 
     const activeAction = ctrl.actions[ctrl.currentState];
     if (activeAction) {
-      if (ctrl.currentState.startsWith('RIFLE_RUN')) {
+      if (ctrl.currentState === 'RIFLE_SPRINT') {
+        activeAction.setEffectiveTimeScale(THREE.MathUtils.clamp(speed / 4.2, 0.95, 1.35));
+      } else if (ctrl.currentState.startsWith('RIFLE_RUN')) {
         activeAction.setEffectiveTimeScale(THREE.MathUtils.clamp(speed / 3.1, 0.92, 1.28));
+      } else if (ctrl.currentState === 'RIFLE_CROUCH_WALK') {
+        activeAction.setEffectiveTimeScale(THREE.MathUtils.clamp(speed / 1.2, 0.85, 1.15));
       } else if (ctrl.currentState.startsWith('RIFLE_WALK')) {
         activeAction.setEffectiveTimeScale(THREE.MathUtils.clamp(speed / 1.5, 0.88, 1.22));
       }
