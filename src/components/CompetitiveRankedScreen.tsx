@@ -22,6 +22,7 @@ import {
 import { RankedLeftWidgets } from './RankedLeftWidgets';
 import { RankedOperator3DCanvas } from './RankedOperator3DCanvas';
 import { RankedRightWidgets } from './RankedRightWidgets';
+import { thumbForDrillMode } from './mapSelectThumbs';
 
 interface CompetitiveRankedScreenProps {
   playerMmr: number;
@@ -246,12 +247,18 @@ export const CompetitiveRankedScreen: React.FC<CompetitiveRankedScreenProps> = (
                 soundEngine.playMenuSelect();
                 setSelectedArena(m.id);
               }}
-              className={`px-2 py-0.5 rounded text-[8px] sm:text-[9px] font-mono font-bold uppercase transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-mono font-bold uppercase transition-all cursor-pointer ${
                 selectedArena === m.id
                   ? 'bg-sky-500 text-slate-950 shadow-[0_0_10px_rgba(56,189,248,0.65)]'
                   : 'bg-white/5 text-slate-300 hover:bg-white/15'
               } ${isSearching ? 'opacity-60 cursor-not-allowed' : ''}`}
             >
+              <img
+                src={thumbForDrillMode(m.id)}
+                alt=""
+                className="w-5 h-3.5 rounded-sm object-cover hidden sm:block"
+                draggable={false}
+              />
               {m.label}
             </button>
           ))}

@@ -20,6 +20,7 @@ import {
   WarfaceClassId,
 } from './WarfaceClassIcons';
 import { WarfaceRankIcon } from './WarfaceRankIcon';
+import { thumbForDrillMode } from './mapSelectThumbs';
 
 type LoadingRow = {
   callsign: string;
@@ -143,9 +144,6 @@ interface YardMatchLoadingModalProps {
   onComplete: () => void;
 }
 
-const YARD_BG_SCREENSHOT = '/assets/aistudio/fba31cbf1a9790a5d2a3dce1a17a2b999cec04ce_9bd05733.jpg';
-const DUST2_BG_SCREENSHOT = '/assets/aistudio/Screenshot_20261109_205345_Chrome_9cb4d380.jpg';
-const ASSAULT_BG_SCREENSHOT = '/assets/aistudio/Screenshot_20261109_230919_YouTube_bbce4935.jpg';
 const YARD_RADAR_IMAGE = '/assets/aistudio/Yard_Map_Radar_7754e5f9.webp';
 
 const TUTORIAL_STORAGE_KEY = 'kinetic_plant_bomb_tutorial_played';
@@ -173,12 +171,6 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   const onPrepareMapRef = useRef(onPrepareMap);
   onPrepareMapRef.current = onPrepareMap;
 
-  const isDust2 = mode === 'DUST2_BOMB_5V5';
-  const isAssault = mode === 'ASSAULT_BOMB_5V5';
-  const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
-  const isHangar = mode === 'HANGAR_BOMB_5V5';
-  const isEasternCity = mode === 'EASTERN_CITY_BOMB_5V5';
-  const isMirageAnubis = mode === 'MIRAGE_ANUBIS_BOMB_5V5';
   const mapCodeLabel =
     mode === 'DUST2_BOMB_5V5'
       ? 'DE_DUST2'
@@ -199,7 +191,7 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
               : mode === 'TACTICAL_WAVE'
                 ? 'CONTRA IA'
                 : 'YARD';
-  const bgScreenshot = isDust2 || isMirageAnubis ? DUST2_BG_SCREENSHOT : isAssault || isIndustria || isHangar || isEasternCity ? ASSAULT_BG_SCREENSHOT : YARD_BG_SCREENSHOT;
+  const bgScreenshot = thumbForDrillMode(mode);
   const isOnline = isOnlineMatchActive();
 
   const finishLoading = () => {

@@ -25,6 +25,7 @@ import {
 } from './onlineMatchSync';
 import { YardBotEntity } from './yardPropsBuilder';
 import { applyPlayerCombatDamage } from './classSupportSystem';
+import { getActiveGlbCollider } from './activeGlbCollider';
 
 
 /**
@@ -117,14 +118,9 @@ export function updateTargetsAndCombatAI(engine: any, dt: number): void {
           engine.state.yardBomb = { ...engine.yardBombSystem.info };
         }
       } else {
-        const activeGlbCollider =
-          engine.state.drillMode === 'DUST2_BOMB_5V5'
-            ? engine.dust2LevelData.collider
-            : engine.state.drillMode === 'ASSAULT_BOMB_5V5'
-              ? engine.assaultLevelData.collider
-              : engine.state.drillMode === 'INDUSTRIA_BOMB_5V5'
-                ? engine.industriaLevelData.collider
-                : null;
+        // Full GLB triangle collider for all bomb arenas (Dust2/Assault +
+        // Industria/Hangar/Eastern/Mirage) so collision-baked navmesh matches floors.
+        const activeGlbCollider = getActiveGlbCollider(engine);
 
         const playerAlive =
           engine.state.health > 0 &&
@@ -249,20 +245,7 @@ export function updateTargetsAndCombatAI(engine: any, dt: number): void {
 
     // 3.8. Áudio Tático 3D Estilo Call of Duty: Passos de Inimigos por Proximidade + Batimento Cardíaco
     if (engine.state.drillMode !== 'FREE_RANGE') {
-      const activeGlbCollider =
-        engine.state.drillMode === 'DUST2_BOMB_5V5'
-          ? engine.dust2LevelData.collider
-          : engine.state.drillMode === 'ASSAULT_BOMB_5V5'
-            ? engine.assaultLevelData.collider
-            : engine.state.drillMode === 'INDUSTRIA_BOMB_5V5'
-              ? engine.industriaLevelData.collider
-              : engine.state.drillMode === 'HANGAR_BOMB_5V5'
-                ? engine.hangarLevelData.collider
-                : engine.state.drillMode === 'EASTERN_CITY_BOMB_5V5'
-                  ? engine.easternCityLevelData.collider
-                : engine.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5'
-                  ? engine.mirageAnubisLevelData.collider
-                : null;
+      const activeGlbCollider = getActiveGlbCollider(engine);
       updateSpatialBotFootstepsAndHeartbeat(
         engine.targets,
         _worldPos,

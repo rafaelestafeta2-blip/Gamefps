@@ -5,7 +5,8 @@ import { ColliderBox } from './levelBuilder';
 
 /**
  * Collision-baked walkable grid (practical real navmesh).
- * Dust2/Assault: sample triangle floor + wall resolve.
+ * Dust2/Assault/Industria/Hangar/Eastern City/Mirage Anubis:
+ *   sample triangle floor + wall resolve when GLB collider is ready.
  * Yard/etc: sample box colliders over tactical bounds.
  */
 export interface BakedNavMesh {

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
 import { prefetchMapAssetsForMode } from '../three/mapAssetCatalog';
 import { DrillMode } from '../types/game';
+import { thumbForDrillMode } from './mapSelectThumbs';
 
 interface MatchmakingModalProps {
   onMatchFound: (selectedMode: DrillMode) => void;
@@ -103,125 +104,71 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
             SELECIONAR MAPA DA OPERAÇÃO (.GLB):
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playMechanicalSwitch(1.05);
-                setSelectedMap('ASSAULT_BOMB_5V5');
-              }}
-              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
-                selectedMap === 'ASSAULT_BOMB_5V5'
-                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
-                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
-              }`}
-            >
-              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
-                CS_ASSAULT
-              </div>
-              <div className="text-[8px] font-mono text-slate-300 truncate">
-                Galpão Industrial · Real Light
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playMechanicalSwitch(1.05);
-                setSelectedMap('DUST2_BOMB_5V5');
-              }}
-              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
-                selectedMap === 'DUST2_BOMB_5V5'
-                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
-                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
-              }`}
-            >
-              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
-                DE_DUST2
-              </div>
-              <div className="text-[8px] font-mono text-slate-300 truncate">
-                Deserto Tático · Clássico 5v5
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playMechanicalSwitch(1.05);
-                setSelectedMap('INDUSTRIA_BOMB_5V5');
-              }}
-              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
-                selectedMap === 'INDUSTRIA_BOMB_5V5'
-                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
-                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
-              }`}
-            >
-              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
-                INDUSTRIA
-              </div>
-              <div className="text-[8px] font-mono text-slate-300 truncate">
-                Pátio Industrial · 2K
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playMechanicalSwitch(1.05);
-                setSelectedMap('HANGAR_BOMB_5V5');
-              }}
-              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
-                selectedMap === 'HANGAR_BOMB_5V5'
-                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
-                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
-              }`}
-            >
-              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
-                HANGAR
-              </div>
-              <div className="text-[8px] font-mono text-slate-300 truncate">
-                Angar Industrial · 2K
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playMechanicalSwitch(1.05);
-                setSelectedMap('EASTERN_CITY_BOMB_5V5');
-              }}
-              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
-                selectedMap === 'EASTERN_CITY_BOMB_5V5'
-                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
-                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
-              }`}
-            >
-              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
-                EASTERN CITY
-              </div>
-              <div className="text-[8px] font-mono text-slate-300 truncate">
-                Cidade Leste · 2K
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playMechanicalSwitch(1.05);
-                setSelectedMap('MIRAGE_ANUBIS_BOMB_5V5');
-              }}
-              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
-                selectedMap === 'MIRAGE_ANUBIS_BOMB_5V5'
-                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
-                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
-              }`}
-            >
-              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
-                MIRAGE ANUBIS
-              </div>
-              <div className="text-[8px] font-mono text-slate-300 truncate">
-                Deserto · WebP 2K
-              </div>
-            </button>
+            {(
+              [
+                {
+                  id: 'ASSAULT_BOMB_5V5' as DrillMode,
+                  title: 'CS_ASSAULT',
+                  sub: 'Galpão Industrial · Real Light',
+                },
+                {
+                  id: 'DUST2_BOMB_5V5' as DrillMode,
+                  title: 'DE_DUST2',
+                  sub: 'Deserto Tático · Clássico 5v5',
+                },
+                {
+                  id: 'INDUSTRIA_BOMB_5V5' as DrillMode,
+                  title: 'INDUSTRIA',
+                  sub: 'Pátio Industrial · 2K',
+                },
+                {
+                  id: 'HANGAR_BOMB_5V5' as DrillMode,
+                  title: 'HANGAR',
+                  sub: 'Angar Industrial · 2K',
+                },
+                {
+                  id: 'EASTERN_CITY_BOMB_5V5' as DrillMode,
+                  title: 'EASTERN CITY',
+                  sub: 'Cidade Leste · 2K',
+                },
+                {
+                  id: 'MIRAGE_ANUBIS_BOMB_5V5' as DrillMode,
+                  title: 'MIRAGE ANUBIS',
+                  sub: 'Deserto · WebP 2K',
+                },
+              ] as const
+            ).map((m) => {
+              const active = selectedMap === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playMechanicalSwitch(1.05);
+                    setSelectedMap(m.id);
+                  }}
+                  className={`rounded-lg border text-left transition-all cursor-pointer overflow-hidden ${
+                    active
+                      ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                      : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
+                  }`}
+                >
+                  <img
+                    src={thumbForDrillMode(m.id)}
+                    alt={m.title}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-10 object-cover object-center opacity-95"
+                    draggable={false}
+                  />
+                  <div className="px-2.5 py-1.5">
+                    <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
+                      {m.title}
+                    </div>
+                    <div className="text-[8px] font-mono text-slate-300 truncate">{m.sub}</div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 

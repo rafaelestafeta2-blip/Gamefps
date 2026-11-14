@@ -9,6 +9,7 @@ import {
   subscribeOnlineRoom,
   switchLocalPlayerTeam,
 } from '../multiplayer/onlineRoomService';
+import { thumbForDrillMode } from './mapSelectThumbs';
 
 interface OnlineLobbyModalProps {
   isOpen: boolean;
@@ -182,14 +183,23 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
                         key={mode}
                         type="button"
                         onClick={() => onSelectMapMode(mode)}
-                        className={`p-2.5 rounded border text-left transition-all cursor-pointer ${
+                        className={`rounded border text-left transition-all cursor-pointer overflow-hidden ${
                           active
                             ? 'bg-[#c89b3c]/20 border-[#f59e0b] text-white shadow-[0_0_15px_rgba(245,158,11,0.2)]'
                             : 'bg-black/40 border-white/10 text-slate-300 hover:border-white/25'
                         }`}
                       >
-                        <div className="text-xs font-extrabold uppercase tracking-wider text-[#f0e6d2]">{info.title}</div>
-                        <div className="text-[10px] text-slate-400 truncate">{info.subtitle}</div>
+                        <img
+                          src={thumbForDrillMode(mode)}
+                          alt={info.title}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-12 object-cover object-center"
+                          draggable={false}
+                        />
+                        <div className="p-2.5">
+                          <div className="text-xs font-extrabold uppercase tracking-wider text-[#f0e6d2]">{info.title}</div>
+                          <div className="text-[10px] text-slate-400 truncate">{info.subtitle}</div>
+                        </div>
                       </button>
                     );
                   })}
