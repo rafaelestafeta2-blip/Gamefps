@@ -5,6 +5,8 @@ import { TacticalGrenadeSystem } from './grenadeSystem';
 import { ColliderBox } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
 
+export type SquadFlankRole = 'HOLD' | 'LEFT' | 'RIGHT' | 'PRESS';
+
 export interface BotNavData {
   waypoints: THREE.Vector3[];
   wpIndex: number;
@@ -55,6 +57,19 @@ export interface BotNavData {
   flankTimer: number;
   /** Hearing-only alert (gunfire/footsteps) — chase LKP without LOS cheat. */
   heardAlertTimer: number;
+  /** A* path node indices into the mode nav graph (practical waypoint mesh). */
+  pathNodeIds: number[];
+  pathIndex: number;
+  pathGoalKey: string;
+  pathRefreshTimer: number;
+  /** Squad-assigned flank role for coordinated pushes. */
+  squadRole: SquadFlankRole;
+  /** Human peek: delay after leaving cover before first shot (swing-out). */
+  peekPrefireDelay: number;
+  /** Remaining time before peek fire is allowed. */
+  peekPrefireTimer: number;
+  /** Jiggle peek (expose briefly, no commit burst). */
+  isJigglePeek: boolean;
 }
 
 export interface TacticalMapRoutes {
@@ -128,41 +143,225 @@ export function getMapRoutes(mode: DrillMode): TacticalMapRoutes {
   };
 }
 
-/**
- * Guia o bot até o Bomb Site plantado (A ou B) usando o próximo waypoint de corredor
- * quando ainda estiver distante, evitando bater em paredes no caminho.
- */
-export function getWaypointTowardPlantedSite(
-  botPos: THREE.Vector3,
-  plantedSite: 'A' | 'B',
-  mode: DrillMode,
-  isAlly: boolean
-): THREE.Vector3 {
-  const routes = getMapRoutes(mode);
-  const sitePos = plantedSite === 'A' ? routes.siteA : routes.siteB;
-  return pickApproachWaypoint(botPos, sitePos, mode, isAlly, 11.5);
+interface NavGraph {
+  nodes: THREE.Vector3[];
+  /** Undirected adjacency: neighbor index + edge cost. */
+  edges: Array<Array<{ to: number; cost: number }>>;
+}
+
+const _navGraphCache = new Map<DrillMode, NavGraph>();
+
+function distXZ(a: THREE.Vector3, b: THREE.Vector3): number {
+  return Math.hypot(a.x - b.x, a.z - b.z);
+}
+
+function findOrInsertNode(nodes: THREE.Vector3[], p: THREE.Vector3, mergeDist = 2.4): number {
+  for (let i = 0; i < nodes.length; i++) {
+    if (distXZ(nodes[i], p) <= mergeDist) return i;
+  }
+  nodes.push(p.clone());
+  return nodes.length - 1;
+}
+
+function addUndirectedEdge(
+  edges: NavGraph['edges'],
+  a: number,
+  b: number,
+  cost: number
+): void {
+  if (a === b) return;
+  if (!edges[a].some((e) => e.to === b)) edges[a].push({ to: b, cost });
+  if (!edges[b].some((e) => e.to === a)) edges[b].push({ to: a, cost });
 }
 
 /**
- * Corridor-aware approach: pick a lane waypoint that advances toward `goal`
- * instead of beelining into walls/doorframes.
+ * Practical "navmesh": merge all tactical lane waypoints into a graph,
+ * connect sequential lane hops + nearby cross-lane bridges, then A*.
  */
-export function pickApproachWaypoint(
+export function getMapNavGraph(mode: DrillMode): NavGraph {
+  const cached = _navGraphCache.get(mode);
+  if (cached) return cached;
+
+  const routes = getMapRoutes(mode);
+  const lanes = [
+    routes.vgA,
+    routes.vgB,
+    routes.vgMid,
+    routes.btA,
+    routes.btB,
+    routes.btMid,
+    [routes.siteA],
+    [routes.siteB],
+  ];
+  const nodes: THREE.Vector3[] = [];
+  const edges: NavGraph['edges'] = [];
+
+  const ensureEdgeSlots = () => {
+    while (edges.length < nodes.length) edges.push([]);
+  };
+
+  for (let L = 0; L < lanes.length; L++) {
+    const lane = lanes[L];
+    let prevIdx = -1;
+    for (let i = 0; i < lane.length; i++) {
+      const idx = findOrInsertNode(nodes, lane[i]);
+      ensureEdgeSlots();
+      if (prevIdx >= 0) {
+        addUndirectedEdge(edges, prevIdx, idx, distXZ(nodes[prevIdx], nodes[idx]));
+      }
+      prevIdx = idx;
+    }
+  }
+
+  // Cross-lane bridges: connect nearby nodes so A/B/Mid form a walkable mesh.
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const d = distXZ(nodes[i], nodes[j]);
+      if (d > 0.5 && d <= 14.5) {
+        addUndirectedEdge(edges, i, j, d * 1.08);
+      }
+    }
+  }
+
+  const graph: NavGraph = { nodes, edges };
+  _navGraphCache.set(mode, graph);
+  return graph;
+}
+
+function nearestNodeId(graph: NavGraph, pos: THREE.Vector3): number {
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < graph.nodes.length; i++) {
+    const d = distXZ(graph.nodes[i], pos);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/** A* over the waypoint graph. Returns node id path inclusive of start/goal. */
+export function findNavPathIds(
+  mode: DrillMode,
+  fromPos: THREE.Vector3,
+  toPos: THREE.Vector3
+): number[] {
+  const graph = getMapNavGraph(mode);
+  if (graph.nodes.length === 0) return [];
+  const start = nearestNodeId(graph, fromPos);
+  const goal = nearestNodeId(graph, toPos);
+  if (start === goal) return [start];
+
+  const open: number[] = [start];
+  const cameFrom = new Map<number, number>();
+  const gScore = new Float64Array(graph.nodes.length).fill(Infinity);
+  const fScore = new Float64Array(graph.nodes.length).fill(Infinity);
+  gScore[start] = 0;
+  fScore[start] = distXZ(graph.nodes[start], graph.nodes[goal]);
+
+  while (open.length > 0) {
+    let bestOpen = 0;
+    for (let i = 1; i < open.length; i++) {
+      if (fScore[open[i]] < fScore[open[bestOpen]]) bestOpen = i;
+    }
+    const current = open.splice(bestOpen, 1)[0];
+    if (current === goal) {
+      const path = [current];
+      let c = current;
+      while (cameFrom.has(c)) {
+        c = cameFrom.get(c)!;
+        path.push(c);
+      }
+      path.reverse();
+      return path;
+    }
+    const neighbors = graph.edges[current] || [];
+    for (let n = 0; n < neighbors.length; n++) {
+      const { to, cost } = neighbors[n];
+      const tent = gScore[current] + cost;
+      if (tent >= gScore[to]) continue;
+      cameFrom.set(to, current);
+      gScore[to] = tent;
+      fScore[to] = tent + distXZ(graph.nodes[to], graph.nodes[goal]);
+      if (!open.includes(to)) open.push(to);
+    }
+  }
+  return [start];
+}
+
+function goalKey(goal: THREE.Vector3): string {
+  return `${Math.round(goal.x * 2)}_${Math.round(goal.z * 2)}`;
+}
+
+/**
+ * Follow an A* path on the tactical waypoint graph.
+ * Falls back to greedy lane pick if the graph is empty.
+ */
+export function followNavPath(
+  nav: BotNavData,
+  botPos: THREE.Vector3,
+  goal: THREE.Vector3,
+  mode: DrillMode,
+  forceRepath = false
+): THREE.Vector3 {
+  const distToGoal = distXZ(botPos, goal);
+  if (distToGoal <= 3.2) {
+    nav.pathNodeIds = [];
+    nav.pathIndex = 0;
+    return goal;
+  }
+
+  const key = goalKey(goal);
+  const needsBuild =
+    forceRepath ||
+    nav.pathNodeIds.length === 0 ||
+    nav.pathGoalKey !== key ||
+    (nav.pathRefreshTimer || 0) <= 0;
+
+  if (needsBuild) {
+    nav.pathNodeIds = findNavPathIds(mode, botPos, goal);
+    nav.pathIndex = 0;
+    nav.pathGoalKey = key;
+    nav.pathRefreshTimer = 1.8 + Math.random() * 0.7;
+  }
+
+  const graph = getMapNavGraph(mode);
+  const path = nav.pathNodeIds;
+  if (path.length === 0) {
+    return pickApproachWaypointFallback(botPos, goal, mode, false, 8.5, forceRepath);
+  }
+
+  // Advance along nodes as we arrive.
+  while (nav.pathIndex < path.length) {
+    const node = graph.nodes[path[nav.pathIndex]];
+    if (!node) break;
+    if (distXZ(botPos, node) < 2.35) {
+      nav.pathIndex += 1;
+      continue;
+    }
+    break;
+  }
+
+  if (nav.pathIndex >= path.length) return goal;
+  return graph.nodes[path[nav.pathIndex]] || goal;
+}
+
+function pickApproachWaypointFallback(
   botPos: THREE.Vector3,
   goal: THREE.Vector3,
   mode: DrillMode,
   isAlly: boolean,
-  directArriveDist = 8.5,
-  preferAltLane = false
+  directArriveDist: number,
+  preferAltLane: boolean
 ): THREE.Vector3 {
-  const distToGoal = Math.hypot(botPos.x - goal.x, botPos.z - goal.z);
+  const distToGoal = distXZ(botPos, goal);
   if (distToGoal <= directArriveDist) return goal;
 
   const routes = getMapRoutes(mode);
   const primary = isAlly
     ? [routes.vgA, routes.vgB, routes.vgMid]
     : [routes.btA, routes.btB, routes.btMid];
-  // When stuck, shuffle lane preference so bots don't all jam the same doorway.
   const lanes = preferAltLane
     ? [primary[1], primary[2], primary[0]]
     : primary;
@@ -173,11 +372,9 @@ export function pickApproachWaypoint(
     const lane = lanes[L];
     for (let i = 0; i < lane.length; i++) {
       const wp = lane[i];
-      const wpDistToGoal = Math.hypot(wp.x - goal.x, wp.z - goal.z);
-      // Prefer waypoints that are closer to the goal than we currently are.
+      const wpDistToGoal = distXZ(wp, goal);
       if (wpDistToGoal >= distToGoal - 1.2) continue;
-      const botDistToWp = Math.hypot(botPos.x - wp.x, botPos.z - wp.z);
-      // Slight preference for nearer corridor nodes; penalize far hops.
+      const botDistToWp = distXZ(botPos, wp);
       const score = botDistToWp * 1.05 + wpDistToGoal * 0.55 + L * 0.8;
       if (score < bestScore) {
         bestScore = score;
@@ -186,6 +383,59 @@ export function pickApproachWaypoint(
     }
   }
   return bestWp;
+}
+
+/**
+ * Corridor-aware approach via A* waypoint graph (practical navmesh).
+ */
+export function pickApproachWaypoint(
+  botPos: THREE.Vector3,
+  goal: THREE.Vector3,
+  mode: DrillMode,
+  isAlly: boolean,
+  directArriveDist = 8.5,
+  preferAltLane = false,
+  nav?: BotNavData
+): THREE.Vector3 {
+  const distToGoal = distXZ(botPos, goal);
+  if (distToGoal <= directArriveDist) {
+    if (nav) {
+      nav.pathNodeIds = [];
+      nav.pathIndex = 0;
+    }
+    return goal;
+  }
+  if (nav) {
+    return followNavPath(nav, botPos, goal, mode, preferAltLane);
+  }
+  return pickApproachWaypointFallback(
+    botPos,
+    goal,
+    mode,
+    isAlly,
+    directArriveDist,
+    preferAltLane
+  );
+}
+
+/**
+ * Guia o bot até o Bomb Site plantado (A ou B) via A* waypoint graph.
+ */
+export function getWaypointTowardPlantedSite(
+  botPos: THREE.Vector3,
+  plantedSite: 'A' | 'B',
+  mode: DrillMode,
+  isAlly: boolean
+): THREE.Vector3 {
+  const routes = getMapRoutes(mode);
+  const sitePos = plantedSite === 'A' ? routes.siteA : routes.siteB;
+  const path = findNavPathIds(mode, botPos, sitePos);
+  const graph = getMapNavGraph(mode);
+  for (let i = 0; i < path.length; i++) {
+    const node = graph.nodes[path[i]];
+    if (node && distXZ(botPos, node) > 2.4) return node;
+  }
+  return pickApproachWaypoint(botPos, sitePos, mode, isAlly, 11.5);
 }
 
 /** Snapshot last-known position (frozen) — never live-track while hidden. */

@@ -22,6 +22,7 @@ import {
   moveBotWithPhysics,
   pickApproachWaypoint,
   setLastKnownPos,
+  SquadFlankRole,
 } from './botNavigationRoutes';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { TacticalGrenadeSystem } from './grenadeSystem';
@@ -38,19 +39,103 @@ const _combatMoveGoal = new THREE.Vector3();
 const _escortGoal = new THREE.Vector3();
 const _guardGoal = new THREE.Vector3();
 const _throwDir = new THREE.Vector3();
+const _flankScratch = new THREE.Vector3();
 
 let globalBotGrenadeCooldown = 14.0;
+
+/** Shared squad flank plan keyed by team + enemy lock id. */
+interface SquadFlankPlan {
+  roles: Map<string, SquadFlankRole>;
+  refreshAt: number;
+  enemyKey: string;
+}
+
+const squadFlankPlans = new Map<string, SquadFlankPlan>();
+
+function ensureNavExtras(nav: BotNavData): void {
+  if (nav.acquireTimer == null) nav.acquireTimer = 0;
+  if (nav.flankTimer == null) nav.flankTimer = 0;
+  if (nav.jumpCooldown == null) nav.jumpCooldown = 0;
+  if (nav.progressFailTimer == null) nav.progressFailTimer = 0;
+  if (nav.unstickPhase == null) nav.unstickPhase = 0;
+  if (nav.unstickTimer == null) nav.unstickTimer = 0;
+  if (nav.heardAlertTimer == null) nav.heardAlertTimer = 0;
+  if (!nav.pathNodeIds) nav.pathNodeIds = [];
+  if (nav.pathIndex == null) nav.pathIndex = 0;
+  if (nav.pathGoalKey == null) nav.pathGoalKey = '';
+  if (nav.pathRefreshTimer == null) nav.pathRefreshTimer = 0;
+  if (!nav.squadRole) nav.squadRole = 'HOLD';
+  if (nav.peekPrefireDelay == null) nav.peekPrefireDelay = 0.18;
+  if (nav.peekPrefireTimer == null) nav.peekPrefireTimer = 0;
+  if (nav.isJigglePeek == null) nav.isJigglePeek = false;
+}
+
+/**
+ * Assign HOLD / LEFT / RIGHT / PRESS so teammates don't all take the same side.
+ */
+function assignSquadFlankRoles(
+  bots: YardBotEntity[],
+  teamIsAlly: boolean,
+  enemyKey: string,
+  nowSec: number
+): void {
+  const planKey = `${teamIsAlly ? 'VG' : 'BT'}:${enemyKey}`;
+  let plan = squadFlankPlans.get(planKey);
+  if (plan && plan.enemyKey === enemyKey && plan.refreshAt > nowSec) {
+    for (let i = 0; i < bots.length; i++) {
+      const bot = bots[i];
+      if (bot.isDown || bot.type !== 'COMBAT_BOT') continue;
+      if (Boolean(bot.isAlly) !== teamIsAlly) continue;
+      const nav = bot.root.userData?.navData as BotNavData | undefined;
+      if (!nav) continue;
+      const role = plan.roles.get(bot.id);
+      if (role) nav.squadRole = role;
+    }
+    return;
+  }
+
+  const members: YardBotEntity[] = [];
+  for (let i = 0; i < bots.length; i++) {
+    const bot = bots[i];
+    if (bot.isDown || bot.type !== 'COMBAT_BOT') continue;
+    if (Boolean(bot.isAlly) !== teamIsAlly) continue;
+    const nav = bot.root.userData?.navData as BotNavData | undefined;
+    if (!nav) continue;
+    if (
+      nav.tacticalState === 'COMBAT' ||
+      nav.tacticalState === 'COVER' ||
+      nav.tacticalState === 'PEEK' ||
+      nav.tacticalState === 'INVESTIGATE' ||
+      nav.chaseTimer > 0
+    ) {
+      members.push(bot);
+    }
+  }
+  members.sort((a, b) => a.id.localeCompare(b.id));
+
+  const roles = new Map<string, SquadFlankRole>();
+  const cycle: SquadFlankRole[] = ['HOLD', 'LEFT', 'RIGHT', 'PRESS', 'LEFT'];
+  for (let i = 0; i < members.length; i++) {
+    const role = cycle[i % cycle.length];
+    roles.set(members[i].id, role);
+    const nav = members[i].root.userData.navData as BotNavData;
+    nav.squadRole = role;
+    if (role === 'LEFT') {
+      nav.strafeDir = -1;
+      nav.coverSide = -1;
+    } else if (role === 'RIGHT') {
+      nav.strafeDir = 1;
+      nav.coverSide = 1;
+    }
+  }
+  plan = { roles, refreshAt: nowSec + 3.2, enemyKey };
+  squadFlankPlans.set(planKey, plan);
+}
 
 function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): BotNavData {
   const existing = bot.root.userData?.navData as BotNavData | undefined;
   if (existing && existing.waypoints && existing.waypoints.length > 0) {
-    if (existing.acquireTimer == null) existing.acquireTimer = 0;
-    if (existing.flankTimer == null) existing.flankTimer = 0;
-    if (existing.jumpCooldown == null) existing.jumpCooldown = 0;
-    if (existing.progressFailTimer == null) existing.progressFailTimer = 0;
-    if (existing.unstickPhase == null) existing.unstickPhase = 0;
-    if (existing.unstickTimer == null) existing.unstickTimer = 0;
-    if (existing.heardAlertTimer == null) existing.heardAlertTimer = 0;
+    ensureNavExtras(existing);
     return existing;
   }
 
@@ -71,6 +156,11 @@ function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): Bo
     avoidAngle: 0, avoidTimer: 0, verticalVel: 0, jumpCooldown: 0, plantOrDefuseTimer: 0, lastKeypadDigit: -1,
     visionRange: 40.0, fieldOfView: 130.0,
     acquireTimer: 0, flankTimer: 0, heardAlertTimer: 0,
+    pathNodeIds: [], pathIndex: 0, pathGoalKey: '', pathRefreshTimer: 0,
+    squadRole: laneChoice === 0 ? 'LEFT' : laneChoice === 1 ? 'RIGHT' : 'HOLD',
+    peekPrefireDelay: 0.14 + Math.random() * 0.16,
+    peekPrefireTimer: 0,
+    isJigglePeek: false,
   };
   bot.root.userData = bot.root.userData || {};
   bot.root.userData.navData = navData;
@@ -158,6 +248,16 @@ export function updateSmartBotNavigation(
 
   globalBotGrenadeCooldown = Math.max(0, globalBotGrenadeCooldown - dt);
 
+  // Warm nav + squad roles once per frame (shared flank plan for each team).
+  const nowSec = performance.now() * 0.001;
+  for (let i = 0; i < bots.length; i++) {
+    const bot = bots[i];
+    if (bot.isDown || bot.type !== 'COMBAT_BOT') continue;
+    getOrInitBotNav(bot, mode, i);
+  }
+  assignSquadFlankRoles(bots, false, 'PLAYER', nowSec);
+  assignSquadFlankRoles(bots, true, 'ENEMY', nowSec);
+
   for (let i = 0; i < bots.length; i++) {
     const bot = bots[i];
     if (bot.isDown || bot.type !== 'COMBAT_BOT') continue;
@@ -167,6 +267,8 @@ export function updateSmartBotNavigation(
     nav.grenadeCooldown = Math.max(0, nav.grenadeCooldown - dt);
     nav.chaseTimer = Math.max(0, nav.chaseTimer - dt);
     nav.heardAlertTimer = Math.max(0, (nav.heardAlertTimer || 0) - dt);
+    nav.pathRefreshTimer = Math.max(0, (nav.pathRefreshTimer || 0) - dt);
+    nav.peekPrefireTimer = Math.max(0, (nav.peekPrefireTimer || 0) - dt);
 
     const bPos = bot.root.position;
     _botHead.set(bPos.x, bPos.y + 1.45, bPos.z);
@@ -378,42 +480,55 @@ export function updateSmartBotNavigation(
       const isSniperBot = bot.weaponId === 'SNIPER_BOLT' || bot.weaponId === 'SNIPER_TACTICAL';
       const idealDist = isSniperBot ? 15.0 : 4.6;
 
-      // Cover → peek → flank/reposition cadence (not endless side-strafe).
+      // Cover → peek → squad flank cadence (roles assigned per team).
       if (nav.coverTimer == null) nav.coverTimer = 0;
       if (nav.peekTimer == null) nav.peekTimer = 0;
       if (nav.flankTimer == null) nav.flankTimer = 0;
       if (!nav.coverSide) nav.coverSide = Math.random() > 0.5 ? 1 : -1;
+      const role = nav.squadRole || 'HOLD';
+      const roleSide = role === 'LEFT' ? -1 : role === 'RIGHT' ? 1 : nav.strafeDir;
+
       if (nav.tacticalState === 'COMBAT' && distToEnemy < idealDist + 9) {
         const roll = Math.random();
-        if (roll < 0.032) {
+        if (roll < 0.03) {
           nav.tacticalState = 'COVER';
-          nav.coverTimer = 0.85 + Math.random() * 1.15;
-          nav.coverSide = Math.random() > 0.5 ? 1 : -1;
+          // Human hold: vary cover time; HOLD roles linger longer.
+          nav.coverTimer =
+            (role === 'HOLD' ? 1.05 : 0.7) + Math.random() * (role === 'HOLD' ? 1.35 : 1.0);
+          nav.coverSide = roleSide >= 0 ? 1 : -1;
+          nav.isJigglePeek = false;
           if (bot.root.userData?.botAnimCtrl) {
             bot.root.userData.botAnimCtrl.crouchStance = true;
           }
-        } else if (roll < 0.055) {
-          // Flank / reposition burst around the fight ring.
-          nav.flankTimer = 1.15 + Math.random() * 1.35;
-          nav.strafeDir = Math.random() > 0.5 ? 1 : -1;
-          nav.coverSide = nav.strafeDir >= 0 ? 1 : -1;
+        } else if (roll < 0.05 && (role === 'LEFT' || role === 'RIGHT' || role === 'PRESS')) {
+          // Squad-directed flank — not a random solo dart.
+          nav.flankTimer = 1.35 + Math.random() * 1.25;
+          nav.strafeDir = roleSide;
+          nav.coverSide = roleSide >= 0 ? 1 : -1;
         }
       }
-      // After peek ends into COMBAT, occasionally commit to a hard flank.
       if (
         nav.tacticalState === 'COMBAT' &&
         (nav.flankTimer || 0) <= 0 &&
-        Math.random() < 0.008
+        (role === 'LEFT' || role === 'RIGHT' || role === 'PRESS') &&
+        Math.random() < 0.01
       ) {
-        nav.flankTimer = 1.4 + Math.random() * 1.1;
-        nav.strafeDir *= -1;
+        nav.flankTimer = 1.5 + Math.random() * 1.15;
+        nav.strafeDir = roleSide;
       }
       if (nav.flankTimer > 0) nav.flankTimer -= dt;
       if (nav.tacticalState === 'COVER') {
         nav.coverTimer -= dt;
         if (nav.coverTimer <= 0) {
           nav.tacticalState = 'PEEK';
-          nav.peekTimer = 0.45 + Math.random() * 0.55;
+          // Human peek mix: jiggle (~28%) vs commit expose.
+          nav.isJigglePeek = Math.random() < 0.28;
+          nav.peekTimer = nav.isJigglePeek
+            ? 0.22 + Math.random() * 0.2
+            : 0.48 + Math.random() * 0.55;
+          nav.peekPrefireDelay = 0.12 + Math.random() * 0.2;
+          nav.peekPrefireTimer = nav.peekPrefireDelay;
+          nav.acquireTimer = 0;
           if (bot.root.userData?.botAnimCtrl) {
             bot.root.userData.botAnimCtrl.crouchStance = false;
           }
@@ -421,19 +536,30 @@ export function updateSmartBotNavigation(
       } else if (nav.tacticalState === 'PEEK') {
         nav.peekTimer -= dt;
         if (nav.peekTimer <= 0) {
-          nav.tacticalState = Math.random() < 0.6 ? 'COVER' : 'COMBAT';
-          if (nav.tacticalState === 'COVER') {
-            nav.coverTimer = 0.65 + Math.random() * 1.0;
+          // Jiggle peeks almost always snap back to cover.
+          if (nav.isJigglePeek || Math.random() < 0.62) {
+            nav.tacticalState = 'COVER';
+            nav.coverTimer = 0.55 + Math.random() * 1.15;
             if (bot.root.userData?.botAnimCtrl) {
               bot.root.userData.botAnimCtrl.crouchStance = true;
             }
+          } else {
+            nav.tacticalState = 'COMBAT';
           }
+          nav.isJigglePeek = false;
+          nav.peekPrefireTimer = 0;
         }
       }
 
       nav.strafeTimer += dt;
-      if (nav.strafeTimer > 1.6) {
-        nav.strafeDir *= -1;
+      // HOLD / PRESS keep tighter strafe cadence; flankers hold assigned side longer.
+      const strafeFlipAt = role === 'LEFT' || role === 'RIGHT' ? 2.4 : 1.6;
+      if (nav.strafeTimer > strafeFlipAt) {
+        if (role === 'LEFT' || role === 'RIGHT') {
+          nav.strafeDir = roleSide;
+        } else {
+          nav.strafeDir *= -1;
+        }
         nav.strafeTimer = 0;
       }
 
@@ -442,8 +568,7 @@ export function updateSmartBotNavigation(
       if (_navDir.lengthSq() > 0.001) _navDir.normalize();
 
       if (nav.tacticalState === 'COVER') {
-        const side = nav.coverSide || nav.strafeDir;
-        // Pull back + lateral = "behind cover" relative to enemy, not open dance.
+        const side = nav.coverSide || roleSide;
         _combatMoveGoal.set(
           bPos.x - _navDir.z * side * 2.8 - _navDir.x * 1.6,
           bPos.y,
@@ -452,28 +577,42 @@ export function updateSmartBotNavigation(
         moveTarget = _combatMoveGoal;
         moveSpeed = 2.05;
       } else if (nav.tacticalState === 'PEEK') {
-        const side = nav.coverSide || nav.strafeDir;
+        const side = nav.coverSide || roleSide;
+        const peekOut = nav.isJigglePeek ? 0.32 : 0.55;
         _combatMoveGoal.set(
-          bPos.x - _navDir.z * side * 0.4 + _navDir.x * 0.55,
+          bPos.x - _navDir.z * side * 0.4 + _navDir.x * peekOut,
           bPos.y,
-          bPos.z + _navDir.x * side * 0.4 + _navDir.z * 0.55
+          bPos.z + _navDir.x * side * 0.4 + _navDir.z * peekOut
         );
         moveTarget = _combatMoveGoal;
-        moveSpeed = 2.7;
-      } else if (nav.flankTimer > 0) {
-        const side = nav.strafeDir;
+        moveSpeed = nav.isJigglePeek ? 2.35 : 2.7;
+      } else if (
+        nav.flankTimer > 0 ||
+        ((role === 'LEFT' || role === 'RIGHT' || role === 'PRESS') &&
+          distToEnemy > idealDist + 0.8)
+      ) {
+        const side = role === 'HOLD' ? nav.strafeDir : roleSide;
+        const wide = role === 'PRESS' ? 3.2 : role === 'HOLD' ? 2.4 : 4.6;
         const ring = Math.max(idealDist, Math.min(distToEnemy, idealDist + 3.5));
-        _combatMoveGoal.set(
-          visibleEnemyPos.x - _navDir.x * ring - _navDir.z * side * 4.2,
+        _flankScratch.set(
+          visibleEnemyPos.x - _navDir.x * ring - _navDir.z * side * wide,
           bPos.y,
-          visibleEnemyPos.z - _navDir.z * ring + _navDir.x * side * 4.2
+          visibleEnemyPos.z - _navDir.z * ring + _navDir.x * side * wide
         );
-        moveTarget = _combatMoveGoal;
-        moveSpeed = 4.4;
+        // Route flank goals through A* so wide arcs don't jam door frames.
+        moveTarget = pickApproachWaypoint(
+          bPos,
+          _flankScratch,
+          mode,
+          Boolean(bot.isAlly),
+          5.5,
+          botNeedsRepath(nav, bot),
+          nav
+        );
+        moveSpeed = role === 'PRESS' ? 4.55 : 4.35;
       } else if (distToEnemy > idealDist + 1.2) {
-        // Close the gap with slight lateral bias — chase, don't orbit.
-        const sideX = -_navDir.z * nav.strafeDir * 0.12;
-        const sideZ = _navDir.x * nav.strafeDir * 0.12;
+        const sideX = -_navDir.z * roleSide * 0.12;
+        const sideZ = _navDir.x * roleSide * 0.12;
         _combatMoveGoal.set(
           visibleEnemyPos.x - _navDir.x * idealDist + sideX * 2.0,
           bPos.y,
@@ -482,24 +621,22 @@ export function updateSmartBotNavigation(
         moveTarget = _combatMoveGoal;
         moveSpeed = distToEnemy > 12.0 ? 4.55 : 3.95;
       } else if (distToEnemy < idealDist - 1.5) {
-        // Too close → backpedal to cover ring
         _combatMoveGoal.set(
-          bPos.x - _navDir.x * 2.2 - _navDir.z * nav.strafeDir * 1.2,
+          bPos.x - _navDir.x * 2.2 - _navDir.z * roleSide * 1.2,
           bPos.y,
-          bPos.z - _navDir.z * 2.2 + _navDir.x * nav.strafeDir * 1.2
+          bPos.z - _navDir.z * 2.2 + _navDir.x * roleSide * 1.2
         );
         moveTarget = _combatMoveGoal;
         moveSpeed = 2.6;
       } else {
-        // At ideal range: micro-adjust toward cover instead of perpetual strafe.
         if (Math.random() < 0.018) {
           nav.tacticalState = 'COVER';
           nav.coverTimer = 0.7 + Math.random() * 0.9;
         }
         _combatMoveGoal.set(
-          bPos.x - _navDir.z * nav.strafeDir * 0.9 - _navDir.x * 0.35,
+          bPos.x - _navDir.z * roleSide * 0.9 - _navDir.x * 0.35,
           bPos.y,
-          bPos.z + _navDir.x * nav.strafeDir * 0.9 - _navDir.z * 0.35
+          bPos.z + _navDir.x * roleSide * 0.9 - _navDir.z * 0.35
         );
         moveTarget = _combatMoveGoal;
         moveSpeed = 1.85;
@@ -509,7 +646,6 @@ export function updateSmartBotNavigation(
         (!visibleEnemyPos && chasedTargetPos && nav.chaseTimer > 0)) &&
       chasedTargetPos
     ) {
-      // Path toward frozen LKP via approach corridor, then fan/search — never wallhack.
       if (nav.tacticalState !== 'INVESTIGATE') {
         nav.tacticalState = 'INVESTIGATE';
       }
@@ -531,41 +667,53 @@ export function updateSmartBotNavigation(
           mode,
           Boolean(bot.isAlly),
           8.5,
-          needsRepath || nav.unstickPhase >= 2
+          needsRepath || nav.unstickPhase >= 2,
+          nav
         );
         if (needsRepath) clearBotNeedsRepath(nav, bot);
         moveSpeed = 4.55;
       }
     } else if (nav.waypoints.length > 0) {
       if (botNeedsRepath(nav, bot)) {
-        // Soft repath: snap to nearest waypoint after doorway unstick.
-        let best = nav.wpIndex;
-        let bestD = Infinity;
-        for (let w = 0; w < nav.waypoints.length; w++) {
-          const wp = nav.waypoints[w];
-          const d = Math.hypot(bPos.x - wp.x, bPos.z - wp.z);
-          if (d < bestD) {
-            bestD = d;
-            best = w;
-          }
-        }
-        nav.wpIndex = best;
+        // Soft repath via A* toward current lane end / next goal.
+        const laneGoal = nav.waypoints[nav.waypoints.length - 1] || nav.waypoints[nav.wpIndex];
+        moveTarget = pickApproachWaypoint(
+          bPos,
+          laneGoal,
+          mode,
+          Boolean(bot.isAlly),
+          4.0,
+          true,
+          nav
+        );
         nav.progressFailTimer = 0;
         clearBotNeedsRepath(nav, bot);
+        moveSpeed = 4.2;
+      } else {
+        const curWp = nav.waypoints[nav.wpIndex];
+        if (Math.hypot(bPos.x - curWp.x, bPos.z - curWp.z) < 2.2) {
+          const minLoopIdx = Math.min(2, nav.waypoints.length - 1);
+          nav.wpIndex = nav.wpIndex + 1 >= nav.waypoints.length ? minLoopIdx : nav.wpIndex + 1;
+        }
+        // Patrol also uses graph when far from the next lane node.
+        const nextWp = nav.waypoints[nav.wpIndex];
+        moveTarget = pickApproachWaypoint(
+          bPos,
+          nextWp,
+          mode,
+          Boolean(bot.isAlly),
+          6.5,
+          false,
+          nav
+        );
+        moveSpeed = 4.05;
       }
-      const curWp = nav.waypoints[nav.wpIndex];
-      if (Math.hypot(bPos.x - curWp.x, bPos.z - curWp.z) < 2.2) {
-        const minLoopIdx = Math.min(2, nav.waypoints.length - 1);
-        nav.wpIndex = nav.wpIndex + 1 >= nav.waypoints.length ? minLoopIdx : nav.wpIndex + 1;
-      }
-      moveTarget = nav.waypoints[nav.wpIndex];
-      moveSpeed = 4.05;
     } else {
       moveTarget = bPos;
       moveSpeed = 0;
     }
 
-    // When closing through buildings, prefer corridor approaches over raw combat beelines.
+    // Long closes: always prefer A* corridor path over combat beelines.
     if (
       visibleEnemyPos &&
       (nav.tacticalState === 'COMBAT' || nav.tacticalState === 'COVER') &&
@@ -579,7 +727,8 @@ export function updateSmartBotNavigation(
           mode,
           Boolean(bot.isAlly),
           8.5,
-          botNeedsRepath(nav, bot) || nav.unstickPhase >= 2
+          botNeedsRepath(nav, bot) || nav.unstickPhase >= 2,
+          nav
         );
       }
     }
@@ -589,11 +738,20 @@ export function updateSmartBotNavigation(
     const weapon = bot.weaponId || 'AK47_RIFLE';
     const isSniper = weapon === 'SNIPER_BOLT' || weapon === 'SNIPER_TACTICAL';
 
-    // Fair fire: need clear LOS + short acquire window (no instant off-angle laser).
+    // Human fire gates: LOS + acquire + peek swing-out delay; jiggle peeks don't commit.
+    const peekReady =
+      nav.tacticalState !== 'PEEK' ||
+      (!nav.isJigglePeek && (nav.peekPrefireTimer || 0) <= 0);
+    const acquireNeed = isVisibleTargetPlayer
+      ? nav.tacticalState === 'PEEK'
+        ? 0.16 + (nav.peekPrefireDelay || 0.12) * 0.35
+        : 0.24
+      : 0.08;
     const canFireAtVisible =
       (nav.tacticalState === 'COMBAT' || nav.tacticalState === 'PEEK') &&
       visibleEnemyPos &&
-      (nav.acquireTimer || 0) >= (isVisibleTargetPlayer ? 0.22 : 0.08);
+      peekReady &&
+      (nav.acquireTimer || 0) >= acquireNeed;
 
     if (canFireAtVisible && visibleEnemyPos && !isBotReloading(bot)) {
       if (nav.burstShotsLeft <= 0 && nav.fireCooldown <= 0) {
