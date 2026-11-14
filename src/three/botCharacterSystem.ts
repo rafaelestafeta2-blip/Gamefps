@@ -543,6 +543,14 @@ export function attachProRifleCharacterToBot(bot: YardBotEntity, isSoftwareGl: b
   bot.root.userData = bot.root.userData || {};
   bot.root.userData.botAnimCtrl = ctrl;
   bot.root.userData.hasSkeletalCharacter = true;
+
+  // Ensure Mixamo skeleton is never left with matrixAutoUpdate=false (T-pose lock).
+  cloned.traverse((child) => {
+    child.userData.keepMatrixAutoUpdate = true;
+    child.userData.isStaticEnvironment = false;
+    child.matrixAutoUpdate = true;
+  });
+  bot.root.matrixAutoUpdate = true;
 }
 
 export function triggerBotFireAnimation(bot: TacticalTargetEntity): void {
@@ -698,27 +706,18 @@ export function updateAllBotCharacters(
     if (t.armorMesh) t.armorMesh.position.y = isCrouchedNow ? 0.72 : 1.08;
 
     const distSq = t.root.position.distanceToSquared(playerPos);
-    // LOD tiers: near = full rate, mid = 30Hz, far = 10Hz, ultra-far = skip unless firing/aiming.
-    if (distSq < 900) {
+    // LOD: near = every frame, far = ~30Hz. Always update at least occasionally so
+    // newly attached Mixamo characters leave bind pose (T-pose) immediately.
+    if (distSq < 1600) {
       ctrl.mixer.update(dt);
-      syncBotWeaponWithMixamoHands(t, ctrl, isCrouchedNow);
-    } else if (distSq < 2500) {
+    } else {
       ctrl.lodAccumDt += dt;
       if (ctrl.lodAccumDt >= 0.033) {
         ctrl.mixer.update(ctrl.lodAccumDt);
         ctrl.lodAccumDt = 0;
-        syncBotWeaponWithMixamoHands(t, ctrl, isCrouchedNow);
       }
-    } else if (distSq < 6400 || t.isTelegraphing || ctrl.fireAnimTimer > 0) {
-      ctrl.lodAccumDt += dt;
-      if (ctrl.lodAccumDt >= 0.1) {
-        ctrl.mixer.update(ctrl.lodAccumDt);
-        ctrl.lodAccumDt = 0;
-        syncBotWeaponWithMixamoHands(t, ctrl, isCrouchedNow);
-      }
-    } else {
-      // Ultra-far idle bots: freeze mixer this frame (pose stays last sampled).
-      ctrl.lodAccumDt = 0;
     }
+
+    syncBotWeaponWithMixamoHands(t, ctrl, isCrouchedNow);
   }
 }

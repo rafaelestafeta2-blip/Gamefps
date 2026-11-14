@@ -62,6 +62,36 @@ export function markGroupStatic(root: THREE.Object3D): void {
   });
 }
 
+function isAnimatedOrBoneNode(obj: THREE.Object3D): boolean {
+  if (obj.userData?.keepMatrixAutoUpdate) return true;
+  if (obj.userData?.hasSkeletalCharacter || obj.userData?.botAnimCtrl) return true;
+  if ((obj as THREE.SkinnedMesh).isSkinnedMesh) return true;
+  if ((obj as THREE.Bone).isBone) return true;
+  // Mixamo / character bone naming — never freeze these matrices.
+  if (/mixamorig|Armature|Bone/i.test(obj.name || '')) return true;
+  return false;
+}
+
+/**
+ * Protects skeletal characters / bones from matrix freezing.
+ * Must run AFTER markGroupStatic and BEFORE optimizeSceneGraph.
+ */
+export function protectAnimatedSubtrees(root: THREE.Object3D): void {
+  root.traverse((obj) => {
+    if (
+      obj.userData?.hasSkeletalCharacter ||
+      obj.userData?.botAnimCtrl ||
+      (obj as THREE.SkinnedMesh).isSkinnedMesh
+    ) {
+      obj.traverse((child) => {
+        child.userData.keepMatrixAutoUpdate = true;
+        child.userData.isStaticEnvironment = false;
+        child.matrixAutoUpdate = true;
+      });
+    }
+  });
+}
+
 /**
  * One-shot pass after level build / GLB load.
  * Safe to call multiple times (idempotent via userData.perfOptimized).
@@ -84,10 +114,17 @@ export function optimizeSceneGraph(
   root.traverse((obj) => {
     if (obj.userData.perfOptimized) return;
 
+    // Never freeze bones / skinned character hierarchies — that locks Mixamo in T-pose.
+    if (isAnimatedOrBoneNode(obj)) {
+      obj.userData.keepMatrixAutoUpdate = true;
+      obj.userData.isStaticEnvironment = false;
+      obj.matrixAutoUpdate = true;
+      obj.userData.perfOptimized = true;
+      return;
+    }
+
     if (freeze && (obj.userData.isStaticEnvironment || root.userData.isStaticEnvironment)) {
-      // Skinned / animated nodes must keep matrix updates.
-      const isSkinned = (obj as THREE.SkinnedMesh).isSkinnedMesh;
-      if (!isSkinned && !obj.userData.keepMatrixAutoUpdate) {
+      if (!obj.userData.keepMatrixAutoUpdate) {
         obj.updateMatrix();
         obj.matrixAutoUpdate = false;
       }

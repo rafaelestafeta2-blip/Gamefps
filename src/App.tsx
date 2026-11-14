@@ -1,4 +1,5 @@
 import { startTransition, useEffect, useRef, useState } from 'react';
+// startTransition is only used for same-screen HUD ticks — never for screen changes.
 import { applyAudioSettings, initAudioSystem } from './audio/audioSettings';
 import { AuthLoginScreen } from './components/AuthLoginScreen';
 import { GameShellModals } from './components/GameShellModals';
@@ -142,8 +143,15 @@ export default function App() {
     const container = canvasMountRef.current;
     if (!container) return;
 
-    // HUD bridge already dirty-checks; startTransition keeps React from blocking the rAF loop.
+    // HUD bridge dirty-checks. Screen changes MUST be synchronous — deferring
+    // PLAYING with startTransition caused a one-frame MAIN_MENU flash after loading.
+    const hudScreenRef = { current: 'INTRO' as string };
     const engine = new TacticalFPSEngine(container, (nextHud) => {
+      if (nextHud.screen !== hudScreenRef.current) {
+        hudScreenRef.current = nextHud.screen;
+        setHud(nextHud);
+        return;
+      }
       startTransition(() => {
         setHud(nextHud);
       });
@@ -266,8 +274,9 @@ export default function App() {
           }
           onComplete={() => {
             const targetMode = loadingBombMode;
-            setLoadingBombMode(null);
+            // Enter PLAYING first, then dismiss loading — avoids MAIN_MENU flash.
             launchMatchNow(targetMode);
+            setLoadingBombMode(null);
           }}
         />
       )}

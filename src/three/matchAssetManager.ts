@@ -16,7 +16,11 @@ import {
 } from './dust2LevelBuilder';
 import { TacticalGrenadeSystem } from './grenadeSystem';
 import { TacticalLevelData } from './levelBuilder';
-import { markGroupStatic, optimizeSceneGraph } from './scenePerfOptimizer';
+import {
+  markGroupStatic,
+  optimizeSceneGraph,
+  protectAnimatedSubtrees,
+} from './scenePerfOptimizer';
 import { TacticalSkySystem } from './skySystem';
 import {
   loadStanderTiroMapGeometry,
@@ -192,23 +196,28 @@ export async function prepareMatchArena(
           : facilityLevelData.levelGroup;
 
   // Mobile GPU pass: freeze static matrices, share plain materials, trim tiny shadow casters.
-  // Skip animated bot roots (userData.keepMatrixAutoUpdate / skinned meshes).
-  markGroupStatic(activeGroup);
-  activeGroup.traverse((obj) => {
-    if (
-      obj.userData?.hasSkeletalCharacter ||
-      obj.userData?.botAnimCtrl ||
-      (obj as THREE.SkinnedMesh).isSkinnedMesh
-    ) {
-      obj.userData.keepMatrixAutoUpdate = true;
-      obj.userData.isStaticEnvironment = false;
-    }
-  });
-  optimizeSceneGraph(activeGroup, {
-    sharePlainMaterials: true,
-    freezeStaticMatrices: true,
-    minShadowCasterSize: isSoftwareGl ? 99 : 0.4,
-  });
+  // Critical: protect Mixamo bones BEFORE freezing — otherwise bots lock in T-pose.
+  const mapOnlyGroup =
+    (isDust2 && dust2LevelData.mapGeometryGroup) ||
+    (isAssault && assaultLevelData.mapGeometryGroup) ||
+    null;
+
+  if (mapOnlyGroup) {
+    markGroupStatic(mapOnlyGroup);
+    optimizeSceneGraph(mapOnlyGroup, {
+      sharePlainMaterials: true,
+      freezeStaticMatrices: true,
+      minShadowCasterSize: isSoftwareGl ? 99 : 0.4,
+    });
+  } else {
+    markGroupStatic(activeGroup);
+    protectAnimatedSubtrees(activeGroup);
+    optimizeSceneGraph(activeGroup, {
+      sharePlainMaterials: true,
+      freezeStaticMatrices: true,
+      minShadowCasterSize: isSoftwareGl ? 99 : 0.4,
+    });
+  }
 
   if (!isSoftwareGl) {
     const texturesToUpload: THREE.Texture[] = [];
