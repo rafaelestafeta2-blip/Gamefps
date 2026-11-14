@@ -88,6 +88,7 @@ export const MainMenuPlayPanel: React.FC<MainMenuPlayPanelProps> = ({
       case 'CASUAL_ASSAULT':
       case 'CASUAL_INDUSTRIA':
       case 'CASUAL_HANGAR':
+      case 'CASUAL_EASTERN_CITY':
         onStartMatchmaking(modeObj.arena || 'DUST2_BOMB_5V5');
         break;
       case 'RANKED':

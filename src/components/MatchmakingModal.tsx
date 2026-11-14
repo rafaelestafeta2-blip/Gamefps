@@ -176,6 +176,26 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
                 Angar Industrial · 2K
               </div>
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playMechanicalSwitch(1.05);
+                setSelectedMap('EASTERN_CITY_BOMB_5V5');
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                selectedMap === 'EASTERN_CITY_BOMB_5V5'
+                  ? 'bg-amber-500/25 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                  : 'bg-black/45 border-white/15 text-slate-300 hover:border-white/35'
+              }`}
+            >
+              <div className="text-[10px] font-display font-black tracking-wider text-amber-300">
+                EASTERN CITY
+              </div>
+              <div className="text-[8px] font-mono text-slate-300 truncate">
+                Cidade Leste · 2K
+              </div>
+            </button>
           </div>
         </div>
 
@@ -190,6 +210,8 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
                   ? 'INDUSTRIA (.GLB)'
                   : selectedMap === 'HANGAR_BOMB_5V5'
                     ? 'HANGAR (.GLB)'
+                    : selectedMap === 'EASTERN_CITY_BOMB_5V5'
+                      ? 'EASTERN CITY (.GLB)'
                     : 'DE_DUST2 (.GLB)'}
             </span>
           </div>

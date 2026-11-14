@@ -34,6 +34,7 @@ const DRILL_PROTOCOLS: { mode: DrillMode; title: string; desc: string }[] = [
   { mode: 'DUST2_BOMB_5V5', title: '00B. Mapa de_dust2 (CS 5v5)', desc: 'Plant the Bomb 5v5 no mapa oficial Counter-Strike de_dust2 (.glb).' },
   { mode: 'INDUSTRIA_BOMB_5V5', title: '00C. Mapa Industria (5v5)', desc: 'Plant the Bomb 5v5 no pátio industrial Industria (.glb 2K).' },
   { mode: 'HANGAR_BOMB_5V5', title: '00D. Mapa Hangar (5v5)', desc: 'Plant the Bomb 5v5 no hangar industrial Angar (.glb 2K + boxes).' },
+  { mode: 'EASTERN_CITY_BOMB_5V5', title: '00E. Mapa Eastern City (5v5)', desc: 'Plant the Bomb 5v5 na Cidade Leste (.glb 2K + props).' },
   { mode: 'YARD_BOMB_5V5', title: '01. Mapa Yard (5v5)', desc: 'Plant the Bomb 5v5 no mapa clássico Yard do Warface.' },
   { mode: 'FREE_RANGE', title: '02. Estande Livre', desc: 'Raias de 15m a 55m, gongos AR500 e telemetria balística.' },
   { mode: 'KILLHOUSE_BLITZ', title: '03. Incursão CQB', desc: 'Percurso cronometrado no Killhouse com alvos blindados.' },

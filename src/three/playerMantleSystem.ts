@@ -90,6 +90,7 @@ export function tryStartMantle(engine: any): boolean {
   const isAssault = engine.state.drillMode === 'ASSAULT_BOMB_5V5';
   const isIndustria = engine.state.drillMode === 'INDUSTRIA_BOMB_5V5';
   const isHangar = engine.state.drillMode === 'HANGAR_BOMB_5V5';
+  const isEasternCity = engine.state.drillMode === 'EASTERN_CITY_BOMB_5V5';
   const glb = isDust2
     ? engine.dust2LevelData.collider
     : isAssault
@@ -98,6 +99,8 @@ export function tryStartMantle(engine: any): boolean {
         ? engine.industriaLevelData.collider
         : isHangar
           ? engine.hangarLevelData.collider
+          : isEasternCity
+            ? engine.easternCityLevelData.collider
           : null;
   const colliders: ColliderBox[] | undefined =
     engine.colliders ||

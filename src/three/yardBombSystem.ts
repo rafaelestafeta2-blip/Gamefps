@@ -31,6 +31,11 @@ import {
   HANGAR_BOMB_SITE_B,
   getHangarCalloutForPos,
 } from './hangarLevelBuilder';
+import {
+  EASTERN_CITY_BOMB_SITE_A,
+  EASTERN_CITY_BOMB_SITE_B,
+  getEasternCityCalloutForPos,
+} from './easternCityLevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
 import { getYardCalloutForPos, YARD_BOMB_SITE_A, YARD_BOMB_SITE_B } from './yardMapData';
 import { YardBotEntity } from './yardPropsBuilder';
@@ -118,6 +123,8 @@ export class YardBombSystem {
               ? 'BASE VANGUARD (APRON SUL · INDUSTRIA)'
               : mode === 'HANGAR_BOMB_5V5'
                 ? 'BASE VANGUARD (PORTÃO SUL · HANGAR)'
+                : mode === 'EASTERN_CITY_BOMB_5V5'
+                  ? 'BASE VANGUARD (ENTRADA SUL · CIDADE LESTE)'
                 : 'BASE VANGUARD (SUL · RUA DO HOTEL)',
       currentRound: prevRound, maxRounds: 6, vanguardScore: prevVg, blackthornScore: prevBt,
       // Warface-style equip window before every round (including first).
@@ -300,6 +307,7 @@ export class YardBombSystem {
     const isAssault = this.activeMode === 'ASSAULT_BOMB_5V5';
     const isIndustria = this.activeMode === 'INDUSTRIA_BOMB_5V5';
     const isHangar = this.activeMode === 'HANGAR_BOMB_5V5';
+    const isEasternCity = this.activeMode === 'EASTERN_CITY_BOMB_5V5';
     const siteA = isDust2
       ? DUST2_BOMB_SITE_A
       : isAssault
@@ -308,6 +316,8 @@ export class YardBombSystem {
           ? INDUSTRIA_BOMB_SITE_A
           : isHangar
             ? HANGAR_BOMB_SITE_A
+            : isEasternCity
+              ? EASTERN_CITY_BOMB_SITE_A
             : YARD_BOMB_SITE_A;
     const siteB = isDust2
       ? DUST2_BOMB_SITE_B
@@ -317,6 +327,8 @@ export class YardBombSystem {
           ? INDUSTRIA_BOMB_SITE_B
           : isHangar
             ? HANGAR_BOMB_SITE_B
+            : isEasternCity
+              ? EASTERN_CITY_BOMB_SITE_B
             : YARD_BOMB_SITE_B;
 
     this.info.calloutLabel = isDust2
@@ -327,6 +339,8 @@ export class YardBombSystem {
           ? getIndustriaCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
           : isHangar
             ? getHangarCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
+            : isEasternCity
+              ? getEasternCityCalloutForPos(playerPos.x, playerPos.y, playerPos.z)
             : getYardCalloutForPos(playerPos.x, playerPos.y, playerPos.z);
 
     let enemies = 0;

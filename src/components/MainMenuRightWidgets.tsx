@@ -17,6 +17,7 @@ export type MainMenuPlayModeId =
   | 'CASUAL_ASSAULT'
   | 'CASUAL_INDUSTRIA'
   | 'CASUAL_HANGAR'
+  | 'CASUAL_EASTERN_CITY'
   | 'RANKED'
   | 'PRIVATE_ROOM'
   | 'RANGE'
@@ -32,6 +33,7 @@ export const PLAY_MODE_OPTIONS: Array<{
   { id: 'CASUAL_ASSAULT', label: 'CASUAL 5V5 - ASSAULT', arena: 'ASSAULT_BOMB_5V5' },
   { id: 'CASUAL_INDUSTRIA', label: 'CASUAL 5V5 - INDUSTRIA', arena: 'INDUSTRIA_BOMB_5V5' },
   { id: 'CASUAL_HANGAR', label: 'CASUAL 5V5 - HANGAR', arena: 'HANGAR_BOMB_5V5' },
+  { id: 'CASUAL_EASTERN_CITY', label: 'CASUAL 5V5 - EASTERN CITY', arena: 'EASTERN_CITY_BOMB_5V5' },
   { id: 'RANKED', label: 'RANKED 5V5 - DUST2', arena: 'DUST2_BOMB_5V5' },
   { id: 'PRIVATE_ROOM', label: 'SALA PRIVADA - DUST2', arena: 'DUST2_BOMB_5V5' },
   { id: 'RANGE', label: 'ESTANDE DE TIRO' },
