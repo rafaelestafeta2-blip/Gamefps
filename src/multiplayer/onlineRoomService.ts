@@ -2,7 +2,13 @@ import { collection, deleteField, doc, getDoc, getDocs, limit, onSnapshot, query
 import { auth, db, handleFirestoreError, OperationType } from '../firebase/firebaseClient';
 import { getCloudSyncState } from '../firebase/playerCloudSync';
 import { DrillMode, WeaponId } from '../types/game';
-import { publishRoomCombatHit, publishRoomLoadProgress, publishRoomPlayerTransform } from './onlineTelemetryPublisher';
+import {
+  persistRoomMatchMeta,
+  publishRoomCombatHit,
+  publishRoomLoadProgress,
+  publishRoomPlayerTransform,
+  resetCombatNetcodeThrottle,
+} from './onlineTelemetryPublisher';
 import { getTeamSpawnForArena, MatchQueueType, OnlineHitEvent, OnlinePlayerState, OnlineRoomState, OnlineTeam } from './onlineTypes';
 
 type RoomSubscriber = (room: OnlineRoomState | null) => void;
@@ -21,13 +27,18 @@ function emitRoomState(): void {
   roomSubscribers.forEach((fn) => fn(snapshot));
 }
 
-function dispatchHitOnce(hit: OnlineHitEvent): void {
-  if (!hit || !hit.eventId || processedHitIds.has(hit.eventId)) return;
-  processedHitIds.add(hit.eventId);
+function rememberHitEventId(eventId: string): void {
+  if (!eventId) return;
+  processedHitIds.add(eventId);
   if (processedHitIds.size > 250) {
     const first = processedHitIds.values().next().value;
     if (first) processedHitIds.delete(first);
   }
+}
+
+function dispatchHitOnce(hit: OnlineHitEvent): void {
+  if (!hit || !hit.eventId || processedHitIds.has(hit.eventId)) return;
+  rememberHitEventId(hit.eventId);
   hitSubscribers.forEach((fn) => fn(hit));
 }
 
@@ -119,22 +130,51 @@ function connectWebSocketForRoom(room: OnlineRoomState, player: OnlinePlayerStat
           players?: Record<string, OnlinePlayerState>;
           hit?: OnlineHitEvent;
           serverConfirmed?: boolean;
+          bombStatus?: OnlineRoomState['bombStatus'];
+          plantedSite?: OnlineRoomState['plantedSite'];
         };
         if (!activeRoom) return;
         if (msg.type === 'PLAYER_STATE' && msg.player?.uid) {
           activeRoom.players[msg.player.uid] = msg.player;
-          emitRoomState();
+          // Transform packets are high-frequency — skip React lobby subscribers
+          // during PLAYING; combat loop reads activeRoom directly.
+          if (activeRoom.status !== 'PLAYING') emitRoomState();
         } else if (msg.type === 'ROOM_SYNC_META' && msg.players) {
           activeRoom.players = { ...activeRoom.players, ...msg.players };
           if (msg.status) activeRoom.status = msg.status;
           emitRoomState();
         } else if (msg.type === 'COMBAT_HIT' && msg.hit) {
-          dispatchHitOnce(msg.hit);
+          const hit = msg.hit;
+          // Skip room mutation + gameplay if we already applied this hit locally
+          // (WebSocket echo back to the attacker).
+          if (!processedHitIds.has(hit.eventId)) {
+            const victim = activeRoom.players[hit.targetUid];
+            if (victim && !victim.isDown) {
+              const nextHp = Math.max(0, victim.health - hit.damage);
+              victim.health = nextHp;
+              victim.isDown = hit.lethal || nextHp <= 0;
+              if (hit.lethal) {
+                victim.deaths = (victim.deaths || 0) + 1;
+                const atk = activeRoom.players[hit.attackerUid];
+                if (atk) {
+                  atk.kills = (atk.kills || 0) + 1;
+                  if (hit.isHeadshot) atk.headshots = (atk.headshots || 0) + 1;
+                }
+              }
+            }
+            activeRoom.lastHitEvent = hit;
+          }
+          dispatchHitOnce(hit);
+        } else if (msg.type === 'BOMB_EVENT') {
+          if (msg.bombStatus) activeRoom.bombStatus = msg.bombStatus;
+          if (msg.plantedSite) activeRoom.plantedSite = msg.plantedSite;
+          activeRoom.updatedAtMs = Date.now();
         } else if (msg.type === 'SERVER_MATCH_READY' && msg.serverConfirmed) {
           if (msg.roomId) activeRoom.roomId = msg.roomId;
           if (msg.arenaMode) activeRoom.arenaMode = msg.arenaMode;
           if (msg.players) activeRoom.players = msg.players;
           activeRoom.status = 'PLAYING';
+          resetCombatNetcodeThrottle();
           emitRoomState();
           void startMatchInActiveRoom(true);
         }
@@ -193,6 +233,7 @@ export async function createMultiplayerRoom(
   };
 
   activeRoom = newRoom;
+  resetCombatNetcodeThrottle();
   connectWebSocketForRoom(newRoom, localPlayer);
   emitRoomState();
 
@@ -311,6 +352,7 @@ export async function startMatchInActiveRoom(serverConfirmed = false): Promise<b
   });
   activeRoom.players = resetPlayers;
   activeRoom.status = 'PLAYING';
+  resetCombatNetcodeThrottle();
   emitRoomState();
   if (auth.currentUser) {
     try {
@@ -323,23 +365,55 @@ export async function startMatchInActiveRoom(serverConfirmed = false): Promise<b
 }
 
 export function publishLocalLoadProgress(progressPct: number, isLoaded: boolean): void {
-  publishRoomLoadProgress(activeRoom, wsClient, emitRoomState, progressPct, isLoaded);
+  publishRoomLoadProgress(
+    activeRoom,
+    wsClient,
+    emitRoomState,
+    progressPct,
+    isLoaded,
+    getEffectiveLocalUid()
+  );
 }
 
 export function publishLocalPlayerTransform(params: {
   x: number; y: number; z: number; yaw: number; pitch: number;
   weaponId: WeaponId; health: number; isDown: boolean; isCrouching: boolean; isFiring: boolean;
 }): void {
-  publishRoomPlayerTransform(activeRoom, wsClient, params);
+  publishRoomPlayerTransform(activeRoom, wsClient, params, getEffectiveLocalUid());
 }
 
 export function publishCombatHit(targetUid: string, damage: number, isHeadshot: boolean, weaponId: WeaponId): void {
-  publishRoomCombatHit(activeRoom, wsClient, targetUid, damage, isHeadshot, weaponId);
+  const hit = publishRoomCombatHit(
+    activeRoom,
+    wsClient,
+    targetUid,
+    damage,
+    isHeadshot,
+    weaponId,
+    getEffectiveLocalUid()
+  );
+  // Prevent WS echo from double-applying damage/score on the attacker client.
+  if (hit?.eventId) rememberHitEventId(hit.eventId);
 }
 
 export function publishBombStateChange(bombStatus: 'CARRIED' | 'PLANTED' | 'DEFUSED' | 'DETONATED', plantedSite: 'NONE' | 'A' | 'B'): void {
   if (!activeRoom) return;
-  void updateDoc(doc(db, 'rooms', activeRoom.roomId), { bombStatus, plantedSite, updatedAtMs: Date.now() }).catch(() => {});
+  activeRoom.bombStatus = bombStatus;
+  activeRoom.plantedSite = plantedSite;
+  activeRoom.updatedAtMs = Date.now();
+  // Prefer WS for bomb events; Firestore only for durable meta.
+  if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+    wsClient.send(
+      JSON.stringify({
+        type: 'BOMB_EVENT',
+        roomId: activeRoom.roomId,
+        bombStatus,
+        plantedSite,
+        ts: Date.now(),
+      })
+    );
+  }
+  persistRoomMatchMeta(activeRoom);
 }
 
 export async function leaveActiveRoom(): Promise<void> {
@@ -357,6 +431,7 @@ export async function leaveActiveRoom(): Promise<void> {
   const user = auth.currentUser;
   const prevRoom = activeRoom;
   activeRoom = null;
+  resetCombatNetcodeThrottle();
   emitRoomState();
 
   if (user && prevRoom) {

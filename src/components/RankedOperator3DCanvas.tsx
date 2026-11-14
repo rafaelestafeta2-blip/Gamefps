@@ -12,6 +12,10 @@ import {
   createBotThirdPersonWeaponMesh,
   preloadRealBotWeaponGlbs,
 } from '../three/botWeaponProps';
+import {
+  createSecondaryWebGLRenderer,
+  disposeSecondaryWebGLRenderer,
+} from '../three/webglContextGuard';
 import { WeaponId } from '../types/game';
 import { WarfaceClassId } from './WarfaceClassIcons';
 
@@ -77,7 +81,7 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
     camera.position.set(0, 0.98, isBlackthorn ? 3.12 : 3.18);
     camera.lookAt(0, 0.90, 0);
 
-    const renderer = new THREE.WebGLRenderer({
+    const renderer = createSecondaryWebGLRenderer({
       antialias: !isSoftwareGl,
       alpha: true,
       powerPreference: 'high-performance',
@@ -85,7 +89,7 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = isBlackthorn ? 1.32 : 1.28;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(width, height);
     renderer.setClearColor(0x000000, 0);
 
@@ -366,7 +370,7 @@ export const RankedOperator3DCanvas: React.FC<RankedOperator3DCanvasProps> = ({
       ringMat.dispose();
       innerDiscGeo.dispose();
       innerDiscMat.dispose();
-      renderer.dispose();
+      disposeSecondaryWebGLRenderer(renderer);
     };
   }, [team]);
 

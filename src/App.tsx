@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useRef, useState } from 'react';
 import { applyAudioSettings, initAudioSystem } from './audio/audioSettings';
 import { AuthLoginScreen } from './components/AuthLoginScreen';
 import { GameShellModals } from './components/GameShellModals';
@@ -142,7 +142,12 @@ export default function App() {
     const container = canvasMountRef.current;
     if (!container) return;
 
-    const engine = new TacticalFPSEngine(container, (nextHud) => setHud(nextHud));
+    // HUD bridge already dirty-checks; startTransition keeps React from blocking the rAF loop.
+    const engine = new TacticalFPSEngine(container, (nextHud) => {
+      startTransition(() => {
+        setHud(nextHud);
+      });
+    });
     engineRef.current = engine;
     const initialLoadout = getClassCombatModifiers();
     if (initialLoadout.primaryWeapon) {

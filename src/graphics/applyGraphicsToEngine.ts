@@ -30,6 +30,8 @@ interface InternalEngineAccess {
 interface EngineGraphicsCache {
   lastShadowQuality: ShadowQuality | null;
   lastAcesToneMapping: boolean | null;
+  lastTextureQuality: GameSettings['textures'] | null;
+  lastAnisotropy: number | null;
   cachedEnvironmentTex: THREE.Texture | null;
 }
 
@@ -72,6 +74,8 @@ export function applyGraphicsToEngine(
     cache = {
       lastShadowQuality: null,
       lastAcesToneMapping: null,
+      lastTextureQuality: null,
+      lastAnisotropy: null,
       cachedEnvironmentTex: scene.environment || null,
     };
     engineCacheMap.set(rawEngine, cache);
@@ -279,6 +283,17 @@ export function applyGraphicsToEngine(
   }
   const targetAnisotropy = Math.min(desiredAniso, hwMaxAnisotropy);
   const isLowTextures = settings.textures === 'LOW';
+  const texturesChanged =
+    cache.lastTextureQuality !== settings.textures ||
+    cache.lastAnisotropy !== targetAnisotropy;
+
+  // Skip full scene material walk unless tone/shadow/texture settings actually changed.
+  if (!forceAllMaterialsNeedsUpdate && !texturesChanged) {
+    return;
+  }
+
+  cache.lastTextureQuality = settings.textures;
+  cache.lastAnisotropy = targetAnisotropy;
 
   scene.traverse((obj) => {
     if (!(obj as THREE.Mesh).isMesh) return;

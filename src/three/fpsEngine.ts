@@ -111,6 +111,14 @@ import {
   hideAllBotsForOnlineMatch,
   syncOnlineMatchFrame,
 } from './onlineMatchSync';
+import {
+  createDrsRuntimeState,
+  DrsRuntimeState,
+  updateDynamicResolutionGovernor,
+} from './dynamicResolutionGovernor';
+import { emitHudIfChanged, HudRadarCacheEntry } from './hudBridge';
+import { clearSharedMaterialCache } from './scenePerfOptimizer';
+import { disposeAllSecondaryWebGLRenderers } from './webglContextGuard';
 
 // Pre-allocated math helpers outside the frame loop (Zero GC)
 const _resolvedHoriz = { x: 0, z: 0 };
@@ -168,12 +176,16 @@ export class TacticalFPSEngine {
   private elapsedTime = 0;
   private hitstopTimer = 0;
   private hudSyncTimer = 0;
-  private drsAccumTime = 0;
-  private drsFrameCount = 0;
-  private currentRenderScale = 1.0;
-  private drsLowFpsStreak = 0;
-  private drsHighFpsStreak = 0;
-  private drsCooldownSec = 0;
+  private drsState: DrsRuntimeState = createDrsRuntimeState(1.0);
+  /** Mirrored for applyGraphicsToEngine / legacy field access. */
+  private get currentRenderScale(): number {
+    return this.drsState.currentRenderScale;
+  }
+  private set currentRenderScale(value: number) {
+    this.drsState.currentRenderScale = value;
+  }
+  private hudFingerprint = { value: '' };
+  private hudForceEmit = { value: true };
   private aimRaycastTimer = 0;
   private aimRaycastInitialized = false;
   private cachedAimHits: THREE.Intersection[] = [];
@@ -251,14 +263,7 @@ export class TacticalFPSEngine {
 
   private primaryWeapon: WeaponId = 'M4_CARBINE';
   private secondaryWeapon: WeaponId = 'P50_PISTOL';
-  private cachedRadarTargets: Array<{
-    id: string;
-    sector: 'RANGE' | 'KILLHOUSE';
-    x: number;
-    z: number;
-    isDown: boolean;
-    isAlly?: boolean;
-  }> = [];
+  private cachedRadarTargets: HudRadarCacheEntry[] = [];
 
   // Public HUD state mirror (All players start with M4_CARBINE as primary and P50_PISTOL as secondary)
   public state: HudState = {
@@ -664,14 +669,17 @@ export class TacticalFPSEngine {
     if (mode) {
       this.state.drillMode = mode;
     }
+    // Free menu/inspection WebGL contexts so the match owns the GPU.
+    disposeAllSecondaryWebGLRenderers();
     this.resetScenario(this.state.drillMode);
     this.state.screen = 'PLAYING';
+    this.hudForceEmit.value = true;
     this.startLoop();
     if (this.state.gyroMode !== 'OFF') {
       void this.enableGyroSensor();
     }
     this.requestPointerLock();
-    this.emitHud();
+    this.emitHud(true);
   }
 
   public resumeGame(): void {
@@ -731,6 +739,7 @@ export class TacticalFPSEngine {
 
   public setScreenState(screen: GameScreenState): void {
     this.state.screen = screen;
+    this.hudForceEmit.value = true;
     if (screen === 'INTRO' || screen === 'LOADING' || screen === 'AUTH_LOGIN') {
       this.stopLoop();
     } else {
@@ -1728,67 +1737,13 @@ export class TacticalFPSEngine {
   }
 
   private updateDynamicResolutionGovernor(rawDt: number): void {
-    if (this.drsCooldownSec > 0) {
-      this.drsCooldownSec = Math.max(0, this.drsCooldownSec - rawDt);
-    }
-
-    this.drsAccumTime += rawDt;
-    this.drsFrameCount += 1;
-
-    if (this.drsAccumTime < 0.48) return;
-
-    const avgFps = this.drsFrameCount / this.drsAccumTime;
-    this.state.liveFps = Math.min(120, Math.round(avgFps));
-    this.drsAccumTime = 0;
-    this.drsFrameCount = 0;
-
-    if (this.isSoftwareGl || !this.state.dynamicResolutionEnabled) return;
-
-    if (this.drsCooldownSec > 0) {
-      this.drsLowFpsStreak = 0;
-      this.drsHighFpsStreak = 0;
-      return;
-    }
-
-    const maxDpr = Math.min(window.devicePixelRatio || 1, 2.0);
-    const targetCeiling =
-      this.state.qualityPreset === 'COMPETITIVE_120'
-        ? Math.min(maxDpr, 1.05)
-        : this.state.qualityPreset === 'BALANCED_60'
-          ? Math.min(maxDpr, 1.4)
-          : maxDpr;
-
-    if (avgFps < 48) {
-      this.drsLowFpsStreak += 1;
-      this.drsHighFpsStreak = 0;
-    } else if (avgFps >= 58) {
-      this.drsHighFpsStreak += 1;
-      this.drsLowFpsStreak = 0;
-    } else {
-      this.drsLowFpsStreak = 0;
-      this.drsHighFpsStreak = 0;
-    }
-
-    let nextScale = this.currentRenderScale;
-    if (this.drsLowFpsStreak >= 2 && this.currentRenderScale > 0.65) {
-      nextScale = Math.max(0.65, this.currentRenderScale - 0.08);
-    } else if (
-      this.drsHighFpsStreak >= 6 &&
-      this.currentRenderScale < targetCeiling
-    ) {
-      nextScale = Math.min(targetCeiling, this.currentRenderScale + 0.08);
-    }
-
-    if (Math.abs(nextScale - this.currentRenderScale) >= 0.01) {
-      this.currentRenderScale = nextScale;
-      this.renderer.setPixelRatio(this.currentRenderScale);
-      this.state.renderScalePercent = Math.round(
-        (this.currentRenderScale / maxDpr) * 100
-      );
-      this.drsLowFpsStreak = 0;
-      this.drsHighFpsStreak = 0;
-      this.drsCooldownSec = 4.0;
-    }
+    updateDynamicResolutionGovernor(
+      this.drsState,
+      this.state,
+      this.renderer,
+      rawDt,
+      { isSoftwareGl: this.isSoftwareGl }
+    );
   }
 
   public resetScenario(mode: DrillMode, keepMatchScore = false): void {
@@ -4707,40 +4662,27 @@ export class TacticalFPSEngine {
     }
   }
 
-  private emitHud(): void {
-    if (this.cachedRadarTargets.length !== this.targets.length) {
-      this.cachedRadarTargets = this.targets.map((t) => ({
-        id: t.id,
-        sector: t.sector,
-        x: t.root.position.x,
-        z: t.root.position.z,
-        isDown: t.isDown,
-        isAlly: (t as YardBotEntity).isAlly,
-      }));
-    } else {
-      for (let i = 0; i < this.targets.length; i++) {
-        const t = this.targets[i];
-        const c = this.cachedRadarTargets[i];
-        c.x = t.root.position.x;
-        c.z = t.root.position.z;
-        c.isDown = t.isDown;
-        c.isAlly = (t as YardBotEntity).isAlly;
-      }
-    }
-
-    this.state.playerPos.x = this.playerPos.x;
-    this.state.playerPos.y = this.playerPos.y;
-    this.state.playerPos.z = this.playerPos.z;
-    this.state.playerYaw = this.yaw;
-
-    this.onHudUpdate({
-      ...this.state,
-      primaryWeapon: this.primaryWeapon,
-      secondaryWeapon: 'P50_PISTOL',
-      playerPos: this.state.playerPos,
-      playerYaw: this.yaw,
-      radarTargets: this.cachedRadarTargets,
-    });
+  private emitHud(force = false): void {
+    if (force) this.hudForceEmit.value = true;
+    emitHudIfChanged(
+      {
+        state: this.state,
+        primaryWeapon: this.primaryWeapon,
+        playerPos: this.playerPos,
+        yaw: this.yaw,
+        targets: this.targets as Array<{
+          id: string;
+          sector: 'RANGE' | 'KILLHOUSE';
+          root: { position: { x: number; z: number } };
+          isDown: boolean;
+          isAlly?: boolean;
+        }>,
+        cachedRadarTargets: this.cachedRadarTargets,
+        lastFingerprint: this.hudFingerprint,
+        forceNext: this.hudForceEmit,
+      },
+      this.onHudUpdate
+    );
   }
 
   public dispose(): void {
@@ -4820,6 +4762,8 @@ export class TacticalFPSEngine {
         }
       }
     });
+
+    clearSharedMaterialCache();
 
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode) {

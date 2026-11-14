@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ColliderBox, TacticalTargetEntity } from './levelBuilder';
 import { YardTextureSet } from './yardMapData';
+import { buildInstancedFromTransforms } from './scenePerfOptimizer';
 
 import { WeaponId } from '../types/game';
 
@@ -29,16 +30,50 @@ export function addYardPowerLinesAndPoles(
     [0.5, -24.0],
   ];
 
+  const poleGeo = new THREE.CylinderGeometry(0.11, 0.14, 7.6, 10);
+  const armGeo = new THREE.BoxGeometry(1.4, 0.1, 0.1);
+  const poleTransforms = poleCoords.map(([px, pz]) => ({
+    position: new THREE.Vector3(px, 3.8, pz),
+  }));
+  const armTransforms = poleCoords.map(([px, pz]) => ({
+    position: new THREE.Vector3(px, 7.1, pz),
+  }));
+
+  const polesInstanced = buildInstancedFromTransforms(
+    poleGeo,
+    matWoodPole,
+    poleTransforms,
+    !isSoftwareGl
+  );
+  const armsInstanced = buildInstancedFromTransforms(
+    armGeo,
+    matCrossArm,
+    armTransforms,
+    false
+  );
+
+  if (polesInstanced) {
+    levelGroup.add(polesInstanced);
+  } else {
+    poleCoords.forEach(([px, pz]) => {
+      const pole = new THREE.Mesh(poleGeo, matWoodPole);
+      pole.position.set(px, 3.8, pz);
+      pole.castShadow = !isSoftwareGl;
+      levelGroup.add(pole);
+    });
+  }
+
+  if (armsInstanced) {
+    levelGroup.add(armsInstanced);
+  } else {
+    poleCoords.forEach(([px, pz]) => {
+      const crossArm = new THREE.Mesh(armGeo, matCrossArm);
+      crossArm.position.set(px, 7.1, pz);
+      levelGroup.add(crossArm);
+    });
+  }
+
   poleCoords.forEach(([px, pz]) => {
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 7.6, 10), matWoodPole);
-    pole.position.set(px, 3.8, pz);
-    pole.castShadow = !isSoftwareGl;
-    levelGroup.add(pole);
-
-    const crossArm = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.1, 0.1), matCrossArm);
-    crossArm.position.set(px, 7.1, pz);
-    levelGroup.add(crossArm);
-
     colliders.push({
       minX: px - 0.18, maxX: px + 0.18,
       minY: 0, maxY: 7.5,
@@ -88,11 +123,28 @@ export function addGreenShopRooftopDetails(
   barrelLid.position.set(3.5, roofY + 0.79, 28.6);
   levelGroup.add(barrelLid);
 
-  // 2. Wooden Fence Backdrop behind clothesline
-  for (let x = 3.2; x <= 8.8; x += 0.38) {
-    const slat = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.55, 0.06), matWoodFence);
-    slat.position.set(x, roofY + 0.78, 27.6);
-    levelGroup.add(slat);
+  // 2. Wooden Fence Backdrop behind clothesline (InstancedMesh — 1 draw call)
+  {
+    const slatGeo = new THREE.BoxGeometry(0.22, 1.55, 0.06);
+    const slatTransforms: Array<{ position: THREE.Vector3 }> = [];
+    for (let x = 3.2; x <= 8.8; x += 0.38) {
+      slatTransforms.push({ position: new THREE.Vector3(x, roofY + 0.78, 27.6) });
+    }
+    const fenceInstanced = buildInstancedFromTransforms(
+      slatGeo,
+      matWoodFence,
+      slatTransforms,
+      false
+    );
+    if (fenceInstanced) {
+      levelGroup.add(fenceInstanced);
+    } else {
+      slatTransforms.forEach((t) => {
+        const slat = new THREE.Mesh(slatGeo, matWoodFence);
+        slat.position.copy(t.position);
+        levelGroup.add(slat);
+      });
+    }
   }
 
   // 3. Hanging Colorful Laundry on Clothesline (red, white, blue, pink garments!)
