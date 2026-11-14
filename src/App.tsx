@@ -146,10 +146,30 @@ export default function App() {
 
     // HUD bridge dirty-checks. Screen changes MUST be synchronous — deferring
     // PLAYING with startTransition caused a one-frame MAIN_MENU flash after loading.
+    // Weapon/grenade equip must also be sync — startTransition made grenade taps feel lagged.
     const hudScreenRef = { current: 'INTRO' as string };
+    const hudInteractionRef = {
+      equippedGrenade: null as string | null,
+      isThrowingGrenade: false,
+      activeWeapon: '' as string,
+    };
     const engine = new TacticalFPSEngine(container, (nextHud) => {
       if (nextHud.screen !== hudScreenRef.current) {
         hudScreenRef.current = nextHud.screen;
+        hudInteractionRef.equippedGrenade = nextHud.equippedGrenade;
+        hudInteractionRef.isThrowingGrenade = nextHud.isThrowingGrenade;
+        hudInteractionRef.activeWeapon = nextHud.activeWeapon;
+        setHud(nextHud);
+        return;
+      }
+      const interactionChanged =
+        nextHud.equippedGrenade !== hudInteractionRef.equippedGrenade ||
+        nextHud.isThrowingGrenade !== hudInteractionRef.isThrowingGrenade ||
+        nextHud.activeWeapon !== hudInteractionRef.activeWeapon;
+      if (interactionChanged) {
+        hudInteractionRef.equippedGrenade = nextHud.equippedGrenade;
+        hudInteractionRef.isThrowingGrenade = nextHud.isThrowingGrenade;
+        hudInteractionRef.activeWeapon = nextHud.activeWeapon;
         setHud(nextHud);
         return;
       }

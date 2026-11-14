@@ -42,6 +42,10 @@ export interface BotNavData {
   lastKeypadDigit: number;
   visionRange: number;
   fieldOfView: number;
+  /** Continuous LOS time on current target before bots may fire (fairness). */
+  acquireTimer: number;
+  /** Seconds left to hold a flank / reposition goal. */
+  flankTimer: number;
 }
 
 export interface TacticalMapRoutes {
@@ -185,12 +189,21 @@ export function checkBotLineOfSight(
   if (dist < 0.001) return true;
   _losDir.multiplyScalar(1 / dist);
 
+  // Dust2/Assault: until triangle collider is ready, refuse long "wallbang" sightlines.
+  if (activeGlbCollider && !activeGlbCollider.ready) {
+    return dist < 5.5;
+  }
+
   if (activeGlbCollider && activeGlbCollider.ready) {
     const hitDist = activeGlbCollider.raycastDistance(from, _losDir, Math.max(0.2, dist - 0.35));
     if (hitDist !== null) return false;
   }
 
-  if (!colliders || colliders.length === 0) return true;
+  if (!colliders || colliders.length === 0) {
+    // No box colliders and no GLB hit → only trust short open-air LOS (Yard props missing).
+    if (!activeGlbCollider) return dist < 8.0;
+    return true;
+  }
 
   const invX = 1 / (to.x - from.x || 0.000001);
   const invY = 1 / (to.y - from.y || 0.000001);

@@ -1349,47 +1349,46 @@ export class TacticalFPSEngine {
         this.state.reloadTypeLabel =
           'SEM GRANADAS DE FRAGMENTAÇÃO — REABASTEÇA NO BOTÃO [+]';
         this.magCheckTimer = 1.5;
-        this.emitHud();
+        this.emitHud(true);
         return;
       }
-      this.state.reloadTypeLabel =
-        'GRANADA FRAG NA MÃO — MIRE ONDE JOGAR E APERTE ATIRAR PARA TIRAR O PINO!';
+      this.state.reloadTypeLabel = 'FRAG PRONTA — ATIRE PARA JOGAR';
     } else {
       if (this.state.smokeGrenades <= 0) {
         soundEngine.playMechanicalSwitch(0.75);
         this.state.reloadTypeLabel =
           'SEM GRANADAS DE FUMAÇA (SMOKE) — REABASTEÇA NO BOTÃO [+]';
         this.magCheckTimer = 1.5;
-        this.emitHud();
+        this.emitHud(true);
         return;
       }
-      this.state.reloadTypeLabel =
-        'GRANADA SMOKE NA MÃO — MIRE ONDE JOGAR E APERTE ATIRAR PARA TIRAR O PINO!';
+      this.state.reloadTypeLabel = 'SMOKE PRONTA — ATIRE PARA JOGAR';
     }
 
+    // Instant feedback first (haptic + state), then light equip — avoid HUD/startTransition hitch.
     this.lastGrenadeEquipTime = performance.now();
     this.state.isAds = false;
     this.state.reloadPhase = 'IDLE';
     this.state.equippedGrenade = type;
-    this.magCheckTimer = 3.5;
+    this.magCheckTimer = 1.6;
+    mobileHardware.vibratePinPull();
     this.grenadeSystem.equipInHand(type);
-    this.emitHud();
+    this.emitHud(true);
   }
 
   public useEquippedGrenade(): void {
     if (this.state.screen !== 'PLAYING') return;
     if (!this.state.equippedGrenade || this.grenadeSystem.isThrowing()) return;
-    if (performance.now() - this.lastGrenadeEquipTime < 100) return;
+    // Was 100ms — felt like lag on second tap / fire-to-throw.
+    if (performance.now() - this.lastGrenadeEquipTime < 40) return;
 
     const type = this.state.equippedGrenade;
     if (this.grenadeSystem.triggerPinPullAndThrow()) {
       this.state.isThrowingGrenade = true;
       this.state.reloadTypeLabel =
-        type === 'FRAG'
-          ? 'TIRANDO O PINO E ARREMESSANDO GRANADA DE FRAGMENTAÇÃO!'
-          : 'TIRANDO O PINO E LANÇANDO GRANADA DE FUMAÇA (SMOKE)!';
-      this.magCheckTimer = 1.8;
-      this.emitHud();
+        type === 'FRAG' ? 'ARREMESSANDO FRAG!' : 'LANÇANDO SMOKE!';
+      this.magCheckTimer = 1.2;
+      this.emitHud(true);
     }
   }
 

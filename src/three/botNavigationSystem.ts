@@ -27,7 +27,11 @@ let globalBotGrenadeCooldown = 14.0;
 
 function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): BotNavData {
   const existing = bot.root.userData?.navData as BotNavData | undefined;
-  if (existing && existing.waypoints && existing.waypoints.length > 0) return existing;
+  if (existing && existing.waypoints && existing.waypoints.length > 0) {
+    if (existing.acquireTimer == null) existing.acquireTimer = 0;
+    if (existing.flankTimer == null) existing.flankTimer = 0;
+    return existing;
+  }
 
   const routes = getMapRoutes(mode);
   const laneChoice = index % 3;
@@ -43,7 +47,8 @@ function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): Bo
     coverTimer: 0, peekTimer: 0, coverSide: Math.random() > 0.5 ? 1 : -1,
     strafeTimer: 0, strafeDir: Math.random() > 0.5 ? 1 : -1, stuckTimer: 0,
     avoidAngle: 0, avoidTimer: 0, verticalVel: 0, plantOrDefuseTimer: 0, lastKeypadDigit: -1,
-    visionRange: 44.0, fieldOfView: 145.0,
+    visionRange: 40.0, fieldOfView: 130.0,
+    acquireTimer: 0, flankTimer: 0,
   };
   bot.root.userData = bot.root.userData || {};
   bot.root.userData.navData = navData;
@@ -111,7 +116,11 @@ export function updateSmartBotNavigation(
     let visibleEnemyBot: YardBotEntity | null = null;
     let isVisibleTargetPlayer = false;
     let nearestDist = nav.visionRange;
-    const activeFov = nav.chaseTimer > 0 || nav.tacticalState === 'COMBAT' || isC4Planted ? 360 : nav.fieldOfView;
+    // Was 360 when alerted → aimbot feel / deaths from off-screen. Wider when chasing, not omniscient.
+    const activeFov =
+      nav.chaseTimer > 0 || nav.tacticalState === 'COMBAT' || nav.tacticalState === 'PEEK' || isC4Planted
+        ? 200
+        : nav.fieldOfView;
 
     if (!bot.isAlly && playerAlive) {
       const distToPlayer = bPos.distanceTo(playerPos);
@@ -122,7 +131,7 @@ export function updateSmartBotNavigation(
           visibleEnemyPos = playerPos;
           isVisibleTargetPlayer = true;
           nav.lockedTargetId = 'PLAYER';
-          nav.chaseTimer = 24.0;
+          nav.chaseTimer = 18.0;
           nav.lastKnownPos = playerPos.clone();
         }
       }
@@ -215,13 +224,26 @@ export function updateSmartBotNavigation(
       if (!inCoverCycle && nav.tacticalState !== 'COMBAT' && bot.isAlly) {
         triggerTacticalRadioCallout('ENEMY_SPOTTED');
       }
-      if (!inCoverCycle) nav.tacticalState = 'COMBAT';
+      // First contact → often drop into cover instead of open strafe.
+      if (!inCoverCycle && nav.tacticalState !== 'COMBAT') {
+        if (Math.random() < 0.55) {
+          nav.tacticalState = 'COVER';
+          nav.coverTimer = 0.7 + Math.random() * 0.9;
+          nav.coverSide = Math.random() > 0.5 ? 1 : -1;
+        } else {
+          nav.tacticalState = 'COMBAT';
+        }
+      } else if (!inCoverCycle) {
+        nav.tacticalState = 'COMBAT';
+      }
       bot.isTelegraphing = true;
       lockLookAtTarget = visibleEnemyPos;
+      nav.acquireTimer = (nav.acquireTimer || 0) + dt;
     } else if (chasedTargetPos) {
       nav.tacticalState = 'INVESTIGATE';
       bot.isTelegraphing = true;
       lockLookAtTarget = chasedTargetPos;
+      nav.acquireTimer = 0;
     } else if (isBombMode && bot.isAlly) {
       const distSiteA = Math.hypot(bPos.x - routes.siteA.x, bPos.z - routes.siteA.z);
       const distSiteB = Math.hypot(bPos.x - routes.siteB.x, bPos.z - routes.siteB.z);
@@ -256,6 +278,11 @@ export function updateSmartBotNavigation(
     } else {
       nav.tacticalState = 'PATROL';
       bot.isTelegraphing = false;
+      nav.acquireTimer = 0;
+    }
+
+    if (!visibleEnemyPos) {
+      nav.acquireTimer = 0;
     }
 
     // 3. Seleção de Alvo de Movimento e Velocidade
@@ -297,25 +324,32 @@ export function updateSmartBotNavigation(
       const isSniperBot = bot.weaponId === 'SNIPER_BOLT' || bot.weaponId === 'SNIPER_TACTICAL';
       const idealDist = isSniperBot ? 15.0 : 4.6;
 
-      // Cover / peek cadence: hold offset, then lean out to shoot.
+      // Cover / peek / flank cadence — COD-mobile style, not endless side-strafe.
       if (nav.coverTimer == null) nav.coverTimer = 0;
       if (nav.peekTimer == null) nav.peekTimer = 0;
+      if (nav.flankTimer == null) nav.flankTimer = 0;
       if (!nav.coverSide) nav.coverSide = Math.random() > 0.5 ? 1 : -1;
-      if (nav.tacticalState === 'COMBAT' && distToEnemy < idealDist + 6) {
-        if (Math.random() < 0.012) {
+      if (nav.tacticalState === 'COMBAT' && distToEnemy < idealDist + 8) {
+        const roll = Math.random();
+        if (roll < 0.028) {
           nav.tacticalState = 'COVER';
-          nav.coverTimer = 0.9 + Math.random() * 1.1;
+          nav.coverTimer = 0.85 + Math.random() * 1.15;
           nav.coverSide = Math.random() > 0.5 ? 1 : -1;
           if (bot.root.userData?.botAnimCtrl) {
             bot.root.userData.botAnimCtrl.crouchStance = true;
           }
+        } else if (roll < 0.04) {
+          // Flank / reposition burst
+          nav.flankTimer = 1.1 + Math.random() * 1.2;
+          nav.strafeDir = Math.random() > 0.5 ? 1 : -1;
         }
       }
+      if (nav.flankTimer > 0) nav.flankTimer -= dt;
       if (nav.tacticalState === 'COVER') {
         nav.coverTimer -= dt;
         if (nav.coverTimer <= 0) {
           nav.tacticalState = 'PEEK';
-          nav.peekTimer = 0.55 + Math.random() * 0.55;
+          nav.peekTimer = 0.45 + Math.random() * 0.55;
           if (bot.root.userData?.botAnimCtrl) {
             bot.root.userData.botAnimCtrl.crouchStance = false;
           }
@@ -323,9 +357,9 @@ export function updateSmartBotNavigation(
       } else if (nav.tacticalState === 'PEEK') {
         nav.peekTimer -= dt;
         if (nav.peekTimer <= 0) {
-          nav.tacticalState = Math.random() < 0.55 ? 'COVER' : 'COMBAT';
+          nav.tacticalState = Math.random() < 0.6 ? 'COVER' : 'COMBAT';
           if (nav.tacticalState === 'COVER') {
-            nav.coverTimer = 0.7 + Math.random() * 1.0;
+            nav.coverTimer = 0.65 + Math.random() * 1.0;
             if (bot.root.userData?.botAnimCtrl) {
               bot.root.userData.botAnimCtrl.crouchStance = true;
             }
@@ -334,7 +368,7 @@ export function updateSmartBotNavigation(
       }
 
       nav.strafeTimer += dt;
-      if (nav.strafeTimer > 2.2) {
+      if (nav.strafeTimer > 1.6) {
         nav.strafeDir *= -1;
         nav.strafeTimer = 0;
       }
@@ -345,36 +379,83 @@ export function updateSmartBotNavigation(
 
       if (nav.tacticalState === 'COVER') {
         const side = nav.coverSide || nav.strafeDir;
+        // Pull back + lateral = "behind cover" relative to enemy, not open dance.
         _combatMoveGoal.set(
-          bPos.x - _navDir.z * side * 2.4 - _navDir.x * 1.1,
+          bPos.x - _navDir.z * side * 2.8 - _navDir.x * 1.6,
           bPos.y,
-          bPos.z + _navDir.x * side * 2.4 - _navDir.z * 1.1
+          bPos.z + _navDir.x * side * 2.8 - _navDir.z * 1.6
         );
         moveTarget = _combatMoveGoal;
-        moveSpeed = 1.6;
+        moveSpeed = 2.05;
       } else if (nav.tacticalState === 'PEEK') {
         const side = nav.coverSide || nav.strafeDir;
         _combatMoveGoal.set(
-          bPos.x - _navDir.z * side * 0.55 + _navDir.x * 0.35,
+          bPos.x - _navDir.z * side * 0.4 + _navDir.x * 0.55,
           bPos.y,
-          bPos.z + _navDir.x * side * 0.55 + _navDir.z * 0.35
+          bPos.z + _navDir.x * side * 0.4 + _navDir.z * 0.55
         );
         moveTarget = _combatMoveGoal;
-        moveSpeed = 2.4;
-      } else if (distToEnemy > idealDist) {
-        const sideX = -_navDir.z * nav.strafeDir * 0.22;
-        const sideZ = _navDir.x * nav.strafeDir * 0.22;
-        _combatMoveGoal.set(visibleEnemyPos.x + sideX * 3.0, bPos.y, visibleEnemyPos.z + sideZ * 3.0);
+        moveSpeed = 2.7;
+      } else if (nav.flankTimer > 0) {
+        const side = nav.strafeDir;
+        const ring = Math.max(idealDist, Math.min(distToEnemy, idealDist + 3.5));
+        _combatMoveGoal.set(
+          visibleEnemyPos.x - _navDir.x * ring - _navDir.z * side * 4.2,
+          bPos.y,
+          visibleEnemyPos.z - _navDir.z * ring + _navDir.x * side * 4.2
+        );
         moveTarget = _combatMoveGoal;
-        moveSpeed = distToEnemy > 10.0 ? 4.25 : 3.7;
+        moveSpeed = 4.4;
+      } else if (distToEnemy > idealDist + 1.2) {
+        // Close the gap with slight lateral bias — chase, don't orbit.
+        const sideX = -_navDir.z * nav.strafeDir * 0.12;
+        const sideZ = _navDir.x * nav.strafeDir * 0.12;
+        _combatMoveGoal.set(
+          visibleEnemyPos.x - _navDir.x * idealDist + sideX * 2.0,
+          bPos.y,
+          visibleEnemyPos.z - _navDir.z * idealDist + sideZ * 2.0
+        );
+        moveTarget = _combatMoveGoal;
+        moveSpeed = distToEnemy > 12.0 ? 4.55 : 3.95;
+      } else if (distToEnemy < idealDist - 1.5) {
+        // Too close → backpedal to cover ring
+        _combatMoveGoal.set(
+          bPos.x - _navDir.x * 2.2 - _navDir.z * nav.strafeDir * 1.2,
+          bPos.y,
+          bPos.z - _navDir.z * 2.2 + _navDir.x * nav.strafeDir * 1.2
+        );
+        moveTarget = _combatMoveGoal;
+        moveSpeed = 2.6;
       } else {
-        _combatMoveGoal.set(bPos.x - _navDir.z * nav.strafeDir * 1.6 + _navDir.x * 0.6, bPos.y, bPos.z + _navDir.x * nav.strafeDir * 1.6 + _navDir.z * 0.6);
+        // At ideal range: micro-adjust toward cover instead of perpetual strafe.
+        if (Math.random() < 0.018) {
+          nav.tacticalState = 'COVER';
+          nav.coverTimer = 0.7 + Math.random() * 0.9;
+        }
+        _combatMoveGoal.set(
+          bPos.x - _navDir.z * nav.strafeDir * 0.9 - _navDir.x * 0.35,
+          bPos.y,
+          bPos.z + _navDir.x * nav.strafeDir * 0.9 - _navDir.z * 0.35
+        );
         moveTarget = _combatMoveGoal;
-        moveSpeed = 2.2;
+        moveSpeed = 1.85;
       }
     } else if (nav.tacticalState === 'INVESTIGATE' && chasedTargetPos) {
-      moveTarget = chasedTargetPos;
-      moveSpeed = 4.35;
+      // Sprint to last known, then fan out if close (search, not freeze).
+      const distLast = Math.hypot(bPos.x - chasedTargetPos.x, bPos.z - chasedTargetPos.z);
+      if (distLast < 2.4) {
+        const a = performance.now() * 0.0015 + i;
+        _combatMoveGoal.set(
+          chasedTargetPos.x + Math.cos(a) * 3.2,
+          bPos.y,
+          chasedTargetPos.z + Math.sin(a) * 3.2
+        );
+        moveTarget = _combatMoveGoal;
+        moveSpeed = 2.8;
+      } else {
+        moveTarget = chasedTargetPos;
+        moveSpeed = 4.55;
+      }
     } else if (nav.waypoints.length > 0) {
       const curWp = nav.waypoints[nav.wpIndex];
       if (Math.hypot(bPos.x - curWp.x, bPos.z - curWp.z) < 2.2) {
@@ -393,36 +474,61 @@ export function updateSmartBotNavigation(
     const weapon = bot.weaponId || 'AK47_RIFLE';
     const isSniper = weapon === 'SNIPER_BOLT' || weapon === 'SNIPER_TACTICAL';
 
-    if (
+    // Fair fire: need clear LOS + short acquire window (no instant off-angle laser).
+    const canFireAtVisible =
       (nav.tacticalState === 'COMBAT' || nav.tacticalState === 'PEEK') &&
-      visibleEnemyPos
-    ) {
+      visibleEnemyPos &&
+      (nav.acquireTimer || 0) >= (isVisibleTargetPlayer ? 0.22 : 0.08);
+
+    if (canFireAtVisible && visibleEnemyPos) {
       if (nav.burstShotsLeft <= 0 && nav.fireCooldown <= 0) {
-        nav.burstShotsLeft = isSniper ? 1 : 3 + Math.floor(Math.random() * 3);
+        nav.burstShotsLeft = isSniper ? 1 : 2 + Math.floor(Math.random() * 3);
         nav.burstShotTimer = 0;
-        nav.fireCooldown = isSniper ? 1.55 + Math.random() * 0.55 : 0.52 + Math.random() * 0.45;
+        nav.fireCooldown = isSniper ? 1.7 + Math.random() * 0.55 : 0.62 + Math.random() * 0.5;
       }
 
       if (nav.burstShotsLeft > 0) {
         nav.burstShotTimer -= dt;
         if (nav.burstShotTimer <= 0) {
           nav.burstShotsLeft -= 1;
-          nav.burstShotTimer = isSniper ? 0.48 : 0.092 + Math.random() * 0.02;
+          nav.burstShotTimer = isSniper ? 0.52 : 0.1 + Math.random() * 0.025;
           triggerBotFireAnimation(bot);
           _botHead.set(bPos.x, bPos.y + 1.45, bPos.z);
-          const spread = isSniper ? 0.08 : 0.25;
-          _targetEye.set(visibleEnemyPos.x + (Math.random() - 0.5) * spread, visibleEnemyPos.y + 1.32 + (Math.random() - 0.5) * 0.16, visibleEnemyPos.z + (Math.random() - 0.5) * spread);
+          const spread = isSniper ? 0.12 : 0.32;
+          _targetEye.set(
+            visibleEnemyPos.x + (Math.random() - 0.5) * spread,
+            visibleEnemyPos.y + 1.32 + (Math.random() - 0.5) * 0.18,
+            visibleEnemyPos.z + (Math.random() - 0.5) * spread
+          );
+
+          // Re-validate LOS at fire time (prevents wallbang if target slipped behind cover).
+          const stillClear = checkBotLineOfSight(
+            _botHead,
+            _targetEye,
+            grenadeSystem,
+            colliders,
+            activeGlbCollider
+          );
+          if (!stillClear) {
+            nav.burstShotsLeft = 0;
+            nav.acquireTimer = 0;
+            continue;
+          }
 
           playSpatialBotGunshot(_botHead, playerPos, playerYaw, weapon, !isVisibleTargetPlayer);
           if (!bot.isAlly) playBulletSnapAndWhizz(_botHead, _targetEye, playerPos, playerYaw);
           fxPool.spawnTracer(_botHead, _targetEye, bot.isAlly ? 0x38bdf8 : 0xef4444);
 
           if (isVisibleTargetPlayer && playerAlive) {
-            if (Math.random() < (isSniper ? 0.62 : 0.38)) {
-              const isHeadshot = Math.random() < 0.22;
-              onDealDamageToPlayer(isSniper ? (isHeadshot ? 85 : 52) : isHeadshot ? 22 : 10, isHeadshot, bot);
+            if (Math.random() < (isSniper ? 0.48 : 0.28)) {
+              const isHeadshot = Math.random() < 0.16;
+              onDealDamageToPlayer(
+                isSniper ? (isHeadshot ? 72 : 42) : isHeadshot ? 18 : 9,
+                isHeadshot,
+                bot
+              );
             }
-          } else if (visibleEnemyBot && !visibleEnemyBot.isDown && Math.random() < (isSniper ? 0.58 : 0.36)) {
+          } else if (visibleEnemyBot && !visibleEnemyBot.isDown && Math.random() < (isSniper ? 0.52 : 0.32)) {
             const isHeadshot = Math.random() < 0.26;
             visibleEnemyBot.health -= isSniper ? (isHeadshot ? 110 : 75) : isHeadshot ? 42 : 22;
             visibleEnemyBot.hitTiltVelocity = -12.0;

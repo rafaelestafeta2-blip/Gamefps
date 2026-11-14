@@ -121,6 +121,7 @@ export class TacticalGrenadeSystem {
   private landingOuterRingMat: THREE.MeshBasicMaterial;
   private landingInnerDiscMat: THREE.MeshBasicMaterial;
   private lastTrajectoryUpdateMs = 0;
+  private lastBoundVmType: GrenadeType | null = null;
 
   // Active World Projectiles, Explosions & Volumetric Smoke Clouds
   private projectiles: ActiveProjectile[] = [];
@@ -796,7 +797,8 @@ export class TacticalGrenadeSystem {
 
     this.heldGrenadeType = type;
     this.holdIdleTime = 0;
-    this.equipCooldownTimer = 0.08;
+    // Near-zero — old 80ms + HUD defer made the tap feel lagged before anything moved.
+    this.equipCooldownTimer = 0.02;
     this.projectileLaunchedInSequence = false;
     this.viewmodelGroup.visible = true;
     this.handRig.grenadeSocket.visible = true;
@@ -805,7 +807,23 @@ export class TacticalGrenadeSystem {
 
     const activeVisual =
       type === 'FRAG' ? this.vmFragVisual : this.vmSmokeVisual;
-    this.bindViewmodelParts(activeVisual);
+    // Cache pin/lever bind — full traverse on every tap was hitching mobile UI.
+    if (this.lastBoundVmType !== type || !this.vmPinMesh || !this.vmLeverMesh) {
+      this.bindViewmodelParts(activeVisual);
+      this.lastBoundVmType = type;
+    } else {
+      if (this.vmPinMesh.userData.restPos) {
+        this.vmPinMesh.position.copy(
+          this.vmPinMesh.userData.restPos as THREE.Vector3
+        );
+      }
+      this.vmPinMesh.visible = true;
+      if (this.vmLeverMesh.userData.restRot) {
+        this.vmLeverMesh.rotation.copy(
+          this.vmLeverMesh.userData.restRot as THREE.Euler
+        );
+      }
+    }
     this.handRig.updateHoldPose(0, 0);
 
     const indicatorColor = type === 'FRAG' ? 0xf97316 : 0x38bdf8;
