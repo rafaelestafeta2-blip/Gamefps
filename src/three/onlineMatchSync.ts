@@ -9,6 +9,10 @@ import {
   getLocalOnlinePlayerState,
   publishLocalPlayerTransform,
 } from '../multiplayer/onlineRoomService';
+import {
+  pushPeerPose,
+  samplePeerPoseForRender,
+} from '../multiplayer/peerSnapshotBuffer';
 import { getTeamSpawnForArena, OnlinePlayerState } from '../multiplayer/onlineTypes';
 
 export interface OnlineMatchSyncContext {
@@ -167,27 +171,49 @@ export function syncOnlineMatchFrame(ctx: OnlineMatchSyncContext): void {
 
     bot.root.visible = true;
 
-    const targetGroundY = ctx.getGroundHeight(remote.x, remote.y, remote.z);
-    const dx = remote.x - bot.root.position.x;
-    const dz = remote.z - bot.root.position.z;
+    // Snapshot buffer: store latest wire pose, render from delayed interp sample (~100ms).
+    pushPeerPose(remote.uid, {
+      x: remote.x,
+      y: remote.y,
+      z: remote.z,
+      yaw: remote.yaw,
+      pitch: remote.pitch,
+      isCrouching: remote.isCrouching,
+      ts: remote.updatedAtMs || Date.now(),
+    });
+    const renderPose =
+      samplePeerPoseForRender(remote.uid, 90) || {
+        x: remote.x,
+        y: remote.y,
+        z: remote.z,
+        yaw: remote.yaw,
+        pitch: remote.pitch,
+        isCrouching: remote.isCrouching,
+        ts: Date.now(),
+      };
+
+    const targetGroundY = ctx.getGroundHeight(renderPose.x, renderPose.y, renderPose.z);
+    const dx = renderPose.x - bot.root.position.x;
+    const dz = renderPose.z - bot.root.position.z;
     const planarDistSq = dx * dx + dz * dz;
 
     if (planarDistSq > 64 || bot.root.position.y < -100) {
-      bot.root.position.set(remote.x, targetGroundY, remote.z);
+      bot.root.position.set(renderPose.x, targetGroundY, renderPose.z);
     } else {
-      const interpAlpha = Math.min(1, ctx.dt * 14);
+      // Slightly snappier than before — buffer already smooths jitter.
+      const interpAlpha = Math.min(1, ctx.dt * 18);
       bot.root.position.x += dx * interpAlpha;
       bot.root.position.z += dz * interpAlpha;
       bot.root.position.y += (targetGroundY - bot.root.position.y) * interpAlpha;
     }
 
-    const targetModelYaw = remote.yaw + Math.PI;
-    bot.root.rotation.y = lerpAngleRadians(bot.root.rotation.y, targetModelYaw, ctx.dt * 15);
+    const targetModelYaw = renderPose.yaw + Math.PI;
+    bot.root.rotation.y = lerpAngleRadians(bot.root.rotation.y, targetModelYaw, ctx.dt * 16);
     bot.root.rotation.x = 0;
     bot.root.rotation.z = 0;
 
     if (bot.root.userData?.botAnimCtrl) {
-      bot.root.userData.botAnimCtrl.crouchStance = remote.isCrouching;
+      bot.root.userData.botAnimCtrl.crouchStance = renderPose.isCrouching;
     }
 
     // Trigger remote gunshot animation & spatial 3D audio

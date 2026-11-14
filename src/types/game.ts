@@ -209,6 +209,7 @@ export interface HudState {
   gyroSensitivity: number;
   lookSensitivity: number;
   adsSensitivity: number;
+  aimAssistStrength: number;
   hapticsEnabled: boolean;
   isFullscreen: boolean;
   graphicQuality: 'HIGH' | 'LOW';

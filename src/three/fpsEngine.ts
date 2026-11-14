@@ -122,6 +122,15 @@ import { disposeAllSecondaryWebGLRenderers } from './webglContextGuard';
 import { CombatRayHit, raycastCombatShot } from './combatRaycast';
 import { attemptFireWeapon as runAttemptFireWeapon, executeSingleShot as runExecuteSingleShot } from './weaponFireSystem';
 import { handleTargetHit as runHandleTargetHit } from './weaponHitSystem';
+import { getWeaponFeel } from '../data/weaponFeel';
+import {
+  configureTacticalPostFx,
+  createTacticalPostFx,
+  disposeTacticalPostFx,
+  renderWithTacticalPostFx,
+  TacticalPostFxState,
+} from '../graphics/tacticalPostFx';
+import { applyAimAssistToLookDelta } from './aimAssist';
 import { applyLookDelta, type LookInputState } from './engineLookInput';
 import {
   configureIntermittentShadows,
@@ -259,6 +268,9 @@ export class TacticalFPSEngine {
   private recoilPitch = 0;
   private recoilYaw = 0;
   private cameraShake = 0;
+  /** Per-weapon recovery multiplier for recoil damp (from weaponFeel). */
+  private weaponFeelRecovery = 1;
+  private postFx: TacticalPostFxState = createTacticalPostFx();
   private boltCycleOffset = 0;
   private muzzleFlashTimer = 0;
   private fireCooldown = 0;
@@ -376,6 +388,7 @@ export class TacticalFPSEngine {
     gyroSensitivity: 1.0,
     lookSensitivity: 1.0,
     adsSensitivity: 1.0,
+    aimAssistStrength: 0.45,
     hapticsEnabled: true,
     isFullscreen: false,
     graphicQuality: 'HIGH',
@@ -674,7 +687,15 @@ export class TacticalFPSEngine {
         playRealPlayerHitGrunt(hit.isHeadshot);
         this.state.health = Math.max(0, this.state.health - hit.damage);
         this.state.damageFlashAlpha = hit.isHeadshot ? 0.95 : 0.75;
-        this.cameraShake = hit.isHeadshot ? 0.024 : 0.012;
+        {
+          const flinch = getWeaponFeel(this.state.activeWeapon).flinchScale;
+          this.cameraShake = (hit.isHeadshot ? 0.024 : 0.012) * flinch;
+          this.pitch = THREE.MathUtils.clamp(
+            this.pitch - (hit.isHeadshot ? 0.018 : 0.01) * flinch,
+            -Math.PI * 0.46,
+            Math.PI * 0.46
+          );
+        }
         if (this.state.health <= 0) {
           this.triggerPlayerDeathSequence(
             hit.isHeadshot,
@@ -1510,7 +1531,42 @@ export class TacticalFPSEngine {
   }
 
   public applyTouchLookDelta(dx: number, dy: number): void {
-    applyLookDelta(this.state, this as unknown as LookInputState, dx, dy);
+    const assistTargets = (this.targets || []).map((t) => ({
+      position: t.root.position,
+      isDown: t.isDown,
+      isAlly: Boolean((t as { isAlly?: boolean }).isAlly),
+    }));
+    const assisted = applyAimAssistToLookDelta(
+      dx,
+      dy,
+      this.camera,
+      assistTargets,
+      this.state.aimAssistStrength || 0,
+      this.state.isAds
+    );
+    applyLookDelta(
+      this.state,
+      this as unknown as LookInputState,
+      assisted.dx,
+      assisted.dy
+    );
+  }
+
+  public setAimAssistStrength(strength: number): void {
+    this.state.aimAssistStrength = THREE.MathUtils.clamp(strength, 0, 1);
+    this.emitHud();
+  }
+
+  public configurePostFx(opts: {
+    enabled: boolean;
+    sharpen?: number;
+    bloom?: number;
+  }): void {
+    configureTacticalPostFx(this.postFx, this.renderer, {
+      enabled: opts.enabled,
+      sharpen: opts.sharpen ?? 0.32,
+      bloom: opts.bloom ?? 0.18,
+    });
   }
 
   public setTouchFireHeld(held: boolean): void {
@@ -2655,7 +2711,17 @@ export class TacticalFPSEngine {
       }
     }
 
-    this.renderer.render(this.scene, this.camera);
+    if (this.postFx.enabled && this.state.screen === 'PLAYING') {
+      renderWithTacticalPostFx(
+        this.postFx,
+        this.renderer,
+        this.scene,
+        this.camera,
+        this.state.damageFlashAlpha || 0
+      );
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
     if (this.isLoopRunning && !this.disposed) {
       this.frameId = requestAnimationFrame(this.tick);
     }
@@ -2982,6 +3048,7 @@ export class TacticalFPSEngine {
 
   public dispose(): void {
     this.disposed = true;
+    disposeTacticalPostFx(this.postFx);
     this.unsubOnlineHits?.();
     this.unsubOnlineHits = null;
     cancelAnimationFrame(this.frameId);

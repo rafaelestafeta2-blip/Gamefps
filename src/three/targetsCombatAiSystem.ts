@@ -143,7 +143,23 @@ export function updateTargetsAndCombatAI(engine: any, dt: number): void {
             playRealPlayerHitGrunt(isHeadshot);
             engine.state.health = Math.max(0, engine.state.health - dmg);
             engine.state.damageFlashAlpha = isHeadshot ? 0.95 : 0.75;
-            engine.cameraShake = isHeadshot ? 0.024 : 0.012;
+            {
+              const flinchMod =
+                engine.state.activeWeapon === 'SNIPER_BOLT' ||
+                engine.state.activeWeapon === 'SNIPER_TACTICAL'
+                  ? 1.25
+                  : engine.state.activeWeapon === 'L49_LMG'
+                    ? 1.15
+                    : 1.0;
+              engine.cameraShake = (isHeadshot ? 0.024 : 0.012) * flinchMod;
+              engine.pitch = Math.max(
+                -Math.PI * 0.46,
+                Math.min(
+                  Math.PI * 0.46,
+                  engine.pitch - (isHeadshot ? 0.018 : 0.01) * flinchMod
+                )
+              );
+            }
 
             if (engine.state.health <= 0) {
               engine.triggerPlayerDeathSequence(

@@ -38,6 +38,8 @@ export interface GameSettings {
   pbrReflections: boolean;
   muzzleLight: boolean;
   acesToneMapping: boolean;
+  /** Sharpen + soft bloom + GPU damage vignette (HIGH/ULTRA only recommended). */
+  tacticalPostFx: boolean;
   fpsLimit: FpsLimit;
   showFpsCounter: boolean;
   batterySaver: boolean;
@@ -241,6 +243,7 @@ export function getDefaultGameSettings(): GameSettings {
   return {
     ...base,
     preset: 'AUTO',
+    tacticalPostFx: cap.tier === 'HIGH' || cap.tier === 'ULTRA',
     showFpsCounter: false,
     batterySaver: false,
     vibration: true,
@@ -307,6 +310,10 @@ export function validateSettings(s: unknown): GameSettings {
       typeof raw.acesToneMapping === 'boolean'
         ? raw.acesToneMapping
         : def.acesToneMapping,
+    tacticalPostFx:
+      typeof raw.tacticalPostFx === 'boolean'
+        ? raw.tacticalPostFx
+        : def.tacticalPostFx,
     fpsLimit: validFps.includes(raw.fpsLimit as FpsLimit)
       ? (raw.fpsLimit as FpsLimit)
       : def.fpsLimit,
@@ -376,6 +383,7 @@ export function applyPreset(
   return {
     ...current,
     ...graphicFields,
+    tacticalPostFx: resolvedTier === 'HIGH' || resolvedTier === 'ULTRA',
     preset,
   };
 }

@@ -78,6 +78,7 @@ export const INITIAL_HUD_STATE: HudState = {
   gyroSensitivity: 1.0,
   lookSensitivity: 1.0,
   adsSensitivity: 1.0,
+  aimAssistStrength: 0.45,
   hapticsEnabled: true,
   isFullscreen: false,
   graphicQuality: 'HIGH',

@@ -5,7 +5,9 @@ import {
   playMaterialImpact3D,
   playShellCasingDrop3D,
 } from '../audio/tacticalImmersionAudio';
+import { getSprayOffset, getWeaponFeel } from '../data/weaponFeel';
 import { mobileHardware } from '../mobile/nativeHardware';
+import { samplePeerPoseAt } from '../multiplayer/peerSnapshotBuffer';
 import { WeaponId } from '../types/game';
 import { alertBotsToPlayerCombat } from './botNavigationSystem';
 import { raycastCombatShot } from './combatRaycast';
@@ -19,6 +21,53 @@ import {
   _worldPos,
   _worldPos2,
 } from './engineMathTemps';
+
+/** Temporarily rewind online peer meshes to attacker-time pose for fairer hit checks. */
+function withRewoundOnlinePeers<T>(engine: any, rewindMs: number, fn: () => T): T {
+  const targets = engine.targets as Array<{
+    root: THREE.Object3D;
+    isDown?: boolean;
+  }> | undefined;
+  if (!targets || targets.length === 0) return fn();
+
+  const restores: Array<{
+    root: THREE.Object3D;
+    x: number;
+    y: number;
+    z: number;
+    ry: number;
+  }> = [];
+  const when = Date.now() - rewindMs;
+
+  for (let i = 0; i < targets.length; i++) {
+    const bot = targets[i];
+    const uid = bot?.root?.userData?.remotePlayerUid as string | undefined;
+    if (!uid || bot.isDown) continue;
+    const pose = samplePeerPoseAt(uid, when);
+    if (!pose) continue;
+    restores.push({
+      root: bot.root,
+      x: bot.root.position.x,
+      y: bot.root.position.y,
+      z: bot.root.position.z,
+      ry: bot.root.rotation.y,
+    });
+    bot.root.position.set(pose.x, pose.y, pose.z);
+    bot.root.rotation.y = pose.yaw + Math.PI;
+    bot.root.updateMatrixWorld(true);
+  }
+
+  try {
+    return fn();
+  } finally {
+    for (let i = 0; i < restores.length; i++) {
+      const r = restores[i];
+      r.root.position.set(r.x, r.y, r.z);
+      r.root.rotation.y = r.ry;
+      r.root.updateMatrixWorld(true);
+    }
+  }
+}
 
 
 /** Extracted from TacticalFPSEngine.attemptFireWeapon — behavior preserved. */
@@ -224,9 +273,11 @@ export function executeSingleShot(engine: any): void {
     if (!engine.state.suppressorAttached) {
       alertBotsToPlayerCombat(engine.targets, engine.playerPos, null);
     }
+    const feel = getWeaponFeel(engine.state.activeWeapon as WeaponId);
     mobileHardware.vibrateGunshot(
       engine.state.suppressorAttached,
-      engine.state.boltLockedBack
+      engine.state.boltLockedBack,
+      feel.hapticMs
     );
 
     // Muzzle flash, GLB embedded fire animation (Fire / Fire_ADS) & bolt carrier kick
@@ -300,107 +351,121 @@ export function executeSingleShot(engine: any): void {
     const stanceMult = engine.state.stance === 'CROUCH' ? 0.72 : 1.0;
     const suppMult = engine.state.suppressorAttached ? 0.82 : 1.0;
     const adsMult = wasScopedAtShot ? 0.55 : 1.0;
-    const shotgunKickMult = isShotgun ? 2.15 : 1.0;
-    const totalMult = stanceMult * suppMult * adsMult * shotgunKickMult;
+    const totalMult = stanceMult * suppMult * adsMult;
+    const sprayIdx = Math.max(0, (engine.state.shotsFired || 1) - 1);
+    const spray = getSprayOffset(engine.state.activeWeapon as WeaponId, sprayIdx);
+    const jitter = 0.15 + Math.random() * 0.2;
 
-    engine.recoilKickZ = Math.min(engine.recoilKickZ + 0.032 * totalMult, 0.088);
-    engine.recoilPitch += (0.012 + Math.random() * 0.004) * totalMult;
-    engine.recoilYaw += (Math.random() - 0.5) * 0.004 * totalMult;
-    engine.cameraShake = Math.min(engine.cameraShake + 0.004 * totalMult, 0.016);
+    engine.recoilKickZ = Math.min(
+      engine.recoilKickZ + feel.kickZ * totalMult,
+      0.092
+    );
+    engine.recoilPitch += (feel.kickPitch + spray.pitch * jitter) * totalMult;
+    engine.recoilYaw += (spray.yaw + (Math.random() - 0.5) * feel.kickYaw) * totalMult;
+    engine.cameraShake = Math.min(
+      engine.cameraShake + feel.shake * totalMult,
+      0.02
+    );
+    engine.weaponFeelRecovery = feel.recovery;
 
     engine.pitch = THREE.MathUtils.clamp(
-      engine.pitch + 0.006 * totalMult,
+      engine.pitch + feel.kickPitch * 0.55 * totalMult,
       -Math.PI * 0.46,
       Math.PI * 0.46
     );
 
-    let wallSelected = false;
-    for (let p = 0; p < pelletCount; p++) {
-      const pDir = _rayDir.copy(baseDir);
-      if (isShotgun) {
-        if (p > 0) {
-          const ang = ((p - 1) / (pelletCount - 1)) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
-          const rad = (0.35 + Math.random() * 0.65) * pelletSpread;
-          pDir.x += Math.cos(ang) * rad;
-          pDir.y += Math.sin(ang) * rad;
-          pDir.z += (Math.random() - 0.5) * rad * 0.35;
-          pDir.normalize();
-        }
-      }
-      engine.raycaster.set(_rayOrigin, pDir);
-      engine.raycaster.far = isShotgun ? 34 : 140;
-
-      const glbCollider =
-        engine.state.drillMode === 'DUST2_BOMB_5V5'
-          ? engine.dust2LevelData.collider
-          : engine.state.drillMode === 'ASSAULT_BOMB_5V5'
-            ? engine.assaultLevelData.collider
-            : null;
-
-      const hit = raycastCombatShot(
-        engine.raycaster,
-        engine.shootableMeshes,
-        glbCollider,
-        engine.combatRayHit
-      );
-
-      if (hit) {
-        const hitMesh = hit.object as THREE.Mesh | null;
-        const dist = hit.distance;
-        _hitNormal.copy(hit.normal);
-
-        if (p < 3) {
-          engine.fxPool.spawnTracer(_worldPos2, hit.point);
-        }
-
-        const wallWeaponId = hitMesh?.userData?.wallWeaponId as
-          | WeaponId
-          | undefined;
-        if (wallWeaponId && !wallSelected) {
-          wallSelected = true;
-          engine.selectWeapon(wallWeaponId);
-          return;
-        }
-
-        const targetId = hitMesh?.userData?.targetId as string | undefined;
-        const hitZone = hitMesh?.userData?.hitZone as
-          | 'HEAD'
-          | 'TORSO_A'
-          | 'ARMOR'
-          | 'STEEL_GONG'
-          | undefined;
-
-        if (targetId && hitZone) {
-          engine.handleTargetHit(
-            targetId,
-            hitZone,
-            dist,
-            hit.point,
-            _hitNormal,
-            isShotgun
-          );
-        } else {
-          const surfMat = hitMesh
-            ? detectSurfaceMaterialFromMesh(hitMesh, hit.point)
-            : 'CONCRETE';
-          engine.fxPool.spawnImpactFX(
-            hit.point,
-            _hitNormal,
-            surfMat === 'METAL',
-            false
-          );
-          if (p === 0) {
-            playMaterialImpact3D(hit.point, _rayOrigin, engine.yaw, surfMat);
-            if (surfMat === 'CONCRETE') {
-              soundEngine.playImpact('CONCRETE');
-            }
+    // ~RTT/2 rewind for online peers so hits register closer to what the attacker saw.
+    withRewoundOnlinePeers(engine, 75, () => {
+      let wallSelected = false;
+      for (let p = 0; p < pelletCount; p++) {
+        const pDir = _rayDir.copy(baseDir);
+        if (isShotgun) {
+          if (p > 0) {
+            const ang =
+              ((p - 1) / (pelletCount - 1)) * Math.PI * 2 +
+              (Math.random() - 0.5) * 0.45;
+            const rad = (0.35 + Math.random() * 0.65) * pelletSpread;
+            pDir.x += Math.cos(ang) * rad;
+            pDir.y += Math.sin(ang) * rad;
+            pDir.z += (Math.random() - 0.5) * rad * 0.35;
+            pDir.normalize();
           }
         }
-      } else if (p < 2) {
-        _worldPos.copy(_rayOrigin).addScaledVector(pDir, isShotgun ? 28 : 80);
-        engine.fxPool.spawnTracer(_worldPos2, _worldPos);
+        engine.raycaster.set(_rayOrigin, pDir);
+        engine.raycaster.far = isShotgun ? 34 : 140;
+
+        const glbCollider =
+          engine.state.drillMode === 'DUST2_BOMB_5V5'
+            ? engine.dust2LevelData.collider
+            : engine.state.drillMode === 'ASSAULT_BOMB_5V5'
+              ? engine.assaultLevelData.collider
+              : null;
+
+        const hit = raycastCombatShot(
+          engine.raycaster,
+          engine.shootableMeshes,
+          glbCollider,
+          engine.combatRayHit
+        );
+
+        if (hit) {
+          const hitMesh = hit.object as THREE.Mesh | null;
+          const dist = hit.distance;
+          _hitNormal.copy(hit.normal);
+
+          if (p < 3) {
+            engine.fxPool.spawnTracer(_worldPos2, hit.point);
+          }
+
+          const wallWeaponId = hitMesh?.userData?.wallWeaponId as
+            | WeaponId
+            | undefined;
+          if (wallWeaponId && !wallSelected) {
+            wallSelected = true;
+            engine.selectWeapon(wallWeaponId);
+            return;
+          }
+
+          const targetId = hitMesh?.userData?.targetId as string | undefined;
+          const hitZone = hitMesh?.userData?.hitZone as
+            | 'HEAD'
+            | 'TORSO_A'
+            | 'ARMOR'
+            | 'STEEL_GONG'
+            | undefined;
+
+          if (targetId && hitZone) {
+            engine.handleTargetHit(
+              targetId,
+              hitZone,
+              dist,
+              hit.point,
+              _hitNormal,
+              isShotgun
+            );
+          } else {
+            const surfMat = hitMesh
+              ? detectSurfaceMaterialFromMesh(hitMesh, hit.point)
+              : 'CONCRETE';
+            engine.fxPool.spawnImpactFX(
+              hit.point,
+              _hitNormal,
+              surfMat === 'METAL',
+              false
+            );
+            if (p === 0) {
+              playMaterialImpact3D(hit.point, _rayOrigin, engine.yaw, surfMat);
+              if (surfMat === 'CONCRETE') {
+                soundEngine.playImpact('CONCRETE');
+              }
+            }
+          }
+        } else if (p < 2) {
+          _worldPos.copy(_rayOrigin).addScaledVector(pDir, isShotgun ? 28 : 80);
+          engine.fxPool.spawnTracer(_worldPos2, _worldPos);
+        }
       }
-    }
+    });
 
     if (engine.burstRemaining > 0) {
       engine.burstRemaining -= 1;

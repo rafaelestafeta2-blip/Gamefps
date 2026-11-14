@@ -10,6 +10,11 @@ import {
   normalizeQueueType,
 } from './src/server/matchmakingEngine';
 import {
+  IncomingHitLike,
+  recordServerPlayerPose,
+  validateCombatHit,
+} from './src/server/combatAuthority';
+import {
   broadcastToRoom,
   evaluateAndConfirmRankedRoomIfFull,
   matchmakingQueue,
@@ -267,6 +272,55 @@ async function startServer(): Promise<void> {
             msg.type === 'ROUND_EVENT' ||
             msg.type === 'MATCH_START')
         ) {
+          if (msg.type === 'PLAYER_STATE') {
+            const uid = String(msg.uid || clientMeta.uid || '');
+            const t = Array.isArray(msg.t) ? msg.t : null;
+            const player = msg.player as
+              | { x?: number; y?: number; z?: number; yaw?: number }
+              | undefined;
+            if (uid && t && t.length >= 4) {
+              recordServerPlayerPose(
+                clientMeta.roomId,
+                uid,
+                Number(t[0]),
+                Number(t[1]),
+                Number(t[2]),
+                Number(t[3])
+              );
+            } else if (uid && player) {
+              recordServerPlayerPose(
+                clientMeta.roomId,
+                uid,
+                Number(player.x || 0),
+                Number(player.y || 0),
+                Number(player.z || 0),
+                Number(player.yaw || 0)
+              );
+            }
+          }
+
+          if (msg.type === 'COMBAT_HIT') {
+            const verdict = validateCombatHit(
+              clientMeta.roomId,
+              clientMeta.uid,
+              (msg.hit || {}) as IncomingHitLike
+            );
+            if (!verdict.ok) return;
+            broadcastToRoom(
+              clientMeta.roomId,
+              {
+                ...msg,
+                hit: verdict.sanitized || msg.hit,
+                roomId: clientMeta.roomId,
+                senderUid: clientMeta.uid,
+                serverValidated: true,
+                ts: Date.now(),
+              },
+              null
+            );
+            return;
+          }
+
           broadcastToRoom(
             clientMeta.roomId,
             {

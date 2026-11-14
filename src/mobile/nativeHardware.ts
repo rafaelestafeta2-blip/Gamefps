@@ -1,5 +1,9 @@
 // Mobile Native Hardware Layer: Haptics, Gyroscope Sensor Fusion & Fullscreen Immersive Landscape Lock
 
+type DeviceOrientationEventCtor = typeof DeviceOrientationEvent & {
+  requestPermission?: () => Promise<'granted' | 'denied' | string>;
+};
+
 export class MobileHardwareManager {
   public hapticsEnabled = true;
   private gyroActive = false;
@@ -8,6 +12,10 @@ export class MobileHardwareManager {
   private filteredDx = 0;
   private filteredDy = 0;
   private onGyroDeltaCallback: ((dx: number, dy: number) => void) | null = null;
+  private orientationHandler: ((ev: DeviceOrientationEvent) => void) | null = null;
+  private capacitorHaptics: { impact: (opts: { style: string }) => Promise<void> } | null =
+    null;
+  private capacitorTried = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -21,27 +29,58 @@ export class MobileHardwareManager {
     }
   }
 
-  // =========================================================================
-  // 1. TACTICAL HAPTIC FEEDBACK (ANDROID NATIVE VIBRATE / CAPACITOR)
-  // =========================================================================
-  private triggerVibrate(pattern: number | number[]): void {
-    if (!this.hapticsEnabled) return;
+  private async ensureCapacitorHaptics(): Promise<void> {
+    if (this.capacitorTried) return;
+    this.capacitorTried = true;
     try {
-      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-        navigator.vibrate(pattern);
+      // Prefer Capacitor plugin registry when the native shell exposes Haptics.
+      const cap = (window as any)?.Capacitor;
+      const plugins = cap?.Plugins;
+      if (plugins?.Haptics?.impact) {
+        this.capacitorHaptics = plugins.Haptics;
+        return;
       }
     } catch {
-      // Ignore if device or browser blocks vibration
+      this.capacitorHaptics = null;
     }
   }
 
-  public vibrateGunshot(suppressed: boolean, boltLockedBack: boolean): void {
+  // =========================================================================
+  // 1. TACTICAL HAPTIC FEEDBACK (CAPACITOR HAPTICS → navigator.vibrate)
+  // =========================================================================
+  private triggerVibrate(pattern: number | number[]): void {
+    if (!this.hapticsEnabled) return;
+    void this.ensureCapacitorHaptics().then(() => {
+      try {
+        if (this.capacitorHaptics && typeof pattern === 'number') {
+          const style = pattern >= 28 ? 'HEAVY' : pattern >= 16 ? 'MEDIUM' : 'LIGHT';
+          void this.capacitorHaptics.impact({ style });
+          return;
+        }
+      } catch {
+        // fall through to vibrate
+      }
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(pattern);
+        }
+      } catch {
+        // Ignore if device or browser blocks vibration
+      }
+    });
+  }
+
+  public vibrateGunshot(
+    suppressed: boolean,
+    boltLockedBack: boolean,
+    weaponHapticMs?: number
+  ): void {
     if (boltLockedBack) {
       this.triggerVibrate([20, 25, 38]);
     } else if (suppressed) {
-      this.triggerVibrate(12);
+      this.triggerVibrate(Math.max(8, Math.round((weaponHapticMs || 16) * 0.55)));
     } else {
-      this.triggerVibrate(19);
+      this.triggerVibrate(weaponHapticMs || 19);
     }
   }
 
@@ -105,19 +144,72 @@ export class MobileHardwareManager {
   }
 
   // =========================================================================
-  // 2. GYROSCOPE DISABLED (TOUCH-ONLY CAMERA & AIM CONTROL)
+  // 2. GYROSCOPE / DEVICE ORIENTATION (landscape aim)
   // =========================================================================
   public async enableGyroscope(
-    _onDelta: (dx: number, dy: number) => void
+    onDelta: (dx: number, dy: number) => void
   ): Promise<boolean> {
     this.disableGyroscope();
-    return false;
+    if (typeof window === 'undefined') return false;
+
+    this.onGyroDeltaCallback = onDelta;
+
+    const DOE = window.DeviceOrientationEvent as DeviceOrientationEventCtor | undefined;
+    try {
+      if (DOE && typeof DOE.requestPermission === 'function') {
+        const perm = await DOE.requestPermission();
+        if (perm !== 'granted') return false;
+      }
+    } catch {
+      // Android / older browsers: no permission API
+    }
+
+    this.orientationHandler = (ev: DeviceOrientationEvent) => {
+      if (!this.gyroActive || !this.onGyroDeltaCallback) return;
+      // Landscape: gamma ≈ pitch tilt, beta ≈ roll/yaw contribution
+      const beta = ev.beta;
+      const gamma = ev.gamma;
+      if (beta == null || gamma == null) return;
+
+      if (this.lastBeta == null || this.lastGamma == null) {
+        this.lastBeta = beta;
+        this.lastGamma = gamma;
+        return;
+      }
+
+      let dBeta = beta - this.lastBeta;
+      let dGamma = gamma - this.lastGamma;
+      this.lastBeta = beta;
+      this.lastGamma = gamma;
+
+      // Ignore huge jumps (orientation flips)
+      if (Math.abs(dBeta) > 25 || Math.abs(dGamma) > 25) return;
+
+      // Map to look deltas (tuned for landscape FPS)
+      const rawDx = dBeta * 2.4;
+      const rawDy = -dGamma * 2.1;
+      this.filteredDx = this.filteredDx * 0.55 + rawDx * 0.45;
+      this.filteredDy = this.filteredDy * 0.55 + rawDy * 0.45;
+
+      if (Math.abs(this.filteredDx) < 0.02 && Math.abs(this.filteredDy) < 0.02) return;
+      this.onGyroDeltaCallback(this.filteredDx, this.filteredDy);
+    };
+
+    window.addEventListener('deviceorientation', this.orientationHandler, true);
+    this.gyroActive = true;
+    return true;
   }
 
   public disableGyroscope(): void {
     this.gyroActive = false;
     this.lastBeta = null;
     this.lastGamma = null;
+    this.filteredDx = 0;
+    this.filteredDy = 0;
+    if (this.orientationHandler && typeof window !== 'undefined') {
+      window.removeEventListener('deviceorientation', this.orientationHandler, true);
+    }
+    this.orientationHandler = null;
     this.onGyroDeltaCallback = null;
   }
 
@@ -133,7 +225,6 @@ export class MobileHardwareManager {
   // =========================================================================
   public async enterFullscreenLandscape(): Promise<boolean> {
     try {
-      // If Android native bridge is exposed, trigger sticky immersive mode
       const win = window as any;
       if (win.AndroidFullScreen && typeof win.AndroidFullScreen.immersiveMode === 'function') {
         win.AndroidFullScreen.immersiveMode();
@@ -142,7 +233,6 @@ export class MobileHardwareManager {
       const docEl = document.documentElement as any;
       if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
         if (docEl.requestFullscreen) {
-          // navigationUI: 'hide' hides Android system navigation bar (<, O, |||) and status bar
           await docEl.requestFullscreen({ navigationUI: 'hide' }).catch(() => {
             return docEl.requestFullscreen().catch(() => {});
           });
@@ -170,14 +260,13 @@ export class MobileHardwareManager {
     try {
       if (!document.fullscreenElement) {
         return await this.enterFullscreenLandscape();
-      } else {
-        if (document.exitFullscreen) {
-          await document.exitFullscreen().catch(() => {});
-        } else if ((document as any).webkitExitFullscreen) {
-          await (document as any).webkitExitFullscreen().catch(() => {});
-        }
-        return false;
       }
+      if (document.exitFullscreen) {
+        await document.exitFullscreen().catch(() => {});
+      } else if ((document as any).webkitExitFullscreen) {
+        await (document as any).webkitExitFullscreen().catch(() => {});
+      }
+      return false;
     } catch {
       return Boolean(document.fullscreenElement);
     }

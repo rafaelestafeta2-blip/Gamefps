@@ -14,6 +14,8 @@ export interface BotNavData {
     | 'FOLLOW_PLAYER'
     | 'INVESTIGATE'
     | 'COMBAT'
+    | 'COVER'
+    | 'PEEK'
     | 'RUSH_PLANTED'
     | 'DEFEND_PLANTED'
     | 'PLANTING'
@@ -27,6 +29,9 @@ export interface BotNavData {
   burstShotTimer: number;
   grenadeCooldown: number;
   grenadesLeft: number;
+  coverTimer: number;
+  peekTimer: number;
+  coverSide: 1 | -1;
   strafeTimer: number;
   strafeDir: number;
   stuckTimer: number;

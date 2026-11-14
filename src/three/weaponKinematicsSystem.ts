@@ -266,9 +266,10 @@ export function updateWeaponKinematicsAndOptics(engine: any, dt: number): void {
       Math.abs(Math.sin(engine.walkBobPhase)) * -0.012 * engine.walkBobAmp * bobScale;
 
     // Recoil decay
-    engine.recoilKickZ = THREE.MathUtils.damp(engine.recoilKickZ, 0, 22, dt);
-    engine.recoilPitch = THREE.MathUtils.damp(engine.recoilPitch, 0, 18, dt);
-    engine.recoilYaw = THREE.MathUtils.damp(engine.recoilYaw, 0, 18, dt);
+    const recovery = typeof engine.weaponFeelRecovery === 'number' ? engine.weaponFeelRecovery : 1;
+    engine.recoilKickZ = THREE.MathUtils.damp(engine.recoilKickZ, 0, 22 * recovery, dt);
+    engine.recoilPitch = THREE.MathUtils.damp(engine.recoilPitch, 0, 18 * recovery, dt);
+    engine.recoilYaw = THREE.MathUtils.damp(engine.recoilYaw, 0, 18 * recovery, dt);
 
     // Sprint / Mag Check / Wall-Tuck / CS2 Hip-Angle Pose Modifiers (smoothly damped to prevent snap jitter)
     const isSprinting = engine.state.stance === 'SPRINT' && engine.state.adsAlpha < 0.2;

@@ -80,6 +80,7 @@ export default function App() {
     engine.setLookSensitivity(next.lookSensitivity);
     engine.setAdsSensitivity(next.adsSensitivity);
     engine.setGyroSensitivity(next.gyroSensitivity);
+    engine.setAimAssistStrength(next.aimAssistStrength ?? 0.45);
     if (!prev || prev.gyroMode !== next.gyroMode) {
       void engine.setGyroMode(next.gyroMode);
     }

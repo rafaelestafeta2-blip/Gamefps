@@ -18,6 +18,11 @@ interface InternalEngineAccess {
     muzzleLight: THREE.PointLight;
   };
   currentRenderScale: number;
+  configurePostFx?: (opts: {
+    enabled: boolean;
+    sharpen?: number;
+    bloom?: number;
+  }) => void;
   state: {
     fpsLimit: number;
     dynamicResolutionEnabled: boolean;
@@ -84,6 +89,20 @@ export function applyGraphicsToEngine(
   // 0. Vibração (Haptics) — Fonte única de verdade
   engine.state.hapticsEnabled = settings.vibration;
   mobileHardware.hapticsEnabled = settings.vibration;
+
+  // Post-FX only on HIGH/ULTRA-ish paths; never with battery saver or 30fps LOW.
+  const postEnabled =
+    settings.tacticalPostFx &&
+    !settings.batterySaver &&
+    settings.fpsLimit !== 30 &&
+    settings.resolution !== 'SCALE_50';
+  if (typeof engine.configurePostFx === 'function') {
+    engine.configurePostFx({
+      enabled: postEnabled,
+      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.4 : 0.28,
+      bloom: settings.muzzleLight ? 0.2 : 0.12,
+    });
+  }
 
   // Economia de bateria força fpsLimit 30, sombras no máximo LOW e muzzleLight desligada
   const effectiveFpsLimit = settings.batterySaver ? 30 : settings.fpsLimit;

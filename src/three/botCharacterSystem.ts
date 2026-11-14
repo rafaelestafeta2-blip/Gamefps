@@ -557,7 +557,12 @@ export function triggerBotFireAnimation(bot: TacticalTargetEntity): void {
   const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
   if (!ctrl || bot.isDown) return;
   ctrl.fireAnimTimer = 0.18;
-  if (ctrl.currentState === 'RIFLE_IDLE' || ctrl.currentState === 'RIFLE_AIM') {
+  // Allow fire interrupt while locomoting / peeking — not only idle/aim.
+  if (
+    ctrl.currentState !== 'RIFLE_DEATH' &&
+    ctrl.currentState !== 'RIFLE_THROW' &&
+    ctrl.currentState !== 'RIFLE_FIRE'
+  ) {
     transitionBotAnim(ctrl, 'RIFLE_FIRE', 0.04);
   }
 }
@@ -573,7 +578,7 @@ export function triggerBotHitAnimation(bot: TacticalTargetEntity): void {
   const ctrl = bot.root.userData?.botAnimCtrl as BotAnimController | undefined;
   if (!ctrl || bot.isDown) return;
   ctrl.hitReactTimer = 0.22;
-  if (ctrl.currentState === 'RIFLE_IDLE' || ctrl.currentState === 'RIFLE_AIM') {
+  if (ctrl.currentState !== 'RIFLE_DEATH' && ctrl.currentState !== 'RIFLE_HIT') {
     transitionBotAnim(ctrl, 'RIFLE_HIT', 0.04);
   }
 }
