@@ -261,5 +261,9 @@ export async function loadStanderTiroMapGeometry(
   });
 
   bundle.glbRoot.add(gltfScene);
+  gltfScene.updateMatrixWorld(true);
+  gltfScene.traverse((obj) => {
+    obj.matrixAutoUpdate = false;
+  });
   bundle.isLoaded = true;
 }

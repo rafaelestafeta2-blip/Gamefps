@@ -1,7 +1,10 @@
+import { Capacitor } from '@capacitor/core';
 import {
+  getRedirectResult,
   GoogleAuthProvider,
   signInWithCredential,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
 } from 'firebase/auth';
 import { auth, firebaseConfig, googleProvider } from './firebaseClient';
@@ -18,7 +21,55 @@ declare global {
 
 export interface GoogleSignInResult {
   ok: boolean;
+  pendingRedirect?: boolean;
   error?: string;
+}
+
+function friendlyAuthError(err: unknown): string {
+  const code =
+    err && typeof err === 'object' && 'code' in err
+      ? String((err as { code?: string }).code || '')
+      : '';
+  const msg = err instanceof Error ? err.message : String(err);
+  const host = typeof location !== 'undefined' ? location.host : '';
+
+  if (code === 'auth/popup-closed-by-user' || msg.includes('popup-closed')) {
+    return 'Janela de login do Google foi fechada.';
+  }
+  if (code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request') {
+    return 'O navegador bloqueou a janela do Google.';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    return `O Firebase bloqueou o login neste endereço (${host}). Abra o jogo pelo app ou pelo domínio publicado.`;
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Sem rede para falar com o Google. Verifique a conexão e tente de novo.';
+  }
+  if (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/missing-or-invalid-nonce' ||
+    code === 'auth/user-disabled'
+  ) {
+    return 'O Google devolveu um token que o Firebase não aceitou. Tente de novo.';
+  }
+  if (code === 'auth/operation-not-supported-in-this-environment') {
+    return 'Este navegador não abre o popup do Google. Tentando entrar na mesma página.';
+  }
+  if (code) return `Falha no login Google (${code}).`;
+  return 'Não foi possível concluir o login com Google. Faça login com uma conta válida.';
+}
+
+function shouldPreferRedirect(err: unknown): boolean {
+  const code =
+    err && typeof err === 'object' && 'code' in err
+      ? String((err as { code?: string }).code || '')
+      : '';
+  return (
+    code === 'auth/popup-blocked' ||
+    code === 'auth/operation-not-supported-in-this-environment' ||
+    code === 'auth/web-storage-unsupported' ||
+    code === 'auth/cancelled-popup-request'
+  );
 }
 
 function buildNativeGoogleOAuthUrl(): string {
@@ -102,10 +153,11 @@ export async function performGoogleSignIn(): Promise<GoogleSignInResult> {
             return;
           }
 
-          const credential = GoogleAuthProvider.credential(
-            idToken || null,
-            accessToken || null
-          );
+          // O id_token deste fluxo traz um nonce que o Firebase não emitiu e
+          // rejeita com auth/invalid-credential. O access_token entra direto.
+          const credential = accessToken
+            ? GoogleAuthProvider.credential(null, accessToken)
+            : GoogleAuthProvider.credential(idToken);
           await signInWithCredential(auth, credential);
           finish({ ok: true });
         } catch (err) {
@@ -128,15 +180,39 @@ export async function performGoogleSignIn(): Promise<GoogleSignInResult> {
     });
   }
 
+  const nativeShell = Capacitor.isNativePlatform();
+  if (nativeShell) {
+    return {
+      ok: false,
+      error:
+        'O login nativo do app não iniciou. Feche o jogo, abra de novo e tente Entrar com Google.',
+    };
+  }
+
   try {
     await signInWithPopup(auth, googleProvider);
     return { ok: true };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const friendlyError = msg.includes('popup-closed')
-      ? 'Janela de login do Google foi fechada.'
-      : 'Não foi possível concluir o login com Google. Faça login com uma conta válida.';
-    return { ok: false, error: friendlyError };
+    if (!shouldPreferRedirect(err)) {
+      return { ok: false, error: friendlyAuthError(err) };
+    }
+    try {
+      await signInWithRedirect(auth, googleProvider);
+      return { ok: false, pendingRedirect: true };
+    } catch (redirectErr) {
+      return { ok: false, error: friendlyAuthError(redirectErr) };
+    }
+  }
+}
+
+/** Completa o login depois que o Google devolve o usuário para o jogo. */
+export async function completePendingGoogleRedirect(): Promise<GoogleSignInResult | null> {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result?.user) return { ok: true };
+    return null;
+  } catch (err) {
+    return { ok: false, error: friendlyAuthError(err) };
   }
 }
 

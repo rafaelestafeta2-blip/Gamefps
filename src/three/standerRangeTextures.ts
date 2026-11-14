@@ -247,7 +247,6 @@ export function applyDarkTacticalMaterialsToStanderGlb(
       const nextMat = new THREE.MeshLambertMaterial({
         name: matName,
         map: src.map || null,
-        normalMap: src.normalMap || null,
         color: src.map
           ? new THREE.Color(0xffffff)
           : src.color

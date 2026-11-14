@@ -174,6 +174,9 @@ export async function loadAssaultMapGeometry(
 
     bundle.levelGroup.add(mapTransformGroup);
     bundle.levelGroup.updateMatrixWorld(true);
+    mapTransformGroup.traverse((obj) => {
+      obj.matrixAutoUpdate = false;
+    });
     bundle.mapGeometryGroup = mapTransformGroup;
 
     openAssaultDoorsAndVents(mapTransformGroup, bundle.levelGroup);

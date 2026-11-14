@@ -70,6 +70,7 @@ export class Dust2TriangleCollider {
 
     rootGroup.traverse((child) => {
       if (!(child instanceof THREE.Mesh) || !child.geometry) return;
+      if (!child.visible) return;
       if (child.userData.targetId || child.userData.ignoreCollider) return;
 
       const geom = child.geometry as THREE.BufferGeometry;
