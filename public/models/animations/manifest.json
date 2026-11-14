@@ -45,5 +45,16 @@
     "braced_hang_to_crouch.fbx",
     "kneeling_down.fbx",
     "kneeling_inspecting.fbx"
-  ]
+  ],
+  "picup": {
+    "source": "Gamesfps@0c909a1d/Anima\u00e7ao/Picup",
+    "files": [
+      "picking_up_object.fbx",
+      "putting_down.fbx",
+      "standing_torch_hold.fbx"
+    ],
+    "ignored": [
+      "Gd"
+    ]
+  }
 }

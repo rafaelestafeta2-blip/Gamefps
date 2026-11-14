@@ -27,7 +27,10 @@ export type AnimPackKey =
   | 'PISTOL_STRAFE_R'
   | 'PISTOL_CROUCH'
   | 'PISTOL_STAND_TO_KNEEL'
-  | 'PISTOL_KNEEL_TO_STAND';
+  | 'PISTOL_KNEEL_TO_STAND'
+  | 'KIT_PICKUP'
+  | 'KIT_HOLD'
+  | 'KIT_PUT_DOWN';
 
 type FileSpec = { url: string; key: AnimPackKey };
 
@@ -66,6 +69,13 @@ const SINGLES: FileSpec[] = [
   { url: `${BASE}/singles/administering_cpr.fbx`, key: 'CPR' },
   { url: `${BASE}/singles/kneeling_down.fbx`, key: 'KNEEL_DOWN' },
   { url: `${BASE}/singles/kneeling_inspecting.fbx`, key: 'KNEEL_INSPECT' },
+];
+
+/** Gamesfps Animaçao/Picup — class kit pick / hold / put-down. */
+const PICUP: FileSpec[] = [
+  { url: `${BASE}/picup/picking_up_object.fbx`, key: 'KIT_PICKUP' },
+  { url: `${BASE}/picup/standing_torch_hold.fbx`, key: 'KIT_HOLD' },
+  { url: `${BASE}/picup/putting_down.fbx`, key: 'KIT_PUT_DOWN' },
 ];
 
 function normalizeMixamoClip(clip: THREE.AnimationClip, forceName: string): THREE.AnimationClip {
@@ -109,7 +119,7 @@ export function preloadMixamoAnimPack(
   packPromise = (async () => {
     const loader = new FBXLoader(loadingManager);
     const out = new Map<AnimPackKey, THREE.AnimationClip>();
-    const all = [...BASIC_SHOOTER, ...PISTOL, ...SINGLES];
+    const all = [...BASIC_SHOOTER, ...PISTOL, ...SINGLES, ...PICUP];
 
     // Load with concurrency limit to avoid mobile stall
     const CONCURRENCY = 4;
@@ -246,6 +256,38 @@ export function getMantleClip(): THREE.AnimationClip | null {
 
 export function getCprClip(): THREE.AnimationClip | null {
   return packCache?.get('CPR') ?? null;
+}
+
+export function getKitPickupClip(): THREE.AnimationClip | null {
+  return packCache?.get('KIT_PICKUP') ?? null;
+}
+
+export function getKitHoldClip(): THREE.AnimationClip | null {
+  return packCache?.get('KIT_HOLD') ?? null;
+}
+
+export function getKitPutDownClip(): THREE.AnimationClip | null {
+  return packCache?.get('KIT_PUT_DOWN') ?? null;
+}
+
+/**
+ * Gameplay-clamped timings for 1P kit present sequence
+ * (pick up → hold → put down / apply).
+ */
+export function getKitUseTimings(): {
+  pickup: number;
+  hold: number;
+  putDown: number;
+  total: number;
+} {
+  const pickupRaw = getKitPickupClip()?.duration ?? 0.75;
+  const holdRaw = getKitHoldClip()?.duration ?? 1.2;
+  const putRaw = getKitPutDownClip()?.duration ?? 0.9;
+  // Keep support snappy vs full Mixamo lengths (torch idle is often long).
+  const pickup = THREE.MathUtils.clamp(pickupRaw, 0.45, 0.9);
+  const hold = THREE.MathUtils.clamp(Math.min(holdRaw, 0.85), 0.35, 0.85);
+  const putDown = THREE.MathUtils.clamp(putRaw, 0.5, 1.1);
+  return { pickup, hold, putDown, total: pickup + hold + putDown };
 }
 
 export function getAnimPackStatus(): {
