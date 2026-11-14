@@ -1,9 +1,37 @@
 import * as THREE from 'three';
 import { DrillMode } from '../types/game';
+import {
+  BakedNavMesh,
+  ensureBakedNavMesh,
+  findBakedMeshPath,
+} from './botNavMeshBake';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { TacticalGrenadeSystem } from './grenadeSystem';
 import { ColliderBox } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
+
+/** Active collision-baked mesh for this frame (set by bot AI update). */
+let _activeBakedMesh: BakedNavMesh | null = null;
+
+export function setActiveBotNavMesh(
+  mode: DrillMode,
+  activeGlbCollider?: Dust2TriangleCollider | null,
+  colliders?: ColliderBox[]
+): BakedNavMesh | null {
+  const routes = getMapRoutes(mode);
+  const seeds = [
+    ...routes.vgA,
+    ...routes.vgB,
+    ...routes.vgMid,
+    ...routes.btA,
+    ...routes.btB,
+    ...routes.btMid,
+    routes.siteA,
+    routes.siteB,
+  ];
+  _activeBakedMesh = ensureBakedNavMesh(mode, seeds, activeGlbCollider, colliders);
+  return _activeBakedMesh;
+}
 
 export type SquadFlankRole = 'HOLD' | 'LEFT' | 'RIGHT' | 'PRESS';
 
@@ -62,6 +90,9 @@ export interface BotNavData {
   pathIndex: number;
   pathGoalKey: string;
   pathRefreshTimer: number;
+  /** Collision-baked navmesh world waypoints (preferred over lane graph). */
+  meshPath: THREE.Vector3[];
+  meshPathIndex: number;
   /** Squad-assigned flank role for coordinated pushes. */
   squadRole: SquadFlankRole;
   /** Human peek: delay after leaving cover before first shot (swing-out). */
@@ -70,6 +101,12 @@ export interface BotNavData {
   peekPrefireTimer: number;
   /** Jiggle peek (expose briefly, no commit burst). */
   isJigglePeek: boolean;
+  /** Burst recoil (climbs while firing, recovers after). */
+  aimRecoil: number;
+  /** Persistent aim drift offsets (meters at target). */
+  aimDriftX: number;
+  aimDriftY: number;
+  aimDriftZ: number;
 }
 
 export interface TacticalMapRoutes {
@@ -295,8 +332,7 @@ function goalKey(goal: THREE.Vector3): string {
 }
 
 /**
- * Follow an A* path on the tactical waypoint graph.
- * Falls back to greedy lane pick if the graph is empty.
+ * Follow collision-baked navmesh when available; else lane waypoint A*.
  */
 export function followNavPath(
   nav: BotNavData,
@@ -309,30 +345,62 @@ export function followNavPath(
   if (distToGoal <= 3.2) {
     nav.pathNodeIds = [];
     nav.pathIndex = 0;
+    nav.meshPath = [];
+    nav.meshPathIndex = 0;
     return goal;
   }
+
+  if (!nav.meshPath) nav.meshPath = [];
+  if (nav.meshPathIndex == null) nav.meshPathIndex = 0;
 
   const key = goalKey(goal);
   const needsBuild =
     forceRepath ||
-    nav.pathNodeIds.length === 0 ||
     nav.pathGoalKey !== key ||
-    (nav.pathRefreshTimer || 0) <= 0;
+    (nav.pathRefreshTimer || 0) <= 0 ||
+    (nav.meshPath.length === 0 && nav.pathNodeIds.length === 0);
 
   if (needsBuild) {
-    nav.pathNodeIds = findNavPathIds(mode, botPos, goal);
-    nav.pathIndex = 0;
     nav.pathGoalKey = key;
     nav.pathRefreshTimer = 1.8 + Math.random() * 0.7;
+    nav.meshPathIndex = 0;
+    nav.pathIndex = 0;
+    // Prefer real collision-baked mesh path.
+    if (_activeBakedMesh) {
+      nav.meshPath = findBakedMeshPath(_activeBakedMesh, botPos, goal);
+      nav.pathNodeIds = [];
+    } else {
+      nav.meshPath = [];
+    }
+    if (nav.meshPath.length === 0) {
+      nav.pathNodeIds = findNavPathIds(mode, botPos, goal);
+    }
   }
 
+  // 1) Collision mesh path
+  if (nav.meshPath.length > 0) {
+    while (nav.meshPathIndex < nav.meshPath.length) {
+      const node = nav.meshPath[nav.meshPathIndex];
+      if (!node) break;
+      if (distXZ(botPos, node) < 1.85) {
+        nav.meshPathIndex += 1;
+        continue;
+      }
+      break;
+    }
+    if (nav.meshPathIndex < nav.meshPath.length) {
+      return nav.meshPath[nav.meshPathIndex];
+    }
+    return goal;
+  }
+
+  // 2) Lane waypoint graph fallback
   const graph = getMapNavGraph(mode);
   const path = nav.pathNodeIds;
   if (path.length === 0) {
     return pickApproachWaypointFallback(botPos, goal, mode, false, 8.5, forceRepath);
   }
 
-  // Advance along nodes as we arrive.
   while (nav.pathIndex < path.length) {
     const node = graph.nodes[path[nav.pathIndex]];
     if (!node) break;
@@ -402,6 +470,8 @@ export function pickApproachWaypoint(
     if (nav) {
       nav.pathNodeIds = [];
       nav.pathIndex = 0;
+      nav.meshPath = [];
+      nav.meshPathIndex = 0;
     }
     return goal;
   }
@@ -429,6 +499,10 @@ export function getWaypointTowardPlantedSite(
 ): THREE.Vector3 {
   const routes = getMapRoutes(mode);
   const sitePos = plantedSite === 'A' ? routes.siteA : routes.siteB;
+  if (_activeBakedMesh) {
+    const meshPath = findBakedMeshPath(_activeBakedMesh, botPos, sitePos);
+    if (meshPath.length > 0) return meshPath[0];
+  }
   const path = findNavPathIds(mode, botPos, sitePos);
   const graph = getMapNavGraph(mode);
   for (let i = 0; i < path.length; i++) {

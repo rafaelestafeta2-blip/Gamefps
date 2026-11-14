@@ -21,6 +21,7 @@ import {
   isTargetInFieldOfView,
   moveBotWithPhysics,
   pickApproachWaypoint,
+  setActiveBotNavMesh,
   setLastKnownPos,
   SquadFlankRole,
 } from './botNavigationRoutes';
@@ -40,6 +41,7 @@ const _escortGoal = new THREE.Vector3();
 const _guardGoal = new THREE.Vector3();
 const _throwDir = new THREE.Vector3();
 const _flankScratch = new THREE.Vector3();
+const _aimPoint = new THREE.Vector3();
 
 let globalBotGrenadeCooldown = 14.0;
 
@@ -64,10 +66,16 @@ function ensureNavExtras(nav: BotNavData): void {
   if (nav.pathIndex == null) nav.pathIndex = 0;
   if (nav.pathGoalKey == null) nav.pathGoalKey = '';
   if (nav.pathRefreshTimer == null) nav.pathRefreshTimer = 0;
+  if (!nav.meshPath) nav.meshPath = [];
+  if (nav.meshPathIndex == null) nav.meshPathIndex = 0;
   if (!nav.squadRole) nav.squadRole = 'HOLD';
   if (nav.peekPrefireDelay == null) nav.peekPrefireDelay = 0.18;
   if (nav.peekPrefireTimer == null) nav.peekPrefireTimer = 0;
   if (nav.isJigglePeek == null) nav.isJigglePeek = false;
+  if (nav.aimRecoil == null) nav.aimRecoil = 0;
+  if (nav.aimDriftX == null) nav.aimDriftX = 0;
+  if (nav.aimDriftY == null) nav.aimDriftY = 0;
+  if (nav.aimDriftZ == null) nav.aimDriftZ = 0;
 }
 
 /**
@@ -157,10 +165,12 @@ function getOrInitBotNav(bot: YardBotEntity, mode: DrillMode, index: number): Bo
     visionRange: 40.0, fieldOfView: 130.0,
     acquireTimer: 0, flankTimer: 0, heardAlertTimer: 0,
     pathNodeIds: [], pathIndex: 0, pathGoalKey: '', pathRefreshTimer: 0,
+    meshPath: [], meshPathIndex: 0,
     squadRole: laneChoice === 0 ? 'LEFT' : laneChoice === 1 ? 'RIGHT' : 'HOLD',
     peekPrefireDelay: 0.14 + Math.random() * 0.16,
     peekPrefireTimer: 0,
     isJigglePeek: false,
+    aimRecoil: 0, aimDriftX: 0, aimDriftY: 0, aimDriftZ: 0,
   };
   bot.root.userData = bot.root.userData || {};
   bot.root.userData.navData = navData;
@@ -248,6 +258,9 @@ export function updateSmartBotNavigation(
 
   globalBotGrenadeCooldown = Math.max(0, globalBotGrenadeCooldown - dt);
 
+  // Bake / refresh collision navmesh (GLB triangle floors or box colliders).
+  setActiveBotNavMesh(mode, activeGlbCollider, colliders);
+
   // Warm nav + squad roles once per frame (shared flank plan for each team).
   const nowSec = performance.now() * 0.001;
   for (let i = 0; i < bots.length; i++) {
@@ -269,6 +282,15 @@ export function updateSmartBotNavigation(
     nav.heardAlertTimer = Math.max(0, (nav.heardAlertTimer || 0) - dt);
     nav.pathRefreshTimer = Math.max(0, (nav.pathRefreshTimer || 0) - dt);
     nav.peekPrefireTimer = Math.max(0, (nav.peekPrefireTimer || 0) - dt);
+    // Recoil recovery between shots / after burst.
+    if ((nav.burstShotsLeft || 0) <= 0) {
+      nav.aimRecoil = Math.max(0, (nav.aimRecoil || 0) - dt * 2.35);
+      nav.aimDriftX = THREE.MathUtils.damp(nav.aimDriftX || 0, 0, 3.2, dt);
+      nav.aimDriftY = THREE.MathUtils.damp(nav.aimDriftY || 0, 0, 3.2, dt);
+      nav.aimDriftZ = THREE.MathUtils.damp(nav.aimDriftZ || 0, 0, 3.2, dt);
+    } else {
+      nav.aimRecoil = Math.max(0, (nav.aimRecoil || 0) - dt * 0.55);
+    }
 
     const bPos = bot.root.position;
     _botHead.set(bPos.x, bPos.y + 1.45, bPos.z);
@@ -713,7 +735,7 @@ export function updateSmartBotNavigation(
       moveSpeed = 0;
     }
 
-    // Long closes: always prefer A* corridor path over combat beelines.
+    // Long closes: always prefer collision-mesh / corridor path over beelines.
     if (
       visibleEnemyPos &&
       (nav.tacticalState === 'COMBAT' || nav.tacticalState === 'COVER') &&
@@ -733,7 +755,22 @@ export function updateSmartBotNavigation(
       }
     }
 
-    moveBotWithPhysics(bot, nav, moveTarget, moveSpeed, dt, colliders, activeGlbCollider, lockLookAtTarget);
+    // Soft look: track drifted aim during fights instead of perfect center lock.
+    let lookAt = lockLookAtTarget;
+    if (
+      lookAt &&
+      visibleEnemyPos &&
+      (nav.tacticalState === 'COMBAT' || nav.tacticalState === 'PEEK')
+    ) {
+      _aimPoint.set(
+        visibleEnemyPos.x + (nav.aimDriftX || 0) * 0.55,
+        visibleEnemyPos.y + 1.12 + (nav.aimDriftY || 0) * 0.45,
+        visibleEnemyPos.z + (nav.aimDriftZ || 0) * 0.55
+      );
+      lookAt = _aimPoint;
+    }
+
+    moveBotWithPhysics(bot, nav, moveTarget, moveSpeed, dt, colliders, activeGlbCollider, lookAt);
 
     const weapon = bot.weaponId || 'AK47_RIFLE';
     const isSniper = weapon === 'SNIPER_BOLT' || weapon === 'SNIPER_TACTICAL';
@@ -755,31 +792,56 @@ export function updateSmartBotNavigation(
 
     if (canFireAtVisible && visibleEnemyPos && !isBotReloading(bot)) {
       if (nav.burstShotsLeft <= 0 && nav.fireCooldown <= 0) {
-        nav.burstShotsLeft = isSniper ? 1 : 2 + Math.floor(Math.random() * 3);
+        // Shorter controlled bursts — less laser hose.
+        nav.burstShotsLeft = isSniper ? 1 : 1 + Math.floor(Math.random() * 3);
         nav.burstShotTimer = 0;
-        nav.fireCooldown = isSniper ? 1.7 + Math.random() * 0.55 : 0.62 + Math.random() * 0.5;
+        nav.fireCooldown = isSniper
+          ? 1.85 + Math.random() * 0.65
+          : 0.72 + Math.random() * 0.55 + (nav.aimRecoil || 0) * 0.25;
       }
 
       if (nav.burstShotsLeft > 0) {
         nav.burstShotTimer -= dt;
         if (nav.burstShotTimer <= 0) {
           nav.burstShotsLeft -= 1;
-          nav.burstShotTimer = isSniper ? 0.52 : 0.1 + Math.random() * 0.025;
-          // Empty mag starts RIFLE_RELOAD_3P inside triggerBotFireAnimation.
+          nav.burstShotTimer = isSniper ? 0.55 : 0.11 + Math.random() * 0.04;
           triggerBotFireAnimation(bot);
           if (isBotReloading(bot)) {
             nav.burstShotsLeft = 0;
             continue;
           }
           _botHead.set(bPos.x, bPos.y + 1.45, bPos.z);
-          const spread = isSniper ? 0.12 : 0.32;
-          _targetEye.set(
-            visibleEnemyPos.x + (Math.random() - 0.5) * spread,
-            visibleEnemyPos.y + 1.32 + (Math.random() - 0.5) * 0.18,
-            visibleEnemyPos.z + (Math.random() - 0.5) * spread
-          );
 
-          // Re-validate LOS at fire time (prevents wallbang if target slipped behind cover).
+          // Humanized aim: torso bias, recoil climb, controlled miss, drift recovery.
+          const acquireFrac = Math.min(1, (nav.acquireTimer || 0) / 0.55);
+          const recoil = nav.aimRecoil || 0;
+          const baseSpread = isSniper ? 0.22 : 0.48;
+          const recoilSpread = baseSpread * (0.65 + recoil * 1.85);
+          const firstShotMiss =
+            acquireFrac < 0.55 ? 0.55 + Math.random() * 0.55 : 0.18 + Math.random() * 0.28;
+          const intentionalMiss = Math.random() < (isSniper ? 0.22 : 0.34) * (1.15 - acquireFrac * 0.5);
+          const missMul = intentionalMiss ? firstShotMiss * (1.4 + Math.random() * 1.1) : 1;
+          // Body center (not head laser); occasional limb/foot miss.
+          let bodyY = intentionalMiss && Math.random() < 0.35
+            ? 0.35 + Math.random() * 0.45
+            : 0.95 + Math.random() * 0.38;
+          if (!intentionalMiss && Math.random() < 0.12) bodyY = 1.38; // rare head try
+          nav.aimDriftX =
+            (nav.aimDriftX || 0) * 0.72 + (Math.random() - 0.5) * recoilSpread * missMul;
+          nav.aimDriftY =
+            (nav.aimDriftY || 0) * 0.65 + (Math.random() - 0.5) * recoilSpread * 0.45 * missMul;
+          nav.aimDriftZ =
+            (nav.aimDriftZ || 0) * 0.72 + (Math.random() - 0.5) * recoilSpread * missMul;
+          nav.aimRecoil = Math.min(1.25, recoil + (isSniper ? 0.62 : 0.2 + Math.random() * 0.08));
+
+          _targetEye.set(
+            visibleEnemyPos.x + (nav.aimDriftX || 0),
+            visibleEnemyPos.y + bodyY + (nav.aimDriftY || 0),
+            visibleEnemyPos.z + (nav.aimDriftZ || 0)
+          );
+          // Face the drifted aim point — not perfect lock on center mass.
+          _aimPoint.copy(_targetEye);
+
           const stillClear = checkBotLineOfSight(
             _botHead,
             _targetEye,
@@ -797,17 +859,25 @@ export function updateSmartBotNavigation(
           if (!bot.isAlly) playBulletSnapAndWhizz(_botHead, _targetEye, playerPos, playerYaw);
           fxPool.spawnTracer(_botHead, _targetEye, bot.isAlly ? 0x38bdf8 : 0xef4444);
 
+          // Hit chance falls with recoil / early acquire; intentional misses almost never connect.
+          const hitChance = intentionalMiss
+            ? 0.04
+            : (isSniper ? 0.42 : 0.22) *
+              (0.55 + acquireFrac * 0.55) *
+              (1.05 - Math.min(0.7, recoil * 0.55));
+          const headChance = intentionalMiss ? 0.02 : isSniper ? 0.12 : 0.08;
+
           if (isVisibleTargetPlayer && playerAlive) {
-            if (Math.random() < (isSniper ? 0.48 : 0.28)) {
-              const isHeadshot = Math.random() < 0.16;
+            if (Math.random() < hitChance) {
+              const isHeadshot = Math.random() < headChance;
               onDealDamageToPlayer(
                 isSniper ? (isHeadshot ? 72 : 42) : isHeadshot ? 18 : 9,
                 isHeadshot,
                 bot
               );
             }
-          } else if (visibleEnemyBot && !visibleEnemyBot.isDown && Math.random() < (isSniper ? 0.52 : 0.32)) {
-            const isHeadshot = Math.random() < 0.26;
+          } else if (visibleEnemyBot && !visibleEnemyBot.isDown && Math.random() < hitChance * 1.1) {
+            const isHeadshot = Math.random() < headChance * 1.2;
             visibleEnemyBot.health -= isSniper ? (isHeadshot ? 110 : 75) : isHeadshot ? 42 : 22;
             visibleEnemyBot.hitTiltVelocity = -12.0;
             triggerBotHitAnimation(visibleEnemyBot);
