@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
 import {
   CloudSyncState,
+  completePastedGoogleLogin,
   getCloudSyncState,
+  resumeGoogleLoginFromBrowser,
   signInWithGoogleAccount,
   signOutGoogleAccount,
   subscribePlayerProfile,
@@ -22,11 +24,21 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
     getCloudSyncState()
   );
   const [signingIn, setSigningIn] = useState(false);
+  const [showPaste, setShowPaste] = useState(false);
+  const [pastedUrl, setPastedUrl] = useState('');
+  const continueRef = useRef(onContinueToMenu);
+  continueRef.current = onContinueToMenu;
 
   useEffect(() => {
     soundEngine.playMenuMusic();
     const unsub = subscribePlayerProfile((next) => {
       setSyncState(next);
+    });
+    void resumeGoogleLoginFromBrowser().then((ok) => {
+      if (ok) {
+        soundEngine.playMenuSelect();
+        continueRef.current();
+      }
     });
     return () => {
       unsub();
@@ -36,12 +48,29 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
   const handleGoogleLogin = async () => {
     soundEngine.playMenuSelect();
     soundEngine.playMenuMusic();
-    void mobileHardware.enterFullscreenLandscape();
+    setShowPaste(false);
     setSigningIn(true);
-    const ok = await signInWithGoogleAccount();
+    const result = await signInWithGoogleAccount();
+    setSigningIn(false);
+    if (result.ok) {
+      soundEngine.playMenuSelect();
+      void mobileHardware.enterFullscreenLandscape();
+      onContinueToMenu();
+      return;
+    }
+    if (result.needsPaste) {
+      setShowPaste(true);
+    }
+  };
+
+  const handlePasteLogin = async () => {
+    soundEngine.playMenuSelect();
+    setSigningIn(true);
+    const ok = await completePastedGoogleLogin(pastedUrl);
     setSigningIn(false);
     if (ok) {
       soundEngine.playMenuSelect();
+      void mobileHardware.enterFullscreenLandscape();
       onContinueToMenu();
     }
   };
@@ -250,6 +279,32 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
               {syncError && (
                 <div className="p-2 rounded-md bg-red-500/15 border border-red-500/40 font-mono text-[10px] text-red-200 text-center">
                   {syncError}
+                </div>
+              )}
+
+              {showPaste && (
+                <div className="space-y-1.5">
+                  <p className="font-mono text-[9px] text-amber-200/90 leading-snug text-center">
+                    No Chrome, copie o endereço da página firebaseapp.com/__/auth/handler?code=... e cole aqui.
+                  </p>
+                  <input
+                    type="text"
+                    value={pastedUrl}
+                    onChange={(event) => setPastedUrl(event.target.value)}
+                    placeholder="COLE O ENDEREÇO DO LOGIN"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    className="w-full px-2 py-2 rounded-md bg-black/50 border border-white/15 font-mono text-[10px] text-white placeholder:text-slate-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={signingIn || pastedUrl.trim().length < 8}
+                    onClick={handlePasteLogin}
+                    className="w-full py-2 rounded-md bg-amber-500/20 border border-amber-400/50 font-display font-black text-[10px] tracking-wider uppercase text-amber-200 disabled:opacity-50"
+                  >
+                    CONCLUIR COM O LINK
+                  </button>
                 </div>
               )}
 

@@ -4,6 +4,10 @@ import path from 'node:path';
 const manifestPath = path.resolve('android/app/src/main/AndroidManifest.xml');
 const stylesPath = path.resolve('android/app/src/main/res/values/styles.xml');
 const javaSrcRoot = path.resolve('android/app/src/main/java');
+const firebaseConfig = JSON.parse(
+  fs.readFileSync(path.resolve('firebase-applet-config.json'), 'utf8')
+);
+const authDomain = String(firebaseConfig.authDomain || '').trim();
 
 // ============================================================================
 // 1. Patch AndroidManifest.xml (VIBRATE, sensorLandscape, hardwareAccelerated)
@@ -42,10 +46,72 @@ if (fs.existsSync(manifestPath)) {
     );
   }
 
+  if (authDomain && !content.includes('kinetic-google-oauth')) {
+    const oauthFilters = `
+        <!-- kinetic-google-oauth -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" android:host="${authDomain}" android:pathPrefix="/__/auth/handler" />
+        </intent-filter>
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="com.kineticlabs.tacticalfps" android:host="oauth" />
+        </intent-filter>`;
+    content = content.replace(
+      /(<activity\b[^>]*android:name="[^"]*MainActivity"[^>]*>)/,
+      `$1${oauthFilters}`
+    );
+  }
+
+  content = content.replace(
+    /(<activity\b[^>]*android:name="[^"]*MainActivity"[^>]*)>/,
+    (_full, attrs) => {
+      let next = attrs;
+      if (/android:launchMode=/.test(next)) {
+        next = next.replace(/android:launchMode="[^"]*"/, 'android:launchMode="singleTask"');
+      } else {
+        next += ' android:launchMode="singleTask"';
+      }
+      return `${next}>`;
+    }
+  );
+
+  if (!content.includes('android:name="com.android.chrome"')) {
+    content = content.replace(
+      '</manifest>',
+      `    <queries>
+        <package android:name="com.android.chrome" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+</manifest>`
+    );
+  }
+
   fs.writeFileSync(manifestPath, content, 'utf8');
-  console.log('[patch-manifest] Patched AndroidManifest.xml (Landscape + Haptics + GPU)');
+  console.log('[patch-manifest] Patched AndroidManifest.xml (Landscape + Haptics + GPU + Google OAuth)');
 } else {
   console.log(`[patch-manifest] Manifest file not found at ${manifestPath}, skipping.`);
+}
+
+for (const gradleName of ['build.gradle', 'build.gradle.kts']) {
+  const gradlePath = path.resolve('android/app', gradleName);
+  if (!fs.existsSync(gradlePath)) continue;
+  let gradle = fs.readFileSync(gradlePath, 'utf8');
+  if (gradle.includes('androidx.browser:browser')) continue;
+  const depLine = gradleName.endsWith('.kts')
+    ? '    implementation("androidx.browser:browser:1.8.0")\n'
+    : '    implementation "androidx.browser:browser:1.8.0"\n';
+  if (!gradle.includes('dependencies')) continue;
+  gradle = gradle.replace(/dependencies\s*\{/, (match) => `${match}\n${depLine}`);
+  fs.writeFileSync(gradlePath, gradle, 'utf8');
+  console.log(`[patch-manifest] Added Chrome Custom Tabs dependency to ${gradleName}`);
 }
 
 // ============================================================================
@@ -97,42 +163,45 @@ if (mainActivityPath) {
   const immersiveMainActivity = `package ${pkgName};
 
 import android.annotation.SuppressLint;
-import android.app.Dialog;
-import android.graphics.Bitmap;
-import android.graphics.Color;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.Gravity;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
-import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
-import android.webkit.WebSettings;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
-import android.widget.Button;
-import android.widget.LinearLayout;
-import android.widget.TextView;
+import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
-import java.io.ByteArrayInputStream;
-import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
-    private Dialog oauthDialog;
-    private WebView oauthWebView;
+    private static final String OAUTH_PREFS = "kinetic_google_oauth";
+    private static final String KEY_PENDING_URL = "pending_url";
+    private static final String KEY_SESSION = "session_id";
+    private static final String AUTH_HOST = "${authDomain}";
+
+    private boolean oauthAwaitingBrowser = false;
     private boolean oauthResultDelivered = false;
+    private boolean authBridgeAttached = false;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        String oauthUrl = extractOAuthUrl(getIntent());
+        if (oauthUrl != null) {
+            stashOAuthResult(oauthUrl);
+            getIntent().setData(null);
+        }
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -141,216 +210,182 @@ public class MainActivity extends BridgeActivity {
             getWindow().setAttributes(lp);
         }
         hideSystemBarsImmersive();
-
-        if (getBridge() != null && getBridge().getWebView() != null) {
-            WebView mainWebView = getBridge().getWebView();
-            WebSettings settings = mainWebView.getSettings();
-            settings.setJavaScriptEnabled(true);
-            settings.setDomStorageEnabled(true);
-            settings.setUserAgentString(buildCleanChromeUserAgent(settings.getUserAgentString()));
-            CookieManager.getInstance().setAcceptCookie(true);
-            CookieManager.getInstance().setAcceptThirdPartyCookies(mainWebView, true);
-            mainWebView.addJavascriptInterface(new KineticNativeAuthBridge(), "KineticNativeAuth");
+        attachAuthBridge();
+        if (oauthUrl != null) {
+            deliverOAuthUrlToJs(oauthUrl, 0);
         }
     }
 
-    private String buildCleanChromeUserAgent(String rawUa) {
-        if (rawUa == null || rawUa.isEmpty()) {
-            return "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
+    @Override
+    public void onNewIntent(Intent intent) {
+        String oauthUrl = extractOAuthUrl(intent);
+        if (oauthUrl != null && intent != null) {
+            intent.setData(null);
         }
-        String cleaned = rawUa.replace("; wv", "").replaceAll("Version/\\\\d+\\\\.\\\\d+\\\\s*", "");
-        if (!cleaned.contains("Chrome/")) {
-            return "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (oauthUrl != null) {
+            oauthAwaitingBrowser = false;
+            oauthResultDelivered = true;
+            stashOAuthResult(oauthUrl);
+            deliverOAuthUrlToJs(oauthUrl, 0);
         }
-        return cleaned;
+    }
+
+    private void attachAuthBridge() {
+        if (authBridgeAttached || getBridge() == null || getBridge().getWebView() == null) return;
+        getBridge().getWebView().addJavascriptInterface(new KineticNativeAuthBridge(), "KineticNativeAuth");
+        authBridgeAttached = true;
     }
 
     public class KineticNativeAuthBridge {
         @JavascriptInterface
         public void startGoogleSignIn(final String oauthUrl) {
-            runOnUiThread(() -> openInAppGoogleOAuthDialog(oauthUrl));
+            runOnUiThread(() -> openGoogleInChrome(oauthUrl));
         }
-    }
 
-    public class KineticPopupBridge {
         @JavascriptInterface
-        public void onCallbackUrl(final String callbackUrl) {
-            runOnUiThread(() -> deliverOAuthUrlToMainWebView(callbackUrl));
+        public void rememberOAuthSession(final String sessionId) {
+            prefs().edit().putString(KEY_SESSION, sessionId == null ? "" : sessionId).apply();
+        }
+
+        @JavascriptInterface
+        public String readOAuthSession() {
+            String value = prefs().getString(KEY_SESSION, "");
+            return value == null ? "" : value;
+        }
+
+        @JavascriptInterface
+        public String pollPendingOAuthResult() {
+            String value = prefs().getString(KEY_PENDING_URL, "");
+            return value == null ? "" : value;
+        }
+
+        @JavascriptInterface
+        public void clearPendingOAuth() {
+            prefs().edit().remove(KEY_PENDING_URL).apply();
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private void openInAppGoogleOAuthDialog(String oauthUrl) {
-        closeOAuthDialogCleanly();
-        oauthResultDelivered = false;
-
-        oauthDialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-        LinearLayout rootLayout = new LinearLayout(this);
-        rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setBackgroundColor(Color.parseColor("#06080c"));
-
-        LinearLayout headerBar = new LinearLayout(this);
-        headerBar.setOrientation(LinearLayout.HORIZONTAL);
-        headerBar.setGravity(Gravity.CENTER_VERTICAL);
-        headerBar.setBackgroundColor(Color.parseColor("#0c111a"));
-        int padH = (int) (14 * getResources().getDisplayMetrics().density);
-        int padV = (int) (8 * getResources().getDisplayMetrics().density);
-        headerBar.setPadding(padH, padV, padH, padV);
-
-        TextView titleView = new TextView(this);
-        titleView.setText("AUTENTICAÇÃO GOOGLE · KINETIC CLOUD");
-        titleView.setTextColor(Color.parseColor("#fbbf24"));
-        titleView.setTextSize(12f);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
-            0,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            1f
-        );
-        headerBar.addView(titleView, titleParams);
-
-        Button closeBtn = new Button(this);
-        closeBtn.setText("CANCELAR ✕");
-        closeBtn.setTextColor(Color.WHITE);
-        closeBtn.setTextSize(11f);
-        closeBtn.setBackgroundColor(Color.parseColor("#1e293b"));
-        closeBtn.setOnClickListener(v -> cancelOAuthFlow());
-        headerBar.addView(closeBtn);
-
-        rootLayout.addView(
-            headerBar,
-            new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        );
-
-        oauthWebView = new WebView(this);
-        WebSettings ws = oauthWebView.getSettings();
-        ws.setJavaScriptEnabled(true);
-        ws.setDomStorageEnabled(true);
-        ws.setUserAgentString(buildCleanChromeUserAgent(ws.getUserAgentString()));
-        CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(oauthWebView, true);
-        oauthWebView.addJavascriptInterface(new KineticPopupBridge(), "KineticPopupBridge");
-
-        oauthWebView.setWebViewClient(new WebViewClient() {
-            @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                String reqUrl = request.getUrl().toString();
-                if (reqUrl.contains("/__/auth/handler")) {
-                    String html = "<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"></head>"
-                        + "<body style=\\"background:#06080c;color:#fbbf24;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\\">"
-                        + "<div>AUTENTICANDO CONTA GOOGLE NO KINETIC...</div>"
-                        + "<script>if(window.KineticPopupBridge){window.KineticPopupBridge.onCallbackUrl(window.location.href);}</script>"
-                        + "</body></html>";
-                    return new WebResourceResponse(
-                        "text/html",
-                        "UTF-8",
-                        new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8))
-                    );
-                }
-                return super.shouldInterceptRequest(view, request);
-            }
-
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                if (url.contains("/__/auth/handler") && (url.contains("id_token=") || url.contains("access_token=") || url.contains("error="))) {
-                    deliverOAuthUrlToMainWebView(url);
-                    return true;
-                }
-                if (url.startsWith("https://") || url.startsWith("http://")) {
-                    return false;
-                }
-                return true;
-            }
-
-            @Override
-            public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                super.onPageStarted(view, url, favicon);
-                if (url != null && url.contains("/__/auth/handler") && (url.contains("id_token=") || url.contains("access_token=") || url.contains("error="))) {
-                    deliverOAuthUrlToMainWebView(url);
-                }
-            }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                if (url != null && url.contains("/__/auth/handler")) {
-                    view.evaluateJavascript(
-                        "(function(){return window.location.href;})()",
-                        val -> {
-                            if (val != null && (val.contains("id_token=") || val.contains("access_token=") || val.contains("error="))) {
-                                String unquoted = val.replaceAll("^\\"|\\"$", "");
-                                deliverOAuthUrlToMainWebView(unquoted);
-                            }
-                        }
-                    );
-                }
-            }
-        });
-
-        rootLayout.addView(
-            oauthWebView,
-            new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        );
-
-        oauthDialog.setContentView(rootLayout);
-        oauthDialog.setOnCancelListener(d -> cancelOAuthFlow());
-        oauthDialog.show();
-        oauthWebView.loadUrl(oauthUrl);
+    private SharedPreferences prefs() {
+        return getSharedPreferences(OAUTH_PREFS, MODE_PRIVATE);
     }
 
-    private void deliverOAuthUrlToMainWebView(String callbackUrl) {
-        if (oauthResultDelivered) return;
-        oauthResultDelivered = true;
-        closeOAuthDialogCleanly();
+    private void stashOAuthResult(String url) {
+        prefs().edit().putString(KEY_PENDING_URL, url).apply();
+    }
+
+    private void openGoogleInChrome(String oauthUrl) {
+        oauthAwaitingBrowser = true;
+        oauthResultDelivered = false;
+        Uri uri = Uri.parse(oauthUrl);
+        String chrome = findChromePackage();
+        Intent view = new Intent(Intent.ACTION_VIEW, uri);
+        if (chrome != null) {
+            view.setPackage(chrome);
+        }
+        try {
+            startActivity(view);
+            return;
+        } catch (ActivityNotFoundException ignored) {
+            view.setPackage(null);
+        }
+        try {
+            CustomTabsIntent tabs = new CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .setShareState(CustomTabsIntent.SHARE_STATE_OFF)
+                .setUrlBarHidingEnabled(false)
+                .build();
+            tabs.launchUrl(this, uri);
+        } catch (ActivityNotFoundException ignored) {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+        }
+    }
+
+    private String findChromePackage() {
+        String[] packages = new String[] {
+            "com.android.chrome",
+            "com.chrome.beta",
+            "com.chrome.dev",
+            "com.google.android.apps.chrome"
+        };
+        PackageManager pm = getPackageManager();
+        for (String pkg : packages) {
+            try {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0));
+                } else {
+                    pm.getPackageInfo(pkg, 0);
+                }
+                return pkg;
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    private String extractOAuthUrl(Intent intent) {
+        if (intent == null || intent.getData() == null) return null;
+        Uri data = intent.getData();
+        String raw = intent.getDataString();
+        if (raw == null) return null;
+        String scheme = data.getScheme() == null ? "" : data.getScheme();
+        boolean customScheme = "com.kineticlabs.tacticalfps".equals(scheme);
+        boolean handler = raw.contains("/__/auth/handler")
+            || (AUTH_HOST.length() > 0 && AUTH_HOST.equals(data.getHost()));
+        if (!customScheme && !handler) return null;
+        String fragment = data.getFragment();
+        if (fragment != null && !fragment.isEmpty() && raw.indexOf('#') < 0) {
+            raw = raw + "#" + fragment;
+        }
+        boolean hasToken = raw.contains("code=")
+            || raw.contains("id_token=")
+            || raw.contains("error=")
+            || data.getQueryParameter("code") != null
+            || data.getQueryParameter("error") != null
+            || data.getQueryParameter("id_token") != null;
+        return hasToken ? raw : null;
+    }
+
+    private void deliverOAuthUrlToJs(String callbackUrl, int attempt) {
+        stashOAuthResult(callbackUrl);
         if (getBridge() != null && getBridge().getWebView() != null) {
             String js = "if(window.__kineticHandleNativeOAuthRedirect){window.__kineticHandleNativeOAuthRedirect("
                 + JSONObject.quote(callbackUrl) + ");}";
-            getBridge().getWebView().evaluateJavascript(js, null);
+            WebView webView = getBridge().getWebView();
+            webView.post(() -> webView.evaluateJavascript(js, null));
+            return;
         }
-        hideSystemBarsImmersive();
+        if (attempt < 25) {
+            new Handler(Looper.getMainLooper()).postDelayed(
+                () -> deliverOAuthUrlToJs(callbackUrl, attempt + 1),
+                400
+            );
+        }
     }
 
-    private void cancelOAuthFlow() {
-        if (oauthResultDelivered) return;
-        oauthResultDelivered = true;
-        closeOAuthDialogCleanly();
-        if (getBridge() != null && getBridge().getWebView() != null) {
-            String js = "if(window.__kineticHandleNativeOAuthCancel){window.__kineticHandleNativeOAuthCancel('Login com Google cancelado.');}";
-            getBridge().getWebView().evaluateJavascript(js, null);
+    private void notifyBrowserReturnedWithoutToken() {
+        if (!oauthAwaitingBrowser || oauthResultDelivered) return;
+        String pending = prefs().getString(KEY_PENDING_URL, "");
+        if (pending != null && (pending.contains("code=") || pending.contains("id_token=") || pending.contains("error="))) {
+            oauthResultDelivered = true;
+            oauthAwaitingBrowser = false;
+            deliverOAuthUrlToJs(pending, 0);
+            return;
         }
-        hideSystemBarsImmersive();
-    }
-
-    private void closeOAuthDialogCleanly() {
-        if (oauthWebView != null) {
-            try {
-                oauthWebView.stopLoading();
-                oauthWebView.loadUrl("about:blank");
-                oauthWebView.destroy();
-            } catch (Exception ignored) {}
-            oauthWebView = null;
-        }
-        if (oauthDialog != null) {
-            try {
-                if (oauthDialog.isShowing()) {
-                    oauthDialog.dismiss();
-                }
-            } catch (Exception ignored) {}
-            oauthDialog = null;
-        }
+        oauthAwaitingBrowser = false;
+        if (getBridge() == null || getBridge().getWebView() == null) return;
+        String js = "if(window.__kineticHandleNativeOAuthCancel){window.__kineticHandleNativeOAuthCancel('__PASTE__');}";
+        getBridge().getWebView().evaluateJavascript(js, null);
     }
 
     @Override
     public void onResume() {
         super.onResume();
         hideSystemBarsImmersive();
+        attachAuthBridge();
+        if (oauthAwaitingBrowser) {
+            new Handler(Looper.getMainLooper()).postDelayed(this::notifyBrowserReturnedWithoutToken, 700);
+        }
     }
 
     @Override
@@ -386,5 +421,5 @@ public class MainActivity extends BridgeActivity {
 `;
 
   fs.writeFileSync(mainActivityPath, immersiveMainActivity, 'utf8');
-  console.log(`[patch-manifest] Patched ${mainActivityPath} with Sticky Immersive + In-App Native Google OAuth`);
+  console.log(`[patch-manifest] Patched ${mainActivityPath} with Chrome Custom Tabs Google OAuth`);
 }

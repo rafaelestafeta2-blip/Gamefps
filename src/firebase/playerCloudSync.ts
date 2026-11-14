@@ -13,7 +13,12 @@ import {
   handleFirestoreError,
   OperationType,
 } from './firebaseClient';
-import { performGoogleSignIn, performGoogleSignOut } from './googleAuthService';
+import {
+  completeGoogleCallback,
+  performGoogleSignIn,
+  performGoogleSignOut,
+  resumePendingGoogleSignInIfNeeded,
+} from './googleAuthService';
 import {
   CloudSyncState,
   compressAvatarFileToDataUrl,
@@ -161,11 +166,46 @@ export function subscribePlayerProfile(listener: SyncListener): () => void {
   };
 }
 
-export async function signInWithGoogleAccount(): Promise<boolean> {
+export interface GoogleLoginAttempt {
+  ok: boolean;
+  needsPaste: boolean;
+}
+
+async function applyGoogleCallback(raw: string): Promise<boolean> {
+  state.syncError = null;
+  state.isSyncing = true;
+  emitState();
+  const res = await completeGoogleCallback(raw);
+  if (!res.ok) {
+    state.syncError = res.error || 'Não foi possível concluir o login com Google.';
+    state.isSyncing = false;
+    emitState();
+    return false;
+  }
+  return true;
+}
+
+export async function signInWithGoogleAccount(): Promise<GoogleLoginAttempt> {
   state.syncError = null;
   state.isSyncing = true;
   emitState();
   const res = await performGoogleSignIn();
+  if (!res.ok) {
+    state.syncError = res.error || 'Não foi possível concluir o login com Google.';
+    state.isSyncing = false;
+    emitState();
+    return { ok: false, needsPaste: Boolean(res.needsPaste) };
+  }
+  return { ok: true, needsPaste: false };
+}
+
+export async function completePastedGoogleLogin(raw: string): Promise<boolean> {
+  return applyGoogleCallback(raw);
+}
+
+export async function resumeGoogleLoginFromBrowser(): Promise<boolean> {
+  const res = await resumePendingGoogleSignInIfNeeded();
+  if (!res) return false;
   if (!res.ok) {
     state.syncError = res.error || 'Não foi possível concluir o login com Google.';
     state.isSyncing = false;
