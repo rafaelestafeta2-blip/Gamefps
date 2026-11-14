@@ -616,6 +616,9 @@ export class TacticalFPSEngine {
 
     const standerData = buildStanderTiroLevel(this.isSoftwareGl);
     this.standerTiroLevelData = standerData;
+    // Hidden until FREE_RANGE prepare finishes loading shooting_range_2k.glb
+    // (avoids empty booth/lights-only scene if start races the GLB).
+    standerData.levelGroup.visible = false;
     this.scene.add(standerData.levelGroup);
 
     const levelData = buildPreProductionLevel(this.textures, this.isSoftwareGl);
@@ -2109,14 +2112,21 @@ export class TacticalFPSEngine {
     const isFreeRange = mode === 'FREE_RANGE';
     const isBombMode = isYard || isDust2 || isAssault || isIndustria || isHangar || isEasternCity || isMirageAnubis;
 
+    // Prefer prepareMatchArena (Loading 2) to have already loaded the GLB.
+    // Fallback await-path only if somehow starting without prepare.
     if (isFreeRange && !this.standerTiroLevelData.isLoaded) {
       void loadStanderTiroMapGeometry(
         this.standerTiroLevelData,
         this.isSoftwareGl
-      );
+      ).then(() => {
+        if (this.state.drillMode === 'FREE_RANGE') {
+          this.standerTiroLevelData.levelGroup.visible = true;
+        }
+      });
     }
 
-    this.standerTiroLevelData.levelGroup.visible = isFreeRange;
+    this.standerTiroLevelData.levelGroup.visible =
+      isFreeRange && this.standerTiroLevelData.isLoaded;
     this.facilityLevelData.levelGroup.visible = !isBombMode && !isFreeRange;
     this.yardLevelData.levelGroup.visible = isYard;
     this.dust2LevelData.levelGroup.visible = isDust2;

@@ -8,6 +8,7 @@ import {
 } from '../multiplayer/onlineRoomService';
 import { OnlineRoomState } from '../multiplayer/onlineTypes';
 import { DrillMode } from '../types/game';
+import { thumbForDrillMode } from './mapSelectThumbs';
 
 interface WarfaceMatchmakingWidgetProps {
   selectedMode: DrillMode;
@@ -17,6 +18,15 @@ interface WarfaceMatchmakingWidgetProps {
 }
 
 const REQUIRED_PUBLIC_PLAYERS = 10;
+
+const QUEUE_MAP_PICKS: Array<{ id: DrillMode; short: string }> = [
+  { id: 'DUST2_BOMB_5V5', short: 'DUST2' },
+  { id: 'ASSAULT_BOMB_5V5', short: 'ASSAULT' },
+  { id: 'INDUSTRIA_BOMB_5V5', short: 'INDUSTRIA' },
+  { id: 'HANGAR_BOMB_5V5', short: 'HANGAR' },
+  { id: 'EASTERN_CITY_BOMB_5V5', short: 'EASTERN' },
+  { id: 'MIRAGE_ANUBIS_BOMB_5V5', short: 'MIRAGE' },
+];
 
 export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> = ({
   selectedMode,
@@ -182,6 +192,38 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
               ✕
             </button>
           </div>
+        </div>
+
+        {/* Visible map thumbs — Industry/Hangar/Eastern/Mirage were cycle-only. */}
+        <div className="mt-1.5 grid grid-cols-6 gap-0.5">
+          {QUEUE_MAP_PICKS.map((m) => {
+            const active = selectedMode === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                title={m.short}
+                disabled={matchFound}
+                onClick={() => {
+                  if (matchFound || selectedMode === m.id) return;
+                  soundEngine.playMenuSelect();
+                  onChangeMode(m.id);
+                }}
+                className={`relative overflow-hidden rounded border cursor-pointer transition-all ${
+                  active
+                    ? 'border-amber-400 ring-1 ring-amber-400/40'
+                    : 'border-white/10 hover:border-white/30'
+                } ${matchFound ? 'opacity-60 cursor-not-allowed' : ''}`}
+              >
+                <img
+                  src={thumbForDrillMode(m.id)}
+                  alt={m.short}
+                  className="w-full h-6 object-cover object-center"
+                  draggable={false}
+                />
+              </button>
+            );
+          })}
         </div>
 
         {/* Barra de 10 Slots de Jogadores Reais */}

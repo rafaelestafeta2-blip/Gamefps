@@ -130,12 +130,9 @@ export default function App() {
     if (!engineRef.current) return;
     setMatchmakingTargetMode(null);
     const targetMode: DrillMode = mode || hud.drillMode || 'DUST2_BOMB_5V5';
-    if (targetMode === 'FREE_RANGE') {
-      launchMatchNow(targetMode);
-      return;
-    }
+    // FREE_RANGE must also go through Loading 2 / prepareMatchArena so
+    // shooting_range_2k.glb is fully loaded (previously fire-and-forget → empty range).
     if (hud.screen === 'MAIN_MENU' || targetMode !== hud.drillMode) {
-      // Kick GLB/Draco prefetch immediately so Loading 2 hits warm cache.
       void prefetchMapAssetsForMode(targetMode);
       setLoadingBombMode(targetMode);
       return;

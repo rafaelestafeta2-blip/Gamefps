@@ -2,6 +2,7 @@ import React from 'react';
 import { soundEngine } from '../audio/soundEngine';
 import { DrillMode } from '../types/game';
 import { MapPreviewBanner } from './MapPreviewBanner';
+import { thumbForDrillMode } from './mapSelectThumbs';
 import {
   WARFACE_CLASS_META,
   WarfaceClassIcon,
@@ -24,6 +25,28 @@ export type MainMenuPlayModeId =
   | 'RANGE'
   | 'KILLHOUSE'
   | 'VS_AI';
+
+/** Visible bomb-map grid (thumbs) — was only reachable via opaque TROCAR cycle. */
+const CASUAL_MAP_PICKS: Array<{
+  playMode: MainMenuPlayModeId;
+  arena: DrillMode;
+  short: string;
+}> = [
+  { playMode: 'CASUAL_DUST2', arena: 'DUST2_BOMB_5V5', short: 'DUST2' },
+  { playMode: 'CASUAL_ASSAULT', arena: 'ASSAULT_BOMB_5V5', short: 'ASSAULT' },
+  { playMode: 'CASUAL_INDUSTRIA', arena: 'INDUSTRIA_BOMB_5V5', short: 'INDUSTRIA' },
+  { playMode: 'CASUAL_HANGAR', arena: 'HANGAR_BOMB_5V5', short: 'HANGAR' },
+  {
+    playMode: 'CASUAL_EASTERN_CITY',
+    arena: 'EASTERN_CITY_BOMB_5V5',
+    short: 'EASTERN',
+  },
+  {
+    playMode: 'CASUAL_MIRAGE_ANUBIS',
+    arena: 'MIRAGE_ANUBIS_BOMB_5V5',
+    short: 'MIRAGE',
+  },
+];
 
 export const PLAY_MODE_OPTIONS: Array<{
   id: MainMenuPlayModeId;
@@ -219,6 +242,40 @@ export const MainMenuRightWidgets: React.FC<MainMenuRightWidgetsProps> = ({
           <div className="p-1 lg:p-1.5 bg-[#0d0608]">
             <div className="overflow-hidden rounded-xs border border-white/15">
               <MapPreviewBanner modeId={selectedPlayMode} />
+            </div>
+            {/* Always-visible map thumbs — Industria/Hangar/Eastern/Mirage were
+                "missing" because only TROCAR cycling exposed them. */}
+            <div className="mt-1.5 grid grid-cols-3 gap-1">
+              {CASUAL_MAP_PICKS.map((m) => {
+                const active = selectedPlayMode === m.playMode;
+                return (
+                  <button
+                    key={m.arena}
+                    type="button"
+                    title={m.short}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      soundEngine.playMenuSelect();
+                      onCyclePlayMode(m.playMode);
+                    }}
+                    className={`relative overflow-hidden rounded border text-left transition-all cursor-pointer ${
+                      active
+                        ? 'border-amber-400 ring-1 ring-amber-400/50'
+                        : 'border-white/15 hover:border-white/35'
+                    }`}
+                  >
+                    <img
+                      src={thumbForDrillMode(m.arena)}
+                      alt={m.short}
+                      className="w-full h-7 lg:h-9 object-cover object-center"
+                      draggable={false}
+                    />
+                    <span className="absolute inset-x-0 bottom-0 bg-black/65 px-0.5 py-[1px] text-[7px] lg:text-[8px] font-mono font-bold text-amber-200 truncate text-center">
+                      {m.short}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

@@ -116,7 +116,8 @@ export async function prepareMatchArena(
 
   onProgress(16, 'INICIALIZANDO THREE.LOADINGMANAGER & DRACOLOADER...');
 
-  standerTiroLevelData.levelGroup.visible = isFreeRange;
+  // Keep FREE_RANGE hidden until shooting_range_2k.glb finishes (avoids empty booth).
+  standerTiroLevelData.levelGroup.visible = false;
   facilityLevelData.levelGroup.visible =
     !isDust2 && !isAssault && !isIndustria && !isHangar && !isEasternCity && !isMirageAnubis && !isYard && !isFreeRange;
   yardLevelData.levelGroup.visible = isYard;
@@ -282,6 +283,7 @@ export async function prepareMatchArena(
       isSoftwareGl,
       loadingManager
     );
+    standerTiroLevelData.levelGroup.visible = true;
     reportProgress(68, 'ESTANDE DE TIRO 3D E ALVOS BALÍSTICOS PRONTOS!');
   } else {
     reportProgress(55, 'ATIVANDO GEOMETRIA E CAIXAS DE COLISÃO BOX3 DA ARENA...');

@@ -12,7 +12,7 @@ import { buildStanderObstacleHall } from './standerObstacleHallBuilder';
 /** Optimized V5 FAB shooting range (2K JPEG + Draco). */
 const STANDER_TIRO_LOCAL_URL = '/models/maps/shooting_range_2k.glb';
 const DRACO_DECODER_PATH =
-  'https://www.gstatic.com/draco/versioned/decoders/1.5.7/';
+  'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
 
 /** Lift so floor planes (~y=-1.16) sit at world y=0. */
 export const STANDER_FLOOR_Y_LIFT = 1.164;
