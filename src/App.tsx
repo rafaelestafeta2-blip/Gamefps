@@ -13,6 +13,7 @@ import { VideoIntroScreen } from './components/VideoIntroScreen';
 import { WarfaceMatchmakingWidget } from './components/WarfaceMatchmakingWidget';
 import { WarfaceRankUpModal } from './components/WarfaceRankUpModal';
 import { YardMatchLoadingModal } from './components/YardMatchLoadingModal';
+import { resumePendingGoogleSignInIfNeeded } from './firebase/googleAuthService';
 import { subscribePlayerProfile } from './firebase/playerCloudSync';
 import { ControlSettings, loadControlSettings, saveControlSettings } from './controls/hudLayoutSettings';
 import { applyGraphicsToEngine } from './graphics/applyGraphicsToEngine';
@@ -46,6 +47,14 @@ export default function App() {
   useEffect(() => {
     initAudioSystem(gameSettingsRef.current);
     applyAudioSettings(gameSettingsRef.current);
+    // After Android process death mid-Google-login, finish OAuth from native prefs.
+    resumePendingGoogleSignInIfNeeded();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        resumePendingGoogleSignInIfNeeded();
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
     const unsub = subscribePlayerProfile((state) => {
       if (engineRef.current) {
         engineRef.current.syncProgressionFromCloud(
@@ -69,6 +78,7 @@ export default function App() {
       }
     });
     return () => {
+      document.removeEventListener('visibilitychange', onVis);
       unsub();
     };
   }, []);

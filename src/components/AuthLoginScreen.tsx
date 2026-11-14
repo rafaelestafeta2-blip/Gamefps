@@ -25,8 +25,18 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
 
   useEffect(() => {
     soundEngine.playMenuMusic();
+    // If Activity cold-started mid-OAuth, keep the button in "connecting" until auth resolves.
+    try {
+      const pending = localStorage.getItem('kinetic_oauth_pending_v1');
+      if (pending) setSigningIn(true);
+    } catch {
+      /* ignore */
+    }
     const unsub = subscribePlayerProfile((next) => {
       setSyncState(next);
+      if (next.isGoogleLinked) {
+        setSigningIn(false);
+      }
     });
     return () => {
       unsub();
@@ -36,12 +46,14 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
   const handleGoogleLogin = async () => {
     soundEngine.playMenuSelect();
     soundEngine.playMenuMusic();
-    void mobileHardware.enterFullscreenLandscape();
+    // Do NOT request fullscreen / orientation lock before OAuth — that can
+    // recreate the Activity while Google Account Picker is open and kill the flow.
     setSigningIn(true);
     const ok = await signInWithGoogleAccount();
     setSigningIn(false);
     if (ok) {
       soundEngine.playMenuSelect();
+      void mobileHardware.enterFullscreenLandscape();
       onContinueToMenu();
     }
   };
