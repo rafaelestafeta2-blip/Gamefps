@@ -312,7 +312,8 @@ export default function App() {
       {hud.screen === 'PLAYING' && (
         <>
           {!hud.yardBomb?.isSpectating &&
-            hud.yardBomb?.roundState !== 'MATCH_OVER' && (
+            hud.yardBomb?.roundState !== 'MATCH_OVER' &&
+            hud.yardBomb?.roundState !== 'EQUIP' && (
               <MobileTouchControls
               hud={hud}
               controlSettings={controlSettings}

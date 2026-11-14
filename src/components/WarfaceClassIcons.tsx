@@ -303,7 +303,19 @@ export const BlackthornTeamEmblem: React.FC<{ className?: string }> = ({
 export const OperatorTacticalAvatar: React.FC<{
   team: 'VANGUARD' | 'BLACKTHORN';
   classId: WarfaceClassId;
-}> = ({ team, classId }) => {
+  photoUrl?: string;
+}> = ({ team, classId, photoUrl }) => {
+  if (photoUrl) {
+    return (
+      <img
+        src={photoUrl}
+        alt=""
+        referrerPolicy="no-referrer"
+        className="w-full h-full object-cover"
+      />
+    );
+  }
+
   const isVanguard = team === 'VANGUARD';
   const visorColor = isVanguard
     ? classId === 'MEDICO'

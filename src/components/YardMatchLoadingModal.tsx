@@ -1,12 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
 import { BLACKTHORN_ROSTER, VANGUARD_ROSTER } from '../data/matchRoster';
+import { getCloudSyncState, getPlayerCallsign } from '../firebase/playerCloudSync';
 import {
   isOnlineMatchActive,
   publishLocalLoadProgress,
   subscribeOnlineRoom,
 } from '../multiplayer/onlineRoomService';
 import { OnlineRoomState } from '../multiplayer/onlineTypes';
+import { TACTICAL_ACHIEVEMENTS } from '../progression/achievementsData';
 import { getPlayerInventoryState } from '../progression/loadoutSystem';
 import { DrillMode } from '../types/game';
 import {
@@ -17,6 +19,120 @@ import {
   WarfaceClassIcon,
   WarfaceClassId,
 } from './WarfaceClassIcons';
+import { WarfaceRankIcon } from './WarfaceRankIcon';
+
+type LoadingRow = {
+  callsign: string;
+  title: string;
+  classId: WarfaceClassId;
+  isReady: boolean;
+  isPlayer?: boolean;
+  avatarDataUrl?: string;
+  rankLevel: number;
+  bannerTitle?: string;
+  bannerIcon?: string;
+  bannerTier?: 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM';
+};
+
+function pickShowcaseAchievement(unlockedIds: string[]): {
+  title: string;
+  icon: string;
+  tier: 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM';
+} | null {
+  const tierScore = { BRONZE: 1, SILVER: 2, GOLD: 3, PLATINUM: 4 };
+  let best: (typeof TACTICAL_ACHIEVEMENTS)[number] | null = null;
+  for (const ach of TACTICAL_ACHIEVEMENTS) {
+    if (!unlockedIds.includes(ach.id)) continue;
+    if (!best || tierScore[ach.tier] >= tierScore[best.tier]) best = ach;
+  }
+  return best
+    ? { title: best.title, icon: best.icon, tier: best.tier }
+    : null;
+}
+
+const BANNER_TIER_CLASS: Record<string, string> = {
+  BRONZE: 'from-amber-800/80 via-amber-600/40 to-transparent border-amber-600/50',
+  SILVER: 'from-slate-400/70 via-slate-300/30 to-transparent border-slate-300/40',
+  GOLD: 'from-amber-400/80 via-yellow-500/35 to-transparent border-amber-300/55',
+  PLATINUM: 'from-cyan-300/80 via-sky-400/35 to-transparent border-cyan-200/55',
+};
+
+const LoadingOperatorRow: React.FC<{
+  op: LoadingRow;
+  team: 'VANGUARD' | 'BLACKTHORN';
+  flip?: boolean;
+}> = ({ op, team, flip }) => {
+  const bannerCls =
+    BANNER_TIER_CLASS[op.bannerTier || ''] ||
+    (team === 'VANGUARD'
+      ? 'from-sky-700/50 via-sky-500/20 to-transparent border-sky-400/30'
+      : 'from-red-800/50 via-red-500/20 to-transparent border-red-400/30');
+
+  return (
+    <div
+      className={`relative h-11 sm:h-12 rounded border overflow-hidden flex items-center justify-between bg-[#081523]/90 ${
+        op.isReady
+          ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.3)]'
+          : team === 'VANGUARD'
+            ? 'border-sky-400/55'
+            : 'border-red-500/55'
+      } ${flip ? 'flex-row-reverse' : ''}`}
+    >
+      {/* Decorative achievement / prestige banner strip */}
+      <div
+        className={`absolute inset-x-0 bottom-0 h-3 bg-gradient-to-r ${bannerCls} border-t pointer-events-none`}
+      />
+      {op.bannerTitle && (
+        <div
+          className={`absolute bottom-0 ${flip ? 'right-16 sm:right-22' : 'left-16 sm:left-22'} text-[7px] sm:text-[8px] font-mono font-bold tracking-wider text-white/90 truncate max-w-[42%] pb-px`}
+        >
+          {op.bannerIcon} {op.bannerTitle}
+        </div>
+      )}
+
+      <div className="w-16 sm:w-22 h-full shrink-0 relative z-10">
+        <OperatorTacticalAvatar
+          team={team}
+          classId={op.classId}
+          photoUrl={op.avatarDataUrl}
+        />
+        <div
+          className={`absolute inset-y-0 ${flip ? 'left-0' : 'right-0'} w-6 ${
+            flip
+              ? 'bg-gradient-to-r from-[#081523] to-transparent'
+              : 'bg-gradient-to-l from-[#081523] to-transparent'
+          }`}
+        />
+      </div>
+      <div
+        className={`flex-1 px-2 flex items-center justify-between min-w-0 relative z-10 ${
+          flip ? 'flex-row-reverse text-right' : ''
+        }`}
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <WarfaceRankIcon level={op.rankLevel} className="w-3.5 h-3.5 shrink-0" />
+            <div
+              className={`text-[10px] sm:text-xs font-display font-black tracking-wide truncate ${
+                team === 'VANGUARD' ? 'text-amber-300' : 'text-white'
+              }`}
+            >
+              {op.callsign}
+            </div>
+          </div>
+          <div
+            className={`text-[8px] sm:text-[9px] font-mono uppercase tracking-wider truncate ${
+              op.isReady ? 'text-emerald-300 font-bold' : team === 'VANGUARD' ? 'text-sky-300/90' : 'text-red-300/90'
+            }`}
+          >
+            Lv.{op.rankLevel} · {op.title}
+          </div>
+        </div>
+        <WarfaceClassIcon classId={op.classId} className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 mx-1" />
+      </div>
+    </div>
+  );
+};
 
 interface YardMatchLoadingModalProps {
   mode?: DrillMode;
@@ -187,26 +303,66 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   const onlineReadyCount = onlinePlayers.filter((p) => p.isLoaded || (p.loadProgress ?? 0) >= 100).length;
 
   const playerSelectedClass = getPlayerInventoryState().selectedClass;
-  const vanguardDisplay = isOnline
-    ? onlinePlayers.filter((p) => p.team === 'VANGUARD').map((p) => ({
-        callsign: p.callsign,
-        title: p.isLoaded || (p.loadProgress ?? 0) >= 100 ? '✓ 100% PRONTO' : `CARREGANDO ${p.loadProgress ?? 0}%`,
-        classId: playerSelectedClass, isPlayer: true, isReady: Boolean(p.isLoaded || (p.loadProgress ?? 0) >= 100),
-      }))
-    : VANGUARD_ROSTER.map((op) => ({
-        ...op,
+  const profile = getCloudSyncState().profile;
+  const localCallsign = getPlayerCallsign();
+  const showcase = useMemo(
+    () => pickShowcaseAchievement(profile.unlockedAchievements || []),
+    [profile.unlockedAchievements]
+  );
+
+  const vanguardDisplay: LoadingRow[] = isOnline
+    ? onlinePlayers
+        .filter((p) => p.team === 'VANGUARD')
+        .map((p) => {
+          const isLocal = p.uid === profile.uid || p.callsign === localCallsign;
+          const ready = Boolean(p.isLoaded || (p.loadProgress ?? 0) >= 100);
+          return {
+            callsign: p.callsign,
+            title: ready ? '✓ 100% PRONTO' : `CARREGANDO ${p.loadProgress ?? 0}%`,
+            classId: isLocal ? playerSelectedClass : 'FUZILEIRO',
+            isPlayer: isLocal,
+            isReady: ready,
+            avatarDataUrl: p.avatarDataUrl || (isLocal ? profile.avatarDataUrl : undefined),
+            rankLevel: p.rankLevel || (isLocal ? profile.rankLevel : 1),
+            bannerTitle: isLocal ? showcase?.title : undefined,
+            bannerIcon: isLocal ? showcase?.icon : undefined,
+            bannerTier: isLocal ? showcase?.tier : undefined,
+          };
+        })
+    : VANGUARD_ROSTER.map((op, idx) => ({
+        callsign: op.isPlayer ? `${localCallsign}` : op.callsign,
+        title: op.isPlayer
+          ? `${WARFACE_CLASS_META[playerSelectedClass].label} · PRONTO`
+          : op.title,
         classId: op.isPlayer ? playerSelectedClass : op.classId,
-        title: op.isPlayer ? WARFACE_CLASS_META[playerSelectedClass].label : op.title,
+        isPlayer: op.isPlayer,
         isReady: isArenaReady,
+        avatarDataUrl: op.isPlayer ? profile.avatarDataUrl : undefined,
+        rankLevel: op.isPlayer ? profile.rankLevel : 55 + idx * 12,
+        bannerTitle: op.isPlayer ? showcase?.title : undefined,
+        bannerIcon: op.isPlayer ? showcase?.icon : undefined,
+        bannerTier: op.isPlayer ? showcase?.tier : undefined,
       }));
 
-  const blackthornDisplay = isOnline
-    ? onlinePlayers.filter((p) => p.team === 'BLACKTHORN').map((p) => ({
-        callsign: p.callsign,
-        title: p.isLoaded || (p.loadProgress ?? 0) >= 100 ? '✓ 100% PRONTO' : `CARREGANDO ${p.loadProgress ?? 0}%`,
-        classId: 'ENGENHEIRO' as WarfaceClassId, isReady: Boolean(p.isLoaded || (p.loadProgress ?? 0) >= 100),
-      }))
-    : BLACKTHORN_ROSTER.map((op) => ({ ...op, isReady: isArenaReady }));
+  const blackthornDisplay: LoadingRow[] = isOnline
+    ? onlinePlayers
+        .filter((p) => p.team === 'BLACKTHORN')
+        .map((p) => {
+          const ready = Boolean(p.isLoaded || (p.loadProgress ?? 0) >= 100);
+          return {
+            callsign: p.callsign,
+            title: ready ? '✓ 100% PRONTO' : `CARREGANDO ${p.loadProgress ?? 0}%`,
+            classId: 'ENGENHEIRO' as WarfaceClassId,
+            isReady: ready,
+            avatarDataUrl: p.avatarDataUrl || undefined,
+            rankLevel: p.rankLevel || 1,
+          };
+        })
+    : BLACKTHORN_ROSTER.map((op, idx) => ({
+        ...op,
+        isReady: isArenaReady,
+        rankLevel: 48 + idx * 11,
+      }));
 
   return (
     <div className="fixed inset-0 z-50 bg-[#05080f] text-white select-none overflow-hidden flex flex-col justify-between font-sans">
@@ -283,30 +439,11 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
           </div>
 
           {vanguardDisplay.map((op) => (
-            <div
-              key={op.callsign}
-              className={`relative h-9 sm:h-11 rounded border overflow-hidden flex items-center justify-between bg-[#081523]/90 transition-transform ${
-                op.isReady
-                  ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.3)]'
-                  : 'border-sky-400/55 shadow-[0_0_10px_rgba(56,189,248,0.18)]'
-              }`}
-            >
-              <div className="w-16 sm:w-22 h-full shrink-0 relative">
-                <OperatorTacticalAvatar team="VANGUARD" classId={op.classId} />
-                <div className="absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#081523] to-transparent" />
-              </div>
-              <div className="flex-1 px-2 flex items-center justify-between min-w-0">
-                <div className="min-w-0">
-                  <div className="text-[10px] sm:text-xs font-display font-black tracking-wide truncate text-amber-300">
-                    {op.callsign}
-                  </div>
-                  <div className={`text-[8px] sm:text-[9px] font-mono uppercase tracking-wider truncate ${op.isReady ? 'text-emerald-300 font-bold' : 'text-sky-300/90'}`}>
-                    {op.title}
-                  </div>
-                </div>
-                <WarfaceClassIcon classId={op.classId} className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 ml-1.5" />
-              </div>
-            </div>
+            <LoadingOperatorRow
+              key={`vg-${op.callsign}`}
+              op={op}
+              team="VANGUARD"
+            />
           ))}
         </div>
 
@@ -326,28 +463,12 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
           </div>
 
           {blackthornDisplay.map((op) => (
-            <div
-              key={op.callsign}
-              className={`relative h-9 sm:h-11 rounded border bg-[#1b0a10]/90 overflow-hidden flex items-center justify-between ${
-                op.isReady ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.3)]' : 'border-red-500/55'
-              }`}
-            >
-              <div className="flex-1 px-2 flex items-center justify-between min-w-0">
-                <WarfaceClassIcon classId={op.classId} className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 mr-1.5" />
-                <div className="min-w-0 text-right">
-                  <div className="text-[10px] sm:text-xs font-display font-black tracking-wide text-white truncate">
-                    {op.callsign}
-                  </div>
-                  <div className={`text-[8px] sm:text-[9px] font-mono uppercase tracking-wider truncate ${op.isReady ? 'text-emerald-300 font-bold' : 'text-red-300/90'}`}>
-                    {op.title}
-                  </div>
-                </div>
-              </div>
-              <div className="w-16 sm:w-22 h-full shrink-0 relative">
-                <OperatorTacticalAvatar team="BLACKTHORN" classId={op.classId} />
-                <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#1b0a10] to-transparent" />
-              </div>
-            </div>
+            <LoadingOperatorRow
+              key={`bt-${op.callsign}`}
+              op={op}
+              team="BLACKTHORN"
+              flip
+            />
           ))}
         </div>
       </div>

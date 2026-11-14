@@ -2823,6 +2823,33 @@ export class TacticalFPSEngine {
         playerAlive
       );
 
+      // Pre-round equip freeze: look OK, no combat / sprint / plant.
+      if (this.yardBombSystem.info.roundState === 'EQUIP') {
+        this.touchFireHeld = false;
+        this.touchSprinting = false;
+        this.burstRemaining = 0;
+        this.fireCooldown = Math.max(this.fireCooldown, 0.05);
+        this.playerVel.x = 0;
+        this.playerVel.z = 0;
+        this.state.isAds = false;
+        this.state.yardBomb = { ...this.yardBombSystem.info };
+        // Keep camera orientation live so players can look around while equipping.
+        this.yawObject.position.set(
+          this.playerPos.x,
+          this.playerPos.y + this.currentEyeHeight,
+          this.playerPos.z
+        );
+        this.yawObject.rotation.y = this.yaw;
+        this.pitchObject.rotation.x = this.pitch;
+        this.updateWeaponKinematicsAndOptics(dt);
+        this.hudSyncTimer += dt;
+        if (this.hudSyncTimer >= 0.09) {
+          this.hudSyncTimer = 0;
+          this.emitHud();
+        }
+        return;
+      }
+
       if (this.playerDeathTp?.isSpectating()) {
         const specBot = this.playerDeathTp.getSpectatedBot(
           this.targets as YardBotEntity[]

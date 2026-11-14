@@ -82,15 +82,22 @@ export interface YardBombHudInfo {
   maxRounds: number; // 6
   vanguardScore: number;
   blackthornScore: number;
-  roundState: 'PLAYING' | 'ROUND_OVER' | 'MATCH_OVER';
+  roundState: 'EQUIP' | 'PLAYING' | 'ROUND_OVER' | 'MATCH_OVER';
   roundWinner: 'VANGUARD' | 'BLACKTHORN' | null;
   roundWinReason: string;
   roundTransitionSec: number;
+  /** Pre-round equip countdown (Warface-style ~7s). */
+  equipTimerSec: number;
   matchWinner: 'VANGUARD' | 'BLACKTHORN' | null;
   lastRoundXp: number;
   lastRoundCash: number;
   totalMatchXp: number;
   totalMatchCash: number;
+  /** Snapshot at match start for post-match XP theater. */
+  matchStartXp?: number;
+  matchStartRank?: number;
+  matchStartCash?: number;
+  matchStartUnlockedWeapons?: WeaponId[];
   isSpectating?: boolean;
   spectatedCallsign?: string;
   spectatedWeapon?: WeaponId;

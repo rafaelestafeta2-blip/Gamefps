@@ -9,7 +9,11 @@ import {
 } from '../audio/characterAndBombAudio';
 import { soundEngine } from '../audio/soundEngine';
 import { playSpatialBotGunshot } from '../audio/spatialCombatAudio';
-import { getPlayerCallsign, recordCombatTelemetryDelta } from '../firebase/playerCloudSync';
+import {
+  getCloudSyncState,
+  getPlayerCallsign,
+  recordCombatTelemetryDelta,
+} from '../firebase/playerCloudSync';
 import { mobileHardware } from '../mobile/nativeHardware';
 import { DrillMode, SquadOperatorStats, WeaponId, YardBombHudInfo } from '../types/game';
 import { BallisticsFXPool } from './ballisticsPool';
@@ -46,11 +50,19 @@ export class YardBombSystem {
     bombStatus: 'CARRIED', plantedSite: null, nearSite: null, plantProgress: 0,
     roundTimerSec: 125, c4TimerSec: 40, alliesAlive: 5, enemiesAlive: 5,
     calloutLabel: 'SPAWN VANGUARD (SUL · RUA DO HOTEL)', currentRound: 1, maxRounds: 6,
-    vanguardScore: 0, blackthornScore: 0, roundState: 'PLAYING', roundWinner: null,
-    roundWinReason: '', roundTransitionSec: 0, matchWinner: null,
+    vanguardScore: 0, blackthornScore: 0, roundState: 'EQUIP', roundWinner: null,
+    roundWinReason: '', roundTransitionSec: 0, equipTimerSec: 7, matchWinner: null,
     lastRoundXp: 0, lastRoundCash: 0, totalMatchXp: 0, totalMatchCash: 0,
     squadStats: createInitialSquadStats(),
   };
+
+  public captureMatchProgressSnapshot(): void {
+    const profile = getCloudSyncState().profile;
+    this.info.matchStartXp = profile.playerXp;
+    this.info.matchStartRank = profile.rankLevel;
+    this.info.matchStartCash = profile.playerCash;
+    this.info.matchStartUnlockedWeapons = [...(profile.unlockedWeapons || [])];
+  }
 
   constructor(sceneGroup: THREE.Object3D) {
     this.c4MeshGroup = new THREE.Group();
@@ -81,6 +93,10 @@ export class YardBombSystem {
     const prevStats = keepMatchScore && this.info.squadStats
       ? this.info.squadStats.map((s) => ({ ...s }))
       : createInitialSquadStats();
+    const snapXp = keepMatchScore ? this.info.matchStartXp : undefined;
+    const snapRank = keepMatchScore ? this.info.matchStartRank : undefined;
+    const snapCash = keepMatchScore ? this.info.matchStartCash : undefined;
+    const snapUnlocks = keepMatchScore ? this.info.matchStartUnlockedWeapons : undefined;
 
     this.info = {
       bombStatus: 'CARRIED', plantedSite: null, nearSite: null, plantProgress: 0,
@@ -92,12 +108,21 @@ export class YardBombSystem {
             ? 'BASE VANGUARD (CT STREET SPAWN)'
             : 'BASE VANGUARD (SUL · RUA DO HOTEL)',
       currentRound: prevRound, maxRounds: 6, vanguardScore: prevVg, blackthornScore: prevBt,
-      roundState: 'PLAYING', roundWinner: null, roundWinReason: '', roundTransitionSec: 0,
+      // Warface-style equip window before every round (including first).
+      roundState: 'EQUIP',
+      equipTimerSec: 7,
+      roundWinner: null, roundWinReason: '', roundTransitionSec: 0,
       matchWinner: null, lastRoundXp: 0, lastRoundCash: 0,
       totalMatchXp: prevTotalXp, totalMatchCash: prevTotalCash,
+      matchStartXp: snapXp, matchStartRank: snapRank, matchStartCash: snapCash,
+      matchStartUnlockedWeapons: snapUnlocks,
       isSpectating: false, spectatedCallsign: undefined, spectatedWeapon: undefined, spectatedHealth: undefined,
       squadStats: prevStats,
     };
+
+    if (!keepMatchScore) {
+      this.captureMatchProgressSnapshot();
+    }
   }
 
   public recordKillEvent(
@@ -231,6 +256,16 @@ export class YardBombSystem {
         this.info.currentRound += 1;
         this.resetRound(this.activeMode, true);
         onAdvanceNextRound();
+      }
+      return;
+    }
+
+    if (this.info.roundState === 'EQUIP') {
+      this.info.equipTimerSec = Math.max(0, (this.info.equipTimerSec || 0) - dt);
+      if (this.info.equipTimerSec <= 0) {
+        this.info.roundState = 'PLAYING';
+        this.info.equipTimerSec = 0;
+        soundEngine.playMechanicalSwitch(1.2);
       }
       return;
     }

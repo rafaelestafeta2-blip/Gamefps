@@ -73,6 +73,7 @@ function withRewoundOnlinePeers<T>(engine: any, rewindMs: number, fn: () => T): 
 /** Extracted from TacticalFPSEngine.attemptFireWeapon — behavior preserved. */
 export function attemptFireWeapon(engine: any): void {
     if (engine.isPlayerDying || engine.state.health <= 0) return;
+    if (engine.state.yardBomb?.roundState === 'EQUIP') return;
     // If the player is holding a grenade in hand, pressing Fire pulls the pin & throws the grenade!
     if (
       engine.state.equippedGrenade !== null ||
