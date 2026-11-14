@@ -13,7 +13,11 @@ import {
   handleFirestoreError,
   OperationType,
 } from './firebaseClient';
-import { performGoogleSignIn, performGoogleSignOut } from './googleAuthService';
+import {
+  completePendingGoogleRedirect,
+  performGoogleSignIn,
+  performGoogleSignOut,
+} from './googleAuthService';
 import {
   CloudSyncState,
   compressAvatarFileToDataUrl,
@@ -86,6 +90,14 @@ function scheduleCloudPush(): void {
     void pushProfileToFirestoreNow();
   }, 600);
 }
+
+void completePendingGoogleRedirect().then((res) => {
+  if (res && !res.ok && res.error) {
+    state.syncError = res.error;
+    state.isSyncing = false;
+    emitState();
+  }
+});
 
 onAuthStateChanged(auth, async (user) => {
   if (firestoreUnsub) {
@@ -166,6 +178,9 @@ export async function signInWithGoogleAccount(): Promise<boolean> {
   state.isSyncing = true;
   emitState();
   const res = await performGoogleSignIn();
+  if (res.pendingRedirect) {
+    return false;
+  }
   if (!res.ok) {
     state.syncError = res.error || 'Não foi possível concluir o login com Google.';
     state.isSyncing = false;

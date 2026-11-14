@@ -163,12 +163,16 @@ export async function loadDust2MapGeometry(
         const matName = mats[0]?.name || '';
 
         // Hide Source-engine black doorway void blocker quads (material_18 & material_3)
+        // Clip brushes do Source (vão das portas e o void do fundo). Ficam
+        // invisíveis e fora do colisor, senão viram parede invisível.
         if (matName === 'material_18' || matName === 'material_3') {
           child.visible = false;
+          child.userData.ignoreCollider = true;
           return;
         }
 
-        child.castShadow = !isSoftwareGl;
+        // O mapa inteiro no shadow pass derruba o FPS. Só recebe sombra dos bots.
+        child.castShadow = false;
         child.receiveShadow = !isSoftwareGl;
         child.userData.isEnvironment = true;
 
@@ -176,7 +180,7 @@ export async function loadDust2MapGeometry(
           const std = m as THREE.MeshStandardMaterial;
           if (std && std.map) {
             std.map.colorSpace = THREE.SRGBColorSpace;
-            std.map.anisotropy = isSoftwareGl ? 1 : 16;
+            std.map.anisotropy = isSoftwareGl ? 1 : 4;
             std.map.minFilter = THREE.LinearMipmapLinearFilter;
             std.map.magFilter = THREE.LinearFilter;
             std.map.generateMipmaps = true;
@@ -201,6 +205,9 @@ export async function loadDust2MapGeometry(
 
     bundle.levelGroup.add(mapTransformGroup);
     bundle.levelGroup.updateMatrixWorld(true);
+    mapTransformGroup.traverse((obj) => {
+      obj.matrixAutoUpdate = false;
+    });
     bundle.mapGeometryGroup = mapTransformGroup;
 
     // Build Box3 bounds + 2D spatial hash triangle collider

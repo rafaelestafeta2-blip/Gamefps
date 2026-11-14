@@ -129,6 +129,7 @@ public class MainActivity extends BridgeActivity {
     private Dialog oauthDialog;
     private WebView oauthWebView;
     private boolean oauthResultDelivered = false;
+    private boolean authBridgeAttached = false;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -142,16 +143,21 @@ public class MainActivity extends BridgeActivity {
         }
         hideSystemBarsImmersive();
 
-        if (getBridge() != null && getBridge().getWebView() != null) {
-            WebView mainWebView = getBridge().getWebView();
-            WebSettings settings = mainWebView.getSettings();
-            settings.setJavaScriptEnabled(true);
-            settings.setDomStorageEnabled(true);
-            settings.setUserAgentString(buildCleanChromeUserAgent(settings.getUserAgentString()));
-            CookieManager.getInstance().setAcceptCookie(true);
-            CookieManager.getInstance().setAcceptThirdPartyCookies(mainWebView, true);
-            mainWebView.addJavascriptInterface(new KineticNativeAuthBridge(), "KineticNativeAuth");
-        }
+        attachNativeAuthBridge();
+    }
+
+    private void attachNativeAuthBridge() {
+        if (authBridgeAttached) return;
+        if (getBridge() == null || getBridge().getWebView() == null) return;
+        WebView mainWebView = getBridge().getWebView();
+        WebSettings settings = mainWebView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setUserAgentString(buildCleanChromeUserAgent(settings.getUserAgentString()));
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(mainWebView, true);
+        mainWebView.addJavascriptInterface(new KineticNativeAuthBridge(), "KineticNativeAuth");
+        authBridgeAttached = true;
     }
 
     private String buildCleanChromeUserAgent(String rawUa) {
@@ -241,7 +247,15 @@ public class MainActivity extends BridgeActivity {
                     String html = "<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"></head>"
                         + "<body style=\\"background:#06080c;color:#fbbf24;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\\">"
                         + "<div>AUTENTICANDO CONTA GOOGLE NO KINETIC...</div>"
-                        + "<script>if(window.KineticPopupBridge){window.KineticPopupBridge.onCallbackUrl(window.location.href);}</script>"
+                        + "<script>(function(){"
+                        + "function ready(h){return h.indexOf('id_token=')>=0||h.indexOf('access_token=')>=0||h.indexOf('error=')>=0;}"
+                        + "var n=0;var t=setInterval(function(){"
+                        + "var href=String(window.location.href||'');"
+                        + "n++;"
+                        + "if(ready(href)&&window.KineticPopupBridge){clearInterval(t);window.KineticPopupBridge.onCallbackUrl(href);}"
+                        + "else if(n>50){clearInterval(t);}"
+                        + "},40);"
+                        + "})();</script>"
                         + "</body></html>";
                     return new WebResourceResponse(
                         "text/html",
@@ -255,8 +269,14 @@ public class MainActivity extends BridgeActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
-                if (url.contains("/__/auth/handler") && (url.contains("id_token=") || url.contains("access_token=") || url.contains("error="))) {
+                if (urlHasOAuthResult(url)) {
                     deliverOAuthUrlToMainWebView(url);
+                    return true;
+                }
+                if (url.startsWith("https://accounts.google.com") || url.startsWith("https://accounts.youtube.com")) {
+                    java.util.HashMap<String, String> headers = new java.util.HashMap<>();
+                    headers.put("X-Requested-With", "");
+                    view.loadUrl(url, headers);
                     return true;
                 }
                 if (url.startsWith("https://") || url.startsWith("http://")) {
@@ -268,7 +288,7 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
-                if (url != null && url.contains("/__/auth/handler") && (url.contains("id_token=") || url.contains("access_token=") || url.contains("error="))) {
+                if (urlHasOAuthResult(url)) {
                     deliverOAuthUrlToMainWebView(url);
                 }
             }
@@ -276,15 +296,10 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                if (url != null && url.contains("/__/auth/handler")) {
+                if (url != null && (url.contains("/__/auth/handler") || url.contains("accounts.google.com"))) {
                     view.evaluateJavascript(
                         "(function(){return window.location.href;})()",
-                        val -> {
-                            if (val != null && (val.contains("id_token=") || val.contains("access_token=") || val.contains("error="))) {
-                                String unquoted = val.replaceAll("^\\"|\\"$", "");
-                                deliverOAuthUrlToMainWebView(unquoted);
-                            }
-                        }
+                        val -> maybeDeliverOAuthUrl(val)
                     );
                 }
             }
@@ -302,7 +317,28 @@ public class MainActivity extends BridgeActivity {
         oauthDialog.setContentView(rootLayout);
         oauthDialog.setOnCancelListener(d -> cancelOAuthFlow());
         oauthDialog.show();
-        oauthWebView.loadUrl(oauthUrl);
+        java.util.HashMap<String, String> headers = new java.util.HashMap<>();
+        headers.put("X-Requested-With", "");
+        oauthWebView.loadUrl(oauthUrl, headers);
+    }
+
+    private boolean urlHasOAuthResult(String url) {
+        if (url == null) return false;
+        return url.contains("id_token=") || url.contains("access_token=") || url.contains("error=");
+    }
+
+    private void maybeDeliverOAuthUrl(String raw) {
+        if (raw == null || "null".equals(raw)) return;
+        String url = raw;
+        if (url.startsWith("\\"")) {
+            try {
+                url = new org.json.JSONArray("[" + url + "]").getString(0);
+            } catch (Exception ignored) {
+                url = url.replaceAll("^\\"|\\"$", "");
+            }
+        }
+        if (!urlHasOAuthResult(url)) return;
+        deliverOAuthUrlToMainWebView(url);
     }
 
     private void deliverOAuthUrlToMainWebView(String callbackUrl) {
@@ -350,6 +386,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
+        attachNativeAuthBridge();
         hideSystemBarsImmersive();
     }
 

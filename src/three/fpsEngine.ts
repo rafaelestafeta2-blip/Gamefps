@@ -390,7 +390,7 @@ export class TacticalFPSEngine {
     this.renderer.setPixelRatio(this.currentRenderScale);
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     container.appendChild(this.renderer.domElement);
 
     // 2. Scene, Studio IBL Environment (`RoomEnvironment`) & Horizon Fog
