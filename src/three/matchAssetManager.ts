@@ -164,6 +164,24 @@ export async function prepareMatchArena(
     onProgress(clamped, label);
   };
 
+  const withTimeout = async <T,>(
+    work: Promise<T>,
+    ms: number
+  ): Promise<'ok' | 'timeout'> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const raced = await Promise.race([
+        work.then(() => 'ok' as const),
+        new Promise<'timeout'>((resolve) => {
+          timer = setTimeout(() => resolve('timeout'), ms);
+        }),
+      ]);
+      return raced;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
   loadingManager.onProgress = (url, itemsLoaded, itemsTotal) => {
     if (itemsTotal > 0) {
       const ratio = itemsLoaded / itemsTotal;
@@ -334,7 +352,18 @@ export async function prepareMatchArena(
       72,
       'CARREGANDO OPERADORES 3D (PRO.RIFLE.PACK.GLB) E ANIMAÇÕES MIXAMO...'
     );
-    await preloadProRifleBotCharacter(loadingManager);
+    // Five character GLBs are ~50MB. A stuck fetch used to hold Loading 2 at
+    // 99% until the screen gave up and sent the player back to the menu.
+    const operators = await withTimeout(
+      preloadProRifleBotCharacter(loadingManager),
+      40000
+    );
+    if (operators === 'timeout') {
+      reportProgress(
+        73,
+        'OPERADORES AINDA EM BACKGROUND — ENTRANDO COM O MAPA PRONTO...'
+      );
+    }
     const activeTargets = isDust2
       ? dust2LevelData.targets
       : isAssault
@@ -457,24 +486,6 @@ export async function prepareMatchArena(
   // Etapa 3: optional warmups — MUST NOT block match forever.
   // Android WebView often stalls at 92% on compileAsync for Eastern/Hangar
   // (~minutes, no progress). Floor/collider is already proven above.
-  const withTimeout = async <T,>(
-    work: Promise<T>,
-    ms: number
-  ): Promise<'ok' | 'timeout'> => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const raced = await Promise.race([
-        work.then(() => 'ok' as const),
-        new Promise<'timeout'>((resolve) => {
-          timer = setTimeout(() => resolve('timeout'), ms);
-        }),
-      ]);
-      return raced;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  };
-
   reportProgress(90, 'PRÉ-DECODIFICANDO ÁUDIOS TÁTICOS...');
   await withTimeout(soundEngine.prewarmGrenadeAudio(), 8000);
 

@@ -269,6 +269,18 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
           });
         });
 
+        if (label === 'VanguardMedicCharacter') {
+          // Tripo wrote Mixamo joint positions in meters (same as the rifleman)
+          // but baked inverse-bind matrices ~3.3× too small. Three then stretches
+          // every vertex into the shredded preview. Rebuild the bind from the joints.
+          root.updateMatrixWorld(true);
+          root.traverse((child) => {
+            const skinned = child as THREE.SkinnedMesh;
+            if (!skinned.isSkinnedMesh || !skinned.skeleton) return;
+            skinned.bind(skinned.skeleton);
+          });
+        }
+
         // Tripo mesh-only exports (medic) ship without embedded Mixamo clips —
         // caller reuses rifleman/shared Mixamo clips (same bone names).
         const clips =
