@@ -2239,10 +2239,10 @@ export class TacticalFPSEngine {
           new THREE.LoadingManager()
         ).then(() => {
           if (this.state.drillMode === 'INDUSTRIA_BOMB_5V5') {
-            this.playerPos.y = this.industriaLevelData.collider.getGroundHeight(
+            this.playerPos.y = this.industriaLevelData.collider.snapToWalkableFloor(
               this.playerPos.x,
-              this.playerPos.y,
-              this.playerPos.z
+              this.playerPos.z,
+              INDUSTRIA_ATTACKER_SPAWN.y
             );
             this.playerVel.y = 0;
             this.isGrounded = true;
@@ -2250,10 +2250,10 @@ export class TacticalFPSEngine {
         });
       }
       const startY = this.industriaLevelData.collider.ready
-        ? this.industriaLevelData.collider.getGroundHeight(
+        ? this.industriaLevelData.collider.snapToWalkableFloor(
             INDUSTRIA_ATTACKER_SPAWN.x,
-            INDUSTRIA_ATTACKER_SPAWN.y,
-            INDUSTRIA_ATTACKER_SPAWN.z
+            INDUSTRIA_ATTACKER_SPAWN.z,
+            INDUSTRIA_ATTACKER_SPAWN.y
           )
         : INDUSTRIA_ATTACKER_SPAWN.y;
       this.playerPos.set(
@@ -2273,10 +2273,10 @@ export class TacticalFPSEngine {
           new THREE.LoadingManager()
         ).then(() => {
           if (this.state.drillMode === 'HANGAR_BOMB_5V5') {
-            this.playerPos.y = this.hangarLevelData.collider.getGroundHeight(
+            this.playerPos.y = this.hangarLevelData.collider.snapToWalkableFloor(
               this.playerPos.x,
-              this.playerPos.y,
-              this.playerPos.z
+              this.playerPos.z,
+              HANGAR_ATTACKER_SPAWN.y
             );
             this.playerVel.y = 0;
             this.isGrounded = true;
@@ -2284,10 +2284,10 @@ export class TacticalFPSEngine {
         });
       }
       const startY = this.hangarLevelData.collider.ready
-        ? this.hangarLevelData.collider.getGroundHeight(
+        ? this.hangarLevelData.collider.snapToWalkableFloor(
             HANGAR_ATTACKER_SPAWN.x,
-            HANGAR_ATTACKER_SPAWN.y,
-            HANGAR_ATTACKER_SPAWN.z
+            HANGAR_ATTACKER_SPAWN.z,
+            HANGAR_ATTACKER_SPAWN.y
           )
         : HANGAR_ATTACKER_SPAWN.y;
       this.playerPos.set(
@@ -2307,10 +2307,10 @@ export class TacticalFPSEngine {
           new THREE.LoadingManager()
         ).then(() => {
           if (this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') {
-            this.playerPos.y = this.easternCityLevelData.collider.getGroundHeight(
+            this.playerPos.y = this.easternCityLevelData.collider.snapToWalkableFloor(
               this.playerPos.x,
-              this.playerPos.y,
-              this.playerPos.z
+              this.playerPos.z,
+              EASTERN_CITY_ATTACKER_SPAWN.y
             );
             this.playerVel.y = 0;
             this.isGrounded = true;
@@ -2318,10 +2318,10 @@ export class TacticalFPSEngine {
         });
       }
       const startY = this.easternCityLevelData.collider.ready
-        ? this.easternCityLevelData.collider.getGroundHeight(
+        ? this.easternCityLevelData.collider.snapToWalkableFloor(
             EASTERN_CITY_ATTACKER_SPAWN.x,
-            EASTERN_CITY_ATTACKER_SPAWN.y,
-            EASTERN_CITY_ATTACKER_SPAWN.z
+            EASTERN_CITY_ATTACKER_SPAWN.z,
+            EASTERN_CITY_ATTACKER_SPAWN.y
           )
         : EASTERN_CITY_ATTACKER_SPAWN.y;
       this.playerPos.set(
@@ -2341,10 +2341,10 @@ export class TacticalFPSEngine {
           new THREE.LoadingManager()
         ).then(() => {
           if (this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') {
-            this.playerPos.y = this.mirageAnubisLevelData.collider.getGroundHeight(
+            this.playerPos.y = this.mirageAnubisLevelData.collider.snapToWalkableFloor(
               this.playerPos.x,
-              this.playerPos.y,
-              this.playerPos.z
+              this.playerPos.z,
+              MIRAGE_ANUBIS_ATTACKER_SPAWN.y
             );
             this.playerVel.y = 0;
             this.isGrounded = true;
@@ -2352,10 +2352,10 @@ export class TacticalFPSEngine {
         });
       }
       const startY = this.mirageAnubisLevelData.collider.ready
-        ? this.mirageAnubisLevelData.collider.getGroundHeight(
+        ? this.mirageAnubisLevelData.collider.snapToWalkableFloor(
             MIRAGE_ANUBIS_ATTACKER_SPAWN.x,
-            MIRAGE_ANUBIS_ATTACKER_SPAWN.y,
-            MIRAGE_ANUBIS_ATTACKER_SPAWN.z
+            MIRAGE_ANUBIS_ATTACKER_SPAWN.z,
+            MIRAGE_ANUBIS_ATTACKER_SPAWN.y
           )
         : MIRAGE_ANUBIS_ATTACKER_SPAWN.y;
       this.playerPos.set(

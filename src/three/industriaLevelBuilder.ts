@@ -19,10 +19,10 @@ const DRACO_DECODER_PATH =
 export const INDUSTRIA_FLOOR_Y_LIFT = 13.18;
 
 /** Vanguard attackers — south road apron, facing north into the yard. */
-export const INDUSTRIA_ATTACKER_SPAWN = new THREE.Vector3(12.0, 1.85, -40.0);
+export const INDUSTRIA_ATTACKER_SPAWN = new THREE.Vector3(8.0, 1.85, -28.0);
 export const INDUSTRIA_SPAWN_YAW = 0;
 /** Blackthorn defenders — north hangar apron. */
-export const INDUSTRIA_DEFENDER_SPAWN = new THREE.Vector3(-5.0, 2.0, 48.0);
+export const INDUSTRIA_DEFENDER_SPAWN = new THREE.Vector3(-5.0, 2.0, 40.0);
 /** Bomb A — container cluster mid-yard. */
 export const INDUSTRIA_BOMB_SITE_A = new THREE.Vector3(-12.0, 3.3, 0.0);
 /** Bomb B — central hangar court. */
@@ -166,10 +166,10 @@ export async function loadIndustriaMapGeometry(
 
     for (let i = 0; i < bundle.targets.length; i++) {
       const bot = bundle.targets[i];
-      const exactY = bundle.collider.getGroundHeight(
+      const exactY = bundle.collider.snapToWalkableFloor(
         bot.basePosition.x,
-        bot.basePosition.y,
-        bot.basePosition.z
+        bot.basePosition.z,
+        bot.basePosition.y
       );
       bot.basePosition.y = exactY;
       bot.root.position.y = exactY;

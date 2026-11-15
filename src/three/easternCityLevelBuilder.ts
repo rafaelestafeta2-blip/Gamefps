@@ -5,6 +5,7 @@ import { WeaponId } from '../types/game';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { Dust2LevelBundle } from './dust2LevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
+import { consolidateDuplicateMeshesToInstances } from './scenePerfOptimizer';
 import { YardBotEntity } from './yardPropsBuilder';
 
 /** Eastern City / Cidade Leste (V8 glTF + props) — 2K JPEG + Draco. */
@@ -17,11 +18,11 @@ const DRACO_DECODER_PATH =
  */
 export const EASTERN_CITY_FLOOR_Y_LIFT = 3.5;
 
-/** Vanguard attackers — south street approach, facing north into the city. */
-export const EASTERN_CITY_ATTACKER_SPAWN = new THREE.Vector3(0.0, 0.2, -48.0);
+/** Vanguard attackers — south street approach (inset onto paved road). */
+export const EASTERN_CITY_ATTACKER_SPAWN = new THREE.Vector3(0.0, 0.35, -36.0);
 export const EASTERN_CITY_SPAWN_YAW = 0;
 /** Blackthorn defenders — north plaza. */
-export const EASTERN_CITY_DEFENDER_SPAWN = new THREE.Vector3(-6.0, 0.2, 48.0);
+export const EASTERN_CITY_DEFENDER_SPAWN = new THREE.Vector3(-6.0, 0.35, 36.0);
 /** Bomb A — west ruin / market block. */
 export const EASTERN_CITY_BOMB_SITE_A = new THREE.Vector3(-36.0, 0.2, -4.0);
 /** Bomb B — east courtyard / tower block. */
@@ -161,14 +162,18 @@ export async function loadEasternCityMapGeometry(
     bundle.levelGroup.updateMatrixWorld(true);
     bundle.mapGeometryGroup = mapTransformGroup;
 
+    // Bake colliders from individual meshes first…
     bundle.collider.buildFromGroup(mapTransformGroup, []);
+
+    // …then collapse duplicate prop nodes → InstancedMesh (VRAM/draw-call win).
+    consolidateDuplicateMeshesToInstances(mapTransformGroup, 3);
 
     for (let i = 0; i < bundle.targets.length; i++) {
       const bot = bundle.targets[i];
-      const exactY = bundle.collider.getGroundHeight(
+      const exactY = bundle.collider.snapToWalkableFloor(
         bot.basePosition.x,
-        bot.basePosition.y,
-        bot.basePosition.z
+        bot.basePosition.z,
+        bot.basePosition.y
       );
       bot.basePosition.y = exactY;
       bot.root.position.y = exactY;

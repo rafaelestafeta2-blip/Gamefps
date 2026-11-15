@@ -217,3 +217,69 @@ export function clearSharedMaterialCache(): void {
   SHARED_COLOR_MATERIALS.forEach((m) => m.dispose());
   SHARED_COLOR_MATERIALS.clear();
 }
+
+/**
+ * Collapse duplicate Mesh nodes that share geometry+material into InstancedMesh.
+ * Call AFTER triangle collider bake (buildFromGroup does not expand instances).
+ * Cuts Eastern City-style 1k–4k node graphs down to ~1 draw per unique mesh.
+ */
+export function consolidateDuplicateMeshesToInstances(
+  root: THREE.Object3D,
+  minCount = 3
+): number {
+  type Entry = { mesh: THREE.Mesh; parent: THREE.Object3D };
+  const buckets = new Map<string, Entry[]>();
+
+  root.updateMatrixWorld(true);
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry || !mesh.parent) return;
+    if ((mesh as THREE.InstancedMesh).isInstancedMesh) return;
+    if (mesh.userData?.targetId || mesh.userData?.skipInstanceConsolidate) return;
+    const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    if (!mat) return;
+    const key = `${mesh.geometry.uuid}|${mat.uuid}`;
+    let list = buckets.get(key);
+    if (!list) {
+      list = [];
+      buckets.set(key, list);
+    }
+    list.push({ mesh, parent: mesh.parent });
+  });
+
+  let consolidated = 0;
+  const _mat = new THREE.Matrix4();
+  const _inv = new THREE.Matrix4();
+  root.updateMatrixWorld(true);
+  _inv.copy(root.matrixWorld).invert();
+
+  buckets.forEach((list) => {
+    if (list.length < minCount) return;
+    const geo = list[0].mesh.geometry;
+    const mat = Array.isArray(list[0].mesh.material)
+      ? list[0].mesh.material[0]
+      : list[0].mesh.material;
+    const inst = new THREE.InstancedMesh(geo, mat, list.length);
+    inst.name = `Instanced_${list[0].mesh.name || 'prop'}`;
+    inst.castShadow = false;
+    inst.receiveShadow = list[0].mesh.receiveShadow;
+    inst.frustumCulled = true;
+    inst.userData.isEnvironment = true;
+    inst.userData.isStaticEnvironment = true;
+    inst.matrixAutoUpdate = false;
+
+    // Parent under root so world matrices stay valid relative to map lift group.
+    root.add(inst);
+    for (let i = 0; i < list.length; i++) {
+      const { mesh, parent } = list[i];
+      mesh.updateMatrixWorld(true);
+      _mat.copy(mesh.matrixWorld).premultiply(_inv);
+      inst.setMatrixAt(i, _mat);
+      parent.remove(mesh);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    consolidated += list.length;
+  });
+
+  return consolidated;
+}

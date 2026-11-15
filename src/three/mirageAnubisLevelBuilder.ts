@@ -17,11 +17,11 @@ const DRACO_DECODER_PATH =
  */
 export const MIRAGE_ANUBIS_FLOOR_Y_LIFT = 1.2;
 
-/** Vanguard attackers — south approach of the Anubis block. */
-export const MIRAGE_ANUBIS_ATTACKER_SPAWN = new THREE.Vector3(-33.0, 0.2, -72.0);
+/** Vanguard attackers — south approach (inset from far AABB edge). */
+export const MIRAGE_ANUBIS_ATTACKER_SPAWN = new THREE.Vector3(-33.0, 0.35, -58.0);
 export const MIRAGE_ANUBIS_SPAWN_YAW = 0;
 /** Blackthorn defenders — north / east edge near Z+. */
-export const MIRAGE_ANUBIS_DEFENDER_SPAWN = new THREE.Vector3(-20.0, 0.2, 12.0);
+export const MIRAGE_ANUBIS_DEFENDER_SPAWN = new THREE.Vector3(-20.0, 0.35, 8.0);
 /** Bomb A — west building cluster. */
 export const MIRAGE_ANUBIS_BOMB_SITE_A = new THREE.Vector3(-60.0, 0.2, -40.0);
 /** Bomb B — central-east courtyard. */
@@ -181,10 +181,10 @@ export async function loadMirageAnubisMapGeometry(
 
     for (let i = 0; i < bundle.targets.length; i++) {
       const bot = bundle.targets[i];
-      const exactY = bundle.collider.getGroundHeight(
+      const exactY = bundle.collider.snapToWalkableFloor(
         bot.basePosition.x,
-        bot.basePosition.y,
-        bot.basePosition.z
+        bot.basePosition.z,
+        bot.basePosition.y
       );
       bot.basePosition.y = exactY;
       bot.root.position.y = exactY;

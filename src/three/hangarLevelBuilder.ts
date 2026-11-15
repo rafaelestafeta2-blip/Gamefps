@@ -17,11 +17,11 @@ const DRACO_DECODER_PATH =
  */
 export const HANGAR_FLOOR_Y_LIFT = 0.6;
 
-/** Vanguard attackers — south hangar entrance, facing inward (+Z). */
-export const HANGAR_ATTACKER_SPAWN = new THREE.Vector3(0.0, 0.15, -18.0);
+/** Vanguard attackers — south hangar entrance (inset for floor snap). */
+export const HANGAR_ATTACKER_SPAWN = new THREE.Vector3(0.0, 0.2, -14.0);
 export const HANGAR_SPAWN_YAW = 0;
 /** Blackthorn defenders — north interior near office/room. */
-export const HANGAR_DEFENDER_SPAWN = new THREE.Vector3(0.0, 0.15, 12.0);
+export const HANGAR_DEFENDER_SPAWN = new THREE.Vector3(0.0, 0.2, 10.0);
 /** Bomb A — container stack side. */
 export const HANGAR_BOMB_SITE_A = new THREE.Vector3(-12.0, 0.15, 0.0);
 /** Bomb B — opposite bay / truck side. */
@@ -165,10 +165,10 @@ export async function loadHangarMapGeometry(
 
     for (let i = 0; i < bundle.targets.length; i++) {
       const bot = bundle.targets[i];
-      const exactY = bundle.collider.getGroundHeight(
+      const exactY = bundle.collider.snapToWalkableFloor(
         bot.basePosition.x,
-        bot.basePosition.y,
-        bot.basePosition.z
+        bot.basePosition.z,
+        bot.basePosition.y
       );
       bot.basePosition.y = exactY;
       bot.root.position.y = exactY;

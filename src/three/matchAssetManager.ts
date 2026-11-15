@@ -116,17 +116,17 @@ export async function prepareMatchArena(
 
   onProgress(16, 'INICIALIZANDO THREE.LOADINGMANAGER & DRACOLOADER...');
 
-  // Keep FREE_RANGE hidden until shooting_range_2k.glb finishes (avoids empty booth).
+  // Hide GLB arenas until geometry+collider bake finishes (no under-map flash).
   standerTiroLevelData.levelGroup.visible = false;
   facilityLevelData.levelGroup.visible =
     !isDust2 && !isAssault && !isIndustria && !isHangar && !isEasternCity && !isMirageAnubis && !isYard && !isFreeRange;
   yardLevelData.levelGroup.visible = isYard;
-  dust2LevelData.levelGroup.visible = isDust2;
-  assaultLevelData.levelGroup.visible = isAssault;
-  industriaLevelData.levelGroup.visible = isIndustria;
-  hangarLevelData.levelGroup.visible = isHangar;
-  easternCityLevelData.levelGroup.visible = isEasternCity;
-  mirageAnubisLevelData.levelGroup.visible = isMirageAnubis;
+  dust2LevelData.levelGroup.visible = false;
+  assaultLevelData.levelGroup.visible = false;
+  industriaLevelData.levelGroup.visible = false;
+  hangarLevelData.levelGroup.visible = false;
+  easternCityLevelData.levelGroup.visible = false;
+  mirageAnubisLevelData.levelGroup.visible = false;
 
   const loadingManager = new THREE.LoadingManager();
   let lastReportedPct = 4;
@@ -176,6 +176,7 @@ export async function prepareMatchArena(
       }
     );
 
+    dust2LevelData.levelGroup.visible = true;
     reportProgress(
       70,
       `COLISORES BOX3 (${dust2LevelData.collider.boundingBoxes.length}) E ${dust2LevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
@@ -195,6 +196,7 @@ export async function prepareMatchArena(
       }
     );
 
+    assaultLevelData.levelGroup.visible = true;
     reportProgress(
       70,
       `COLISORES BOX3 (${assaultLevelData.collider.boundingBoxes.length}) E ${assaultLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
@@ -214,6 +216,7 @@ export async function prepareMatchArena(
       }
     );
 
+    industriaLevelData.levelGroup.visible = true;
     reportProgress(
       70,
       `COLISORES BOX3 (${industriaLevelData.collider.boundingBoxes.length}) E ${industriaLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
@@ -234,6 +237,7 @@ export async function prepareMatchArena(
       }
     );
 
+    hangarLevelData.levelGroup.visible = true;
     reportProgress(
       70,
       `COLISORES BOX3 (${hangarLevelData.collider.boundingBoxes.length}) E ${hangarLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
@@ -253,6 +257,7 @@ export async function prepareMatchArena(
       }
     );
 
+    easternCityLevelData.levelGroup.visible = true;
     reportProgress(
       70,
       `COLISORES BOX3 (${easternCityLevelData.collider.boundingBoxes.length}) E ${easternCityLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
@@ -272,6 +277,7 @@ export async function prepareMatchArena(
       }
     );
 
+    mirageAnubisLevelData.levelGroup.visible = true;
     reportProgress(
       70,
       `COLISORES BOX3 (${mirageAnubisLevelData.collider.boundingBoxes.length}) E ${mirageAnubisLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
@@ -397,6 +403,8 @@ export async function prepareMatchArena(
           74 + texRatio * 14,
           `ENVIANDO TEXTURAS PBR PARA A GPU VRAM (${i + 1}/${texturesToUpload.length})...`
         );
+        // Yield so Loading 2 % can paint (avoids main-thread freeze on Eastern).
+        await new Promise<void>((r) => setTimeout(r, 0));
       }
     }
   }

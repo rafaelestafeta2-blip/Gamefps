@@ -224,6 +224,18 @@ export class Dust2TriangleCollider {
   }
 
   /**
+   * Max Y considered a walkable floor (not a skybox/prop spike).
+   * Dust2 used a hard 10.5m cap — that dropped players UNDER Industria/Hangar/
+   * Eastern/Mirage walkables (post-lift roofs/courts sit at 12–45m).
+   */
+  private walkableYCap(): number {
+    if (!this.worldBounds.isEmpty()) {
+      return this.worldBounds.max.y + 0.5;
+    }
+    return 80;
+  }
+
+  /**
    * Computes exact barycentric Y height on floor/ramp/stair triangles under (x, z).
    * Ignores downward-facing ceiling triangles (`normal.y < -0.45`) above feet so climbing
    * near a ceiling never snaps the player onto the roof of the map, and rescues the player
@@ -234,37 +246,49 @@ export class Dust2TriangleCollider {
 
     const cx = Math.floor(x / this.cellSize);
     const cz = Math.floor(z / this.cellSize);
-    const bucket = this.floorGrid.get(this.cellKey(cx, cz));
-    if (!bucket || bucket.length === 0) return Math.max(0, yBottom);
-
+    const yCap = this.walkableYCap();
     let bestY = -999;
     let closestWalkableAboveY = 999;
     let fallbackHighestFloorY = -999;
 
-    for (let i = 0; i < bucket.length; i++) {
-      const t = bucket[i];
-      if (x < t.minX - 0.05 || x > t.maxX + 0.05 || z < t.minZ - 0.05 || z > t.maxZ + 0.05) {
-        continue;
-      }
+    // Search home cell + 8-neighborhood (spawns near cell borders / thin floors).
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const bucket = this.floorGrid.get(this.cellKey(cx + dx, cz + dz));
+        if (!bucket || bucket.length === 0) continue;
 
-      const yOnTri = this.sampleTriangleY(t, x, z);
-      if (yOnTri === null) continue;
+        for (let i = 0; i < bucket.length; i++) {
+          const t = bucket[i];
+          if (
+            x < t.minX - 0.05 ||
+            x > t.maxX + 0.05 ||
+            z < t.minZ - 0.05 ||
+            z > t.maxZ + 0.05
+          ) {
+            continue;
+          }
 
-      if (yOnTri < 10.5 && yOnTri > yBottom && yOnTri < closestWalkableAboveY) {
-        closestWalkableAboveY = yOnTri;
-      }
+          const yOnTri = this.sampleTriangleY(t, x, z);
+          if (yOnTri === null) continue;
+          if (yOnTri > yCap) continue;
 
-      if (yOnTri < 10.5 && yOnTri > fallbackHighestFloorY) {
-        fallbackHighestFloorY = yOnTri;
-      }
+          if (yOnTri > yBottom && yOnTri < closestWalkableAboveY) {
+            closestWalkableAboveY = yOnTri;
+          }
 
-      // Never treat a downward-facing ceiling above the player's feet as a step-up floor
-      if (t.normal.y < -0.45 && yOnTri > yBottom + 0.08) {
-        continue;
-      }
+          if (yOnTri > fallbackHighestFloorY) {
+            fallbackHighestFloorY = yOnTri;
+          }
 
-      if (yOnTri <= yBottom + 0.65 && yOnTri > bestY) {
-        bestY = yOnTri;
+          // Never treat a downward-facing ceiling above the player's feet as a step-up floor
+          if (t.normal.y < -0.45 && yOnTri > yBottom + 0.08) {
+            continue;
+          }
+
+          if (yOnTri <= yBottom + 0.65 && yOnTri > bestY) {
+            bestY = yOnTri;
+          }
+        }
       }
     }
 
@@ -272,7 +296,32 @@ export class Dust2TriangleCollider {
     // Rescue player if yBottom spawned or dipped below the floor at (x, z)
     if (closestWalkableAboveY < 900) return closestWalkableAboveY;
     if (fallbackHighestFloorY > -900) return fallbackHighestFloorY;
-    return Math.max(0, yBottom);
+    // Last resort: do not hard-clamp to 0 (new maps' visual floor can sit above y=0).
+    if (!this.worldBounds.isEmpty() && yBottom < this.worldBounds.min.y - 1) {
+      return Math.max(yBottom, this.worldBounds.min.y);
+    }
+    return yBottom;
+  }
+
+  /**
+   * Snap a spawn/bot onto the highest walkable floor at (x,z).
+   * Probes from above the map AABB so we never start under FrontSide floors
+   * (white void / floating silhouettes).
+   */
+  public snapToWalkableFloor(
+    x: number,
+    z: number,
+    hintY = 0.2
+  ): number {
+    if (!this.ready) return hintY;
+    const probeY = !this.worldBounds.isEmpty()
+      ? this.worldBounds.max.y + 4
+      : Math.max(hintY, 0) + 48;
+    const snapped = this.getGroundHeight(x, probeY, z);
+    if (!Number.isFinite(snapped)) return hintY;
+    // If probe found nothing useful, keep hint rather than dropping into void.
+    if (Math.abs(snapped - probeY) < 0.01) return hintY;
+    return snapped;
   }
 
 
