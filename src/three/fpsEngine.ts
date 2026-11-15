@@ -141,6 +141,12 @@ import {
   updateDynamicResolutionGovernor,
 } from './dynamicResolutionGovernor';
 import { emitHudIfChanged, HudRadarCacheEntry } from './hudBridge';
+import {
+  arenaAssetMode,
+  isMapSpawnHarness,
+  isNewGlbBombArena,
+  shouldForceSpawnDebug,
+} from './mapModeUtils';
 import { clearSharedMaterialCache } from './scenePerfOptimizer';
 import { disposeAllSecondaryWebGLRenderers } from './webglContextGuard';
 import { CombatRayHit, raycastCombatShot } from './combatRaycast';
@@ -963,7 +969,7 @@ export class TacticalFPSEngine {
   }
 
   private getActiveGlbCollider(): Dust2TriangleCollider | null {
-    const mode = this.state.drillMode;
+    const mode = arenaAssetMode(this.state.drillMode);
     if (mode === 'DUST2_BOMB_5V5') return this.dust2LevelData.collider;
     if (mode === 'ASSAULT_BOMB_5V5') return this.assaultLevelData.collider;
     if (mode === 'INDUSTRIA_BOMB_5V5') return this.industriaLevelData.collider;
@@ -971,6 +977,29 @@ export class TacticalFPSEngine {
     if (mode === 'EASTERN_CITY_BOMB_5V5') return this.easternCityLevelData.collider;
     if (mode === 'MIRAGE_ANUBIS_BOMB_5V5') return this.mirageAnubisLevelData.collider;
     return null;
+  }
+
+  /** Public snap used by revive / harness / round respawn. */
+  public snapLocalPlayerToPlayableFloor(
+    hintX?: number,
+    hintZ?: number,
+    hintY?: number
+  ): void {
+    const col = this.getActiveGlbCollider();
+    const x = hintX ?? this.playerPos.x;
+    const z = hintZ ?? this.playerPos.z;
+    const y = hintY ?? this.playerPos.y;
+    if (col?.ready) {
+      const p = col.findPlayableSpawn(x, z, y);
+      this.playerPos.set(p.x, p.y, p.z);
+    } else {
+      const gy = this.getCurrentGroundHeight(x, y, z);
+      this.playerPos.set(x, gy, z);
+    }
+    this.playerVel.y = 0;
+    this.isGrounded = true;
+    this.syncYawObjectToPlayerFeet();
+    this.scheduleFloorResnap(this.playerPos.y);
   }
 
   private syncYawObjectToPlayerFeet(): void {
@@ -1018,7 +1047,8 @@ export class TacticalFPSEngine {
     hint: THREE.Vector3
   ): void {
     const placeNow = () => {
-      if (this.state.drillMode !== expectedMode) return;
+      const cur = this.state.drillMode;
+      if (cur !== expectedMode && arenaAssetMode(cur) !== expectedMode) return;
       this.placePlayerOnPlayableSpawn(bundle.collider, hint, false);
       this.syncYawObjectToPlayerFeet();
     };
@@ -1038,11 +1068,7 @@ export class TacticalFPSEngine {
     const col = this.getActiveGlbCollider();
     if (!col?.ready) return false;
     const mode = this.state.drillMode;
-    const usePlayable =
-      mode === 'INDUSTRIA_BOMB_5V5' ||
-      mode === 'HANGAR_BOMB_5V5' ||
-      mode === 'EASTERN_CITY_BOMB_5V5' ||
-      mode === 'MIRAGE_ANUBIS_BOMB_5V5';
+    const usePlayable = isNewGlbBombArena(mode) || isMapSpawnHarness(mode);
     if (usePlayable) {
       const p = col.findPlayableSpawn(
         this.playerPos.x,
@@ -1066,22 +1092,23 @@ export class TacticalFPSEngine {
   }
 
   public getCurrentGroundHeight(x: number, y: number, z: number): number {
-    if (this.state.drillMode === 'DUST2_BOMB_5V5') {
+    const mode = arenaAssetMode(this.state.drillMode);
+    if (mode === 'DUST2_BOMB_5V5') {
       return this.dust2LevelData.collider.getGroundHeight(x, y, z);
     }
-    if (this.state.drillMode === 'ASSAULT_BOMB_5V5') {
+    if (mode === 'ASSAULT_BOMB_5V5') {
       return this.assaultLevelData.collider.getGroundHeight(x, y, z);
     }
-    if (this.state.drillMode === 'INDUSTRIA_BOMB_5V5') {
+    if (mode === 'INDUSTRIA_BOMB_5V5') {
       return this.industriaLevelData.collider.getGroundHeight(x, y, z);
     }
-    if (this.state.drillMode === 'HANGAR_BOMB_5V5') {
+    if (mode === 'HANGAR_BOMB_5V5') {
       return this.hangarLevelData.collider.getGroundHeight(x, y, z);
     }
-    if (this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') {
+    if (mode === 'EASTERN_CITY_BOMB_5V5') {
       return this.easternCityLevelData.collider.getGroundHeight(x, y, z);
     }
-    if (this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') {
+    if (mode === 'MIRAGE_ANUBIS_BOMB_5V5') {
       return this.mirageAnubisLevelData.collider.getGroundHeight(x, y, z);
     }
     let groundHeight = 0;
@@ -2218,15 +2245,25 @@ export class TacticalFPSEngine {
     this.state.reloadPhase = 'IDLE';
 
     // Activate bomb arenas, Stander de Tiro (FREE_RANGE), or Killhouse Facility
-    const isYard = mode === 'YARD_BOMB_5V5';
-    const isDust2 = mode === 'DUST2_BOMB_5V5';
-    const isAssault = mode === 'ASSAULT_BOMB_5V5';
-    const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
-    const isHangar = mode === 'HANGAR_BOMB_5V5';
-    const isEasternCity = mode === 'EASTERN_CITY_BOMB_5V5';
-    const isMirageAnubis = mode === 'MIRAGE_ANUBIS_BOMB_5V5';
-    const isFreeRange = mode === 'FREE_RANGE';
-    const isBombMode = isYard || isDust2 || isAssault || isIndustria || isHangar || isEasternCity || isMirageAnubis;
+    const assetMode = arenaAssetMode(mode);
+    const harness = isMapSpawnHarness(mode);
+    const isYard = assetMode === 'YARD_BOMB_5V5';
+    const isDust2 = assetMode === 'DUST2_BOMB_5V5';
+    const isAssault = assetMode === 'ASSAULT_BOMB_5V5';
+    const isIndustria = assetMode === 'INDUSTRIA_BOMB_5V5';
+    const isHangar = assetMode === 'HANGAR_BOMB_5V5';
+    const isEasternCity = assetMode === 'EASTERN_CITY_BOMB_5V5';
+    const isMirageAnubis = assetMode === 'MIRAGE_ANUBIS_BOMB_5V5';
+    const isFreeRange = assetMode === 'FREE_RANGE';
+    const isBombMode =
+      !harness &&
+      (isYard ||
+        isDust2 ||
+        isAssault ||
+        isIndustria ||
+        isHangar ||
+        isEasternCity ||
+        isMirageAnubis);
 
     // Prefer prepareMatchArena (Loading 2) to have already loaded the GLB.
     // Fallback await-path only if somehow starting without prepare.
@@ -2367,8 +2404,10 @@ export class TacticalFPSEngine {
       this.yaw = INDUSTRIA_SPAWN_YAW;
       this.pitch = 0;
       this.scheduleFloorResnap(INDUSTRIA_ATTACKER_SPAWN.y);
-      this.yardBombSystem.resetRound('INDUSTRIA_BOMB_5V5', keepMatchScore);
-      this.state.yardBomb = { ...this.yardBombSystem.info };
+      if (!harness) {
+        this.yardBombSystem.resetRound('INDUSTRIA_BOMB_5V5', keepMatchScore);
+        this.state.yardBomb = { ...this.yardBombSystem.info };
+      }
     } else if (isHangar) {
       this.ensureGlbMapThenPlace(
         this.hangarLevelData,
@@ -2384,8 +2423,10 @@ export class TacticalFPSEngine {
       this.yaw = HANGAR_SPAWN_YAW;
       this.pitch = 0;
       this.scheduleFloorResnap(HANGAR_ATTACKER_SPAWN.y);
-      this.yardBombSystem.resetRound('HANGAR_BOMB_5V5', keepMatchScore);
-      this.state.yardBomb = { ...this.yardBombSystem.info };
+      if (!harness) {
+        this.yardBombSystem.resetRound('HANGAR_BOMB_5V5', keepMatchScore);
+        this.state.yardBomb = { ...this.yardBombSystem.info };
+      }
     } else if (isEasternCity) {
       this.ensureGlbMapThenPlace(
         this.easternCityLevelData,
@@ -2401,8 +2442,10 @@ export class TacticalFPSEngine {
       this.yaw = EASTERN_CITY_SPAWN_YAW;
       this.pitch = 0;
       this.scheduleFloorResnap(EASTERN_CITY_ATTACKER_SPAWN.y);
-      this.yardBombSystem.resetRound('EASTERN_CITY_BOMB_5V5', keepMatchScore);
-      this.state.yardBomb = { ...this.yardBombSystem.info };
+      if (!harness) {
+        this.yardBombSystem.resetRound('EASTERN_CITY_BOMB_5V5', keepMatchScore);
+        this.state.yardBomb = { ...this.yardBombSystem.info };
+      }
     } else if (isMirageAnubis) {
       this.ensureGlbMapThenPlace(
         this.mirageAnubisLevelData,
@@ -2418,8 +2461,10 @@ export class TacticalFPSEngine {
       this.yaw = MIRAGE_ANUBIS_SPAWN_YAW;
       this.pitch = 0;
       this.scheduleFloorResnap(MIRAGE_ANUBIS_ATTACKER_SPAWN.y);
-      this.yardBombSystem.resetRound('MIRAGE_ANUBIS_BOMB_5V5', keepMatchScore);
-      this.state.yardBomb = { ...this.yardBombSystem.info };
+      if (!harness) {
+        this.yardBombSystem.resetRound('MIRAGE_ANUBIS_BOMB_5V5', keepMatchScore);
+        this.state.yardBomb = { ...this.yardBombSystem.info };
+      }
     } else if (isYard) {
       this.playerPos.set(
         YARD_ATTACKER_SPAWN.x,
@@ -2446,6 +2491,23 @@ export class TacticalFPSEngine {
     this.isGrounded = true;
     this.state.isCrouchingToggled = false;
     this.state.isProneToggled = false;
+
+    if (harness) {
+      // Isolated floor test: no bomb HUD, no bots, no online overwrite.
+      this.state.yardBomb = undefined;
+      this.targets.forEach((t) => {
+        t.isDown = true;
+        t.health = 0;
+        t.root.visible = false;
+        t.root.position.set(0, -999, 0);
+      });
+      this.state.targetsRemaining = 0;
+      this.state.totalTargetsInDrill = 0;
+      this.applyPendingFloorSnap();
+      this.syncYawObjectToPlayerFeet();
+      this.emitHud(true);
+      return;
+    }
 
     // Reset all targets to their exact spawn positions & fresh AI navigation state
     let activeCount = 0;
@@ -3569,36 +3631,41 @@ export class TacticalFPSEngine {
 
   private emitHud(force = false): void {
     const mode = this.state.drillMode;
-    const debugModes =
-      mode === 'INDUSTRIA_BOMB_5V5' ||
-      mode === 'HANGAR_BOMB_5V5' ||
-      mode === 'EASTERN_CITY_BOMB_5V5' ||
-      mode === 'MIRAGE_ANUBIS_BOMB_5V5';
-    if (debugModes) {
+    if (shouldForceSpawnDebug(mode, true)) {
       const col = this.getActiveGlbCollider();
       const wb = col?.worldBounds;
+      const groundY = col?.ready
+        ? Number(
+            col
+              .getGroundHeight(
+                this.playerPos.x,
+                this.playerPos.y + 0.1,
+                this.playerPos.z
+              )
+              .toFixed(3)
+          )
+        : -999;
+      const delta =
+        groundY > -900 ? Math.abs(groundY - this.playerPos.y) : 999;
       this.state.spawnDebug = {
         mode,
         xz: `${this.playerPos.x.toFixed(2)}, ${this.playerPos.z.toFixed(2)}`,
         feetY: Number(this.playerPos.y.toFixed(3)),
-        groundY: col?.ready
-          ? Number(
-              col
-                .getGroundHeight(
-                  this.playerPos.x,
-                  this.playerPos.y + 0.1,
-                  this.playerPos.z
-                )
-                .toFixed(3)
-            )
-          : -999,
+        groundY,
         ready: Boolean(col?.ready),
         tris: col?.triangleCount ?? 0,
         aabb: wb && !wb.isEmpty()
           ? `${wb.min.x.toFixed(0)}..${wb.max.x.toFixed(0)} x ${wb.min.y.toFixed(0)}..${wb.max.y.toFixed(0)} x ${wb.min.z.toFixed(0)}..${wb.max.z.toFixed(0)}`
           : 'EMPTY',
+        harness: isMapSpawnHarness(mode),
+        note:
+          !col?.ready
+            ? 'COLIDER NAO READY'
+            : delta > 0.85
+              ? `UNDER/OFF FLOOR dY=${delta.toFixed(2)}`
+              : 'ON FLOOR',
       };
-    } else {
+    } else if (!isNewGlbBombArena(mode) && !isMapSpawnHarness(mode)) {
       this.state.spawnDebug = undefined;
     }
     if (force) this.hudForceEmit.value = true;

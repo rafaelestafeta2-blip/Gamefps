@@ -142,6 +142,8 @@ interface YardMatchLoadingModalProps {
     onProgress: (pct: number, statusLabel: string) => void
   ) => Promise<void>;
   onComplete: () => void;
+  /** Escape hatch when prepare hangs — return to menu. */
+  onCancel?: () => void;
 }
 
 const YARD_RADAR_IMAGE = '/assets/aistudio/Yard_Map_Radar_7754e5f9.webp';
@@ -150,14 +152,19 @@ const TUTORIAL_STORAGE_KEY = 'kinetic_plant_bomb_tutorial_played';
 const BRIEFING_DURATION_MS = 40000;
 /** Soft UI countdown only — must NOT force-start match before GLB+collider ready. */
 const ONLINE_BARRIER_TIMEOUT_MS = 25000;
-/** Hard cap so Hangar/Eastern/etc never freeze forever on VS with 0% progress. */
-/** Hard cap for prepare race; on timeout we KEEP WAITING if still loading (no void fallback). */
-const PREPARE_TIMEOUT_MS = 180000;
+/**
+ * Soft wait for prepare. After this we settle: if prepare finishes soon, enter;
+ * if still hung (legacy compile hang), abort to menu — never spin at 92% for 10min.
+ */
+const PREPARE_TIMEOUT_MS = 90000;
+/** Extra grace after soft timeout before aborting. */
+const PREPARE_GRACE_MS = 12000;
 
 export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   mode = 'YARD_BOMB_5V5',
   onPrepareMap,
   onComplete,
+  onCancel,
 }) => {
   const [showRoster, setShowRoster] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -176,14 +183,22 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   const mapCodeLabel =
     mode === 'DUST2_BOMB_5V5'
       ? 'DE_DUST2'
-      : mode === 'INDUSTRIA_BOMB_5V5'
-        ? 'INDUSTRIA'
-        : mode === 'HANGAR_BOMB_5V5'
-          ? 'HANGAR'
-          : mode === 'EASTERN_CITY_BOMB_5V5'
-            ? 'EASTERN CITY'
-          : mode === 'MIRAGE_ANUBIS_BOMB_5V5'
-            ? 'MIRAGE ANUBIS'
+      : mode === 'INDUSTRIA_BOMB_5V5' || mode === 'MAP_TEST_INDUSTRIA'
+        ? mode === 'MAP_TEST_INDUSTRIA'
+          ? 'TESTE · INDUSTRIA'
+          : 'INDUSTRIA'
+        : mode === 'HANGAR_BOMB_5V5' || mode === 'MAP_TEST_HANGAR'
+          ? mode === 'MAP_TEST_HANGAR'
+            ? 'TESTE · HANGAR'
+            : 'HANGAR'
+          : mode === 'EASTERN_CITY_BOMB_5V5' || mode === 'MAP_TEST_EASTERN'
+            ? mode === 'MAP_TEST_EASTERN'
+              ? 'TESTE · EASTERN'
+              : 'EASTERN CITY'
+          : mode === 'MIRAGE_ANUBIS_BOMB_5V5' || mode === 'MAP_TEST_MIRAGE'
+            ? mode === 'MAP_TEST_MIRAGE'
+              ? 'TESTE · MIRAGE'
+              : 'MIRAGE ANUBIS'
           : mode === 'ASSAULT_BOMB_5V5'
           ? 'CS_ASSAULT'
           : mode === 'FREE_RANGE'
@@ -193,7 +208,17 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
               : mode === 'TACTICAL_WAVE'
                 ? 'CONTRA IA'
                 : 'YARD';
-  const bgScreenshot = thumbForDrillMode(mode);
+  const bgScreenshot = thumbForDrillMode(
+    mode === 'MAP_TEST_INDUSTRIA'
+      ? 'INDUSTRIA_BOMB_5V5'
+      : mode === 'MAP_TEST_HANGAR'
+        ? 'HANGAR_BOMB_5V5'
+        : mode === 'MAP_TEST_EASTERN'
+          ? 'EASTERN_CITY_BOMB_5V5'
+          : mode === 'MAP_TEST_MIRAGE'
+            ? 'MIRAGE_ANUBIS_BOMB_5V5'
+            : mode
+  );
   const isOnline = isOnlineMatchActive();
 
   const finishLoading = () => {
@@ -264,10 +289,27 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
             }),
           ]);
           if (timed === 'timeout') {
-            // Do NOT start match into empty arena (white void). Await real prepare.
-            console.warn('Arena prepare still running past soft timeout — waiting:', mode);
-            setStatusText('MAPA PESADO — AINDA CARREGANDO COLISORES (NÃO INICIAR NO VOID)...');
-            await preparePromise;
+            console.warn('Arena prepare soft-timeout — grace then abort:', mode);
+            setStatusText(
+              'MAPA PESADO / WARMUP LENTO — AGUARDANDO MAIS 12s (DEPOIS VOLTA AO MENU)...'
+            );
+            const settled = await Promise.race([
+              preparePromise.then(() => 'ok' as const),
+              new Promise<'timeout'>((resolve) => {
+                window.setTimeout(() => resolve('timeout'), PREPARE_GRACE_MS);
+              }),
+            ]);
+            if (settled === 'timeout') {
+              if (!cancelled) {
+                setStatusText(
+                  'TIMEOUT NO LOADING (~92% era compile/granada) — VOLTE E TENTE DE NOVO'
+                );
+                setProgress((p) => Math.max(p, 92));
+                localMapReadyRef.current = false;
+                setIsArenaReady(false);
+              }
+              return;
+            }
           }
         }
         if (cancelled) return;
@@ -286,8 +328,9 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       } catch (err) {
         console.error('Erro ao preparar arena 3D:', err);
         if (!cancelled) {
-          // Stay on loading screen — starting without GLB = FrontSide white void.
-          setStatusText('FALHA NO GLB — TOQUE VOLTAR E TENTE DE NOVO (NÃO INICIAR NO VOID)');
+          setStatusText(
+            'FALHA NO GLB/COLISOR — TOQUE CANCELAR E TENTE DE NOVO (NÃO INICIAR NO VOID)'
+          );
           setProgress((p) => Math.max(p, 8));
           localMapReadyRef.current = false;
           setIsArenaReady(false);
@@ -302,18 +345,23 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       const remainingSec = Math.max(0, Math.ceil((BRIEFING_DURATION_MS - elapsed) / 1000));
       setSecondsLeft(remainingSec);
 
-      // Heartbeat so the bar never looks frozen while GLB/Draco work is silent.
+      // Heartbeat — may climb to 99 while warmups run (real stages report 90→100).
       if (!localMapReadyRef.current) {
         setProgress((prev) => {
-          if (prev >= 92) return prev;
-          const soft = Math.min(92, Math.floor(elapsed / 900));
+          if (prev >= 99) return prev;
+          const soft = Math.min(99, Math.floor(elapsed / 900));
           return Math.max(prev, soft);
         });
       }
 
-      if (!localMapReadyRef.current && elapsed >= PREPARE_TIMEOUT_MS && !completedRef.current) {
-        // Soft notice only — never finishLoading() without a ready collider.
-        setStatusText('AINDA PREPARANDO ARENA 3D… AGUARDE (EVITA VOID BRANCO)');
+      if (
+        !localMapReadyRef.current &&
+        elapsed >= PREPARE_TIMEOUT_MS &&
+        !completedRef.current
+      ) {
+        setStatusText(
+          'AINDA EM WARMUP GPU/GRANADA… SE TRAVAR, TOQUE CANCELAR'
+        );
       }
 
       if (isOnline && localMapReadyRef.current && elapsed >= ONLINE_BARRIER_TIMEOUT_MS && !completedRef.current) {
@@ -553,16 +601,26 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center justify-between text-[10px] sm:text-xs font-mono text-slate-300 mt-1.5">
-          <div>
+        <div className="flex items-center justify-between gap-2 text-[10px] sm:text-xs font-mono text-slate-300 mt-1.5">
+          <div className="shrink-0">
             <span className="text-slate-400 block text-[9px]">Modo de Jogo:</span>
             <span className="font-bold text-white">Plant the Bomb (5 vs 5)</span>
           </div>
-          <div className="text-center px-2 truncate max-w-md text-[10px] text-sky-300">{statusText}</div>
-          <div className="text-right">
-            <span className="text-slate-400 block text-[9px]">META DA PARTIDA:</span>
-            <span className="font-bold text-amber-400 tabular-nums">6 Rodadas</span>
+          <div className="flex-1 text-center px-2 text-[10px] sm:text-[11px] text-amber-200 font-bold leading-snug">
+            {statusText}
           </div>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={() => {
+                completedRef.current = true;
+                onCancel();
+              }}
+              className="shrink-0 px-3 py-1.5 rounded border border-red-400/70 bg-red-950/80 text-red-200 font-display font-black text-[10px] tracking-wider uppercase active:scale-95"
+            >
+              CANCELAR
+            </button>
+          )}
         </div>
       </footer>
     </div>

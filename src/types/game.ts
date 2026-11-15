@@ -45,7 +45,12 @@ export type DrillMode =
   | 'INDUSTRIA_BOMB_5V5'
   | 'HANGAR_BOMB_5V5'
   | 'EASTERN_CITY_BOMB_5V5'
-  | 'MIRAGE_ANUBIS_BOMB_5V5';
+  | 'MIRAGE_ANUBIS_BOMB_5V5'
+  /** Isolated GLB+floor harness (no online / bomb / bots). */
+  | 'MAP_TEST_INDUSTRIA'
+  | 'MAP_TEST_HANGAR'
+  | 'MAP_TEST_EASTERN'
+  | 'MAP_TEST_MIRAGE';
 export type QualityPreset = 'COMPETITIVE_120' | 'BALANCED_60' | 'ULTRA_PBR';
 export type GyroMode = 'OFF' | 'ADS_ONLY' | 'ALWAYS';
 
@@ -198,7 +203,7 @@ export interface HudState {
   stance: 'STAND' | 'CROUCH' | 'PRONE' | 'SPRINT' | 'SLIDE';
   leanDirection: -1 | 0 | 1; // -1 Left (Q), 0 Center, 1 Right (E)
   playerPos: { x: number; y?: number; z: number };
-  /** Temporary Android void-debug (new GLB maps only). */
+  /** Android void-debug — forced on for new GLB / harness / ?spawndbg=1. */
   spawnDebug?: {
     mode: string;
     xz: string;
@@ -207,6 +212,8 @@ export interface HudState {
     ready: boolean;
     tris: number;
     aabb: string;
+    harness?: boolean;
+    note?: string;
   };
   playerYaw: number;
   radarTargets: Array<{

@@ -48,10 +48,13 @@ export class TacticalSkySystem {
   public configureForMode(mode: DrillMode, fogEnabled = true): void {
     const isDust2 = mode === 'DUST2_BOMB_5V5';
     const isAssault = mode === 'ASSAULT_BOMB_5V5';
-    const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
-    const isHangar = mode === 'HANGAR_BOMB_5V5';
-    const isEasternCity = mode === 'EASTERN_CITY_BOMB_5V5';
-    const isMirageAnubis = mode === 'MIRAGE_ANUBIS_BOMB_5V5';
+    const isIndustria =
+      mode === 'INDUSTRIA_BOMB_5V5' || mode === 'MAP_TEST_INDUSTRIA';
+    const isHangar = mode === 'HANGAR_BOMB_5V5' || mode === 'MAP_TEST_HANGAR';
+    const isEasternCity =
+      mode === 'EASTERN_CITY_BOMB_5V5' || mode === 'MAP_TEST_EASTERN';
+    const isMirageAnubis =
+      mode === 'MIRAGE_ANUBIS_BOMB_5V5' || mode === 'MAP_TEST_MIRAGE';
     const isYard = mode === 'YARD_BOMB_5V5';
     this.isOutdoor = isDust2 || isAssault || isIndustria || isHangar || isEasternCity || isMirageAnubis || isYard;
 

@@ -260,7 +260,7 @@ export default function App() {
       />
 
       {gameSettings.showFpsCounter && hud.screen === 'PLAYING' && (
-        <div className="absolute top-2 left-2 z-50 pointer-events-none px-2 py-0.5 rounded bg-black/80 border border-amber-500/50 font-mono text-[10px] text-amber-400 flex items-center gap-2 shadow-lg">
+        <div className="absolute top-2 right-2 z-50 pointer-events-none px-2 py-0.5 rounded bg-black/80 border border-amber-500/50 font-mono text-[10px] text-amber-400 flex items-center gap-2 shadow-lg">
           <span className="font-bold">{hud.liveFps} FPS</span>
           <span className="text-zinc-500">|</span>
           <span className="text-zinc-400">{(1000 / Math.max(1, hud.liveFps)).toFixed(1)}ms</span>
@@ -268,6 +268,33 @@ export default function App() {
           <span className="text-zinc-400">DPI {hud.renderScalePercent}%</span>
         </div>
       )}
+
+      {/* SPAWNDBG — App-level (not buried in HUD); impossible to miss on APK */}
+      {hud.screen === 'PLAYING' &&
+        hud.spawnDebug &&
+        (gameSettings.showSpawnDebug ||
+          hud.spawnDebug.harness ||
+          (typeof window !== 'undefined' &&
+            /(?:\?|&)spawndbg=1\b/.test(window.location.search))) && (
+          <div
+            className="absolute bottom-3 left-2 right-2 z-[200] pointer-events-none font-mono text-[12px] sm:text-sm leading-snug text-black bg-lime-300 border-4 border-black px-3 py-2 shadow-[0_0_0_3px_#84cc16]"
+            style={{ textShadow: 'none' }}
+          >
+            <div className="font-black tracking-wide">
+              SPAWNDBG {hud.spawnDebug.harness ? '· TESTE MAPA' : ''} ·{' '}
+              {hud.spawnDebug.mode}
+            </div>
+            <div>
+              xz={hud.spawnDebug.xz} · feetY={hud.spawnDebug.feetY} · ground=
+              {hud.spawnDebug.groundY}
+            </div>
+            <div>
+              ready={String(hud.spawnDebug.ready)} · tris={hud.spawnDebug.tris} ·{' '}
+              {hud.spawnDebug.note || ''}
+            </div>
+            <div className="truncate">aabb {hud.spawnDebug.aabb}</div>
+          </div>
+        )}
 
       {hud.screen === 'INTRO' && (
         <IntroScreen
@@ -315,6 +342,11 @@ export default function App() {
             // Enter PLAYING first, then dismiss loading — avoids MAIN_MENU flash.
             launchMatchNow(targetMode);
             setLoadingBombMode(null);
+          }}
+          onCancel={() => {
+            setLoadingBombMode(null);
+            engineRef.current?.returnToMainMenu?.();
+            setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
           }}
         />
       )}

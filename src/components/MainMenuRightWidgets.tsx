@@ -66,6 +66,13 @@ export const PLAY_MODE_OPTIONS: Array<{
   { id: 'VS_AI', label: 'CONTRA IA - PATRULHAS', arena: 'TACTICAL_WAVE' },
 ];
 
+const MAP_TEST_PICKS: Array<{ mode: DrillMode; short: string }> = [
+  { mode: 'MAP_TEST_INDUSTRIA', short: 'IND' },
+  { mode: 'MAP_TEST_HANGAR', short: 'HANG' },
+  { mode: 'MAP_TEST_EASTERN', short: 'EAST' },
+  { mode: 'MAP_TEST_MIRAGE', short: 'MIR' },
+];
+
 interface MainMenuRightWidgetsProps {
   currentRank: CompetitiveRankTier;
   nextRank: CompetitiveRankTier | null;
@@ -74,6 +81,7 @@ interface MainMenuRightWidgetsProps {
   selectedPlayMode: MainMenuPlayModeId;
   onCyclePlayMode: (next: MainMenuPlayModeId) => void;
   onLaunchSelectedMode: () => void;
+  onStartMapTest?: (mode: DrillMode) => void;
   onOpenRankedScreen: () => void;
   onOpenRanksModal: () => void;
   onOpenInventory: () => void;
@@ -93,6 +101,7 @@ export const MainMenuRightWidgets: React.FC<MainMenuRightWidgetsProps> = ({
   selectedPlayMode,
   onCyclePlayMode,
   onLaunchSelectedMode,
+  onStartMapTest,
   onOpenRankedScreen,
   onOpenRanksModal,
   onOpenInventory,
@@ -294,6 +303,37 @@ export const MainMenuRightWidgets: React.FC<MainMenuRightWidgetsProps> = ({
             })}
           </div>
         </div>
+
+        {/* 3c. TESTE MAPA — isolado (GLB+chão só; filtra void vs online) */}
+        {onStartMapTest && (
+          <div className="w-full rounded border border-lime-500/60 bg-[#06140a]/95 p-1 lg:p-1.5 shadow-[0_0_14px_rgba(132,204,22,0.25)]">
+            <div className="px-0.5 pb-1 flex items-center justify-between gap-1">
+              <span className="font-display font-black text-[9px] lg:text-[11px] tracking-wider uppercase text-lime-300">
+                TESTE MAPA
+              </span>
+              <span className="text-[7px] lg:text-[9px] font-mono text-lime-200/80 uppercase truncate">
+                só GLB+chão
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {MAP_TEST_PICKS.map((m) => (
+                <button
+                  key={m.mode}
+                  type="button"
+                  title={`Teste isolado ${m.short}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    soundEngine.playMenuSelect();
+                    onStartMapTest(m.mode);
+                  }}
+                  className="px-0.5 py-1.5 rounded border border-lime-400/50 bg-lime-950/50 hover:bg-lime-800/40 text-[8px] lg:text-[9px] font-mono font-black text-lime-200 uppercase tracking-wide"
+                >
+                  {m.short}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 4. BOTÃO GIGANTE INICIAR >> */}
         <button

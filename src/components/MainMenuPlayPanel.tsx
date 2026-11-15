@@ -131,6 +131,7 @@ export const MainMenuPlayPanel: React.FC<MainMenuPlayPanelProps> = ({
         selectedPlayMode={selectedPlayMode}
         onCyclePlayMode={setSelectedPlayMode}
         onLaunchSelectedMode={handleLaunchSelectedMode}
+        onStartMapTest={(mode) => onStartDrill(mode)}
         onOpenRankedScreen={() => onOpenRankedScreen('DUST2_BOMB_5V5')}
         onOpenRanksModal={onOpenRanksTab}
         onOpenInventory={onOpenInventory}

@@ -42,6 +42,8 @@ export interface GameSettings {
   tacticalPostFx: boolean;
   fpsLimit: FpsLimit;
   showFpsCounter: boolean;
+  /** Force SPAWNDBG overlay (also auto-on for new GLB maps / ?spawndbg=1). */
+  showSpawnDebug: boolean;
   batterySaver: boolean;
   vibration: boolean;
   volumeMaster: number; // 0..100
@@ -245,6 +247,7 @@ export function getDefaultGameSettings(): GameSettings {
     preset: 'AUTO',
     tacticalPostFx: cap.tier === 'HIGH' || cap.tier === 'ULTRA',
     showFpsCounter: false,
+    showSpawnDebug: true,
     batterySaver: false,
     vibration: true,
     volumeMaster: 100,
@@ -321,6 +324,10 @@ export function validateSettings(s: unknown): GameSettings {
       typeof raw.showFpsCounter === 'boolean'
         ? raw.showFpsCounter
         : def.showFpsCounter,
+    showSpawnDebug:
+      typeof raw.showSpawnDebug === 'boolean'
+        ? raw.showSpawnDebug
+        : def.showSpawnDebug,
     batterySaver:
       typeof raw.batterySaver === 'boolean' ? raw.batterySaver : def.batterySaver,
     vibration:

@@ -10,6 +10,10 @@ export const MAP_GLB_BY_MODE: Partial<Record<DrillMode, string>> = {
   EASTERN_CITY_BOMB_5V5: '/models/maps/eastern_city_2k.glb',
   MIRAGE_ANUBIS_BOMB_5V5: '/models/maps/mirage_anubis_2k.glb',
   FREE_RANGE: '/models/maps/shooting_range_2k.glb',
+  MAP_TEST_INDUSTRIA: '/models/maps/industria_2k.glb',
+  MAP_TEST_HANGAR: '/models/maps/hangar_2k.glb',
+  MAP_TEST_EASTERN: '/models/maps/eastern_city_2k.glb',
+  MAP_TEST_MIRAGE: '/models/maps/mirage_anubis_2k.glb',
 };
 
 const DRACO_DECODER_PATH =

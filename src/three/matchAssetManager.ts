@@ -47,6 +47,7 @@ import {
   StanderTiroBundle,
 } from './standerTiroBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
+import { arenaAssetMode, isMapSpawnHarness } from './mapModeUtils';
 
 /** Block match start when GLB bake produced an empty / unready floor (→ white void). */
 function assertGlbFloorReady(label: string, bundle: Dust2LevelBundle): void {
@@ -112,18 +113,19 @@ export async function prepareMatchArena(
     onProgress,
   } = params;
 
-  const isDust2 = mode === 'DUST2_BOMB_5V5';
-  const isAssault = mode === 'ASSAULT_BOMB_5V5';
-  const isIndustria = mode === 'INDUSTRIA_BOMB_5V5';
-  const isHangar = mode === 'HANGAR_BOMB_5V5';
-  const isEasternCity = mode === 'EASTERN_CITY_BOMB_5V5';
-  const isMirageAnubis = mode === 'MIRAGE_ANUBIS_BOMB_5V5';
-  const isYard = mode === 'YARD_BOMB_5V5';
-  const isFreeRange = mode === 'FREE_RANGE';
+  const assetMode = arenaAssetMode(mode);
+  const isDust2 = assetMode === 'DUST2_BOMB_5V5';
+  const isAssault = assetMode === 'ASSAULT_BOMB_5V5';
+  const isIndustria = assetMode === 'INDUSTRIA_BOMB_5V5';
+  const isHangar = assetMode === 'HANGAR_BOMB_5V5';
+  const isEasternCity = assetMode === 'EASTERN_CITY_BOMB_5V5';
+  const isMirageAnubis = assetMode === 'MIRAGE_ANUBIS_BOMB_5V5';
+  const isYard = assetMode === 'YARD_BOMB_5V5';
+  const isFreeRange = assetMode === 'FREE_RANGE';
 
   enableMapAssetCache();
   onProgress(3, 'INICIALIZANDO CACHE DE ARENA + DECODER DRACO...');
-  await prefetchMapAssetsForMode(mode, (ratio, label) => {
+  await prefetchMapAssetsForMode(assetMode, (ratio, label) => {
     onProgress(3 + ratio * 12, label);
   });
 
@@ -312,8 +314,9 @@ export async function prepareMatchArena(
     reportProgress(55, 'ATIVANDO GEOMETRIA E CAIXAS DE COLISÃO BOX3 DA ARENA...');
   }
 
-  // Etapa 1B: Carregamento do modelo 3D dos Bots (Pro.Rifle.Pack.glb) + 8 Clipes de Animação Mixamo
-  if (!isFreeRange) {
+  // Etapa 1B: Bots (skip for MAP_TEST harness — floor-only filter)
+  const skipBots = isMapSpawnHarness(mode);
+  if (!isFreeRange && !skipBots) {
     reportProgress(
       72,
       'CARREGANDO OPERADORES 3D (PRO.RIFLE.PACK.GLB) E ANIMAÇÕES MIXAMO...'
@@ -426,38 +429,79 @@ export async function prepareMatchArena(
     }
   }
 
-  // Etapa 3: Pré-decodificação de áudio tático + Compilação WebGL (renderer.compile)
-  reportProgress(90, 'PRÉ-DECODIFICANDO ÁUDIOS TÁTICOS E COMPILANDO SHADERS GPU...');
-  await soundEngine.prewarmGrenadeAudio();
+  // Etapa 3: optional warmups — MUST NOT block match forever.
+  // Android WebView often stalls at 92% on compileAsync for Eastern/Hangar
+  // (~minutes, no progress). Floor/collider is already proven above.
+  const withTimeout = async <T,>(
+    work: Promise<T>,
+    ms: number
+  ): Promise<'ok' | 'timeout'> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const raced = await Promise.race([
+        work.then(() => 'ok' as const),
+        new Promise<'timeout'>((resolve) => {
+          timer = setTimeout(() => resolve('timeout'), ms);
+        }),
+      ]);
+      return raced;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
 
-  reportProgress(92, 'AQUECENDO GRANADAS 3D (GLB + BIND 1P)...');
-  await grenadeSystem.ensureGrenadeAssetsReady();
+  reportProgress(90, 'PRÉ-DECODIFICANDO ÁUDIOS TÁTICOS...');
+  await withTimeout(soundEngine.prewarmGrenadeAudio(), 8000);
+
+  reportProgress(92, 'AQUECENDO GRANADAS 3D (LIMITE 12s — NÃO BLOQUEIA)...');
+  const grenadeWarm = await withTimeout(
+    grenadeSystem.ensureGrenadeAssetsReady(),
+    12000
+  );
+  if (grenadeWarm === 'timeout') {
+    reportProgress(93, 'GRANADAS AINDA EM BACKGROUND — SEGUINDO (FLOOR PRONTO)...');
+  }
 
   if (!isSoftwareGl) {
+    reportProgress(94, 'COMPILANDO SHADERS GPU (LIMITE 15s)...');
     try {
-      if (
+      const compileWork =
         'compileAsync' in renderer &&
         typeof renderer.compileAsync === 'function'
-      ) {
-        await renderer.compileAsync(scene, camera);
+          ? renderer.compileAsync(scene, camera)
+          : Promise.resolve().then(() => {
+              renderer.compile(scene, camera);
+            });
+      const compileResult = await withTimeout(
+        Promise.resolve(compileWork).then(() => undefined),
+        15000
+      );
+      if (compileResult === 'timeout') {
+        reportProgress(
+          97,
+          'COMPILE TIMEOUT — ENTRANDO NA ARENA (COLISOR JÁ PRONTO)...'
+        );
       } else {
-        renderer.compile(scene, camera);
+        reportProgress(
+          96,
+          'AQUECENDO PIPELINE DE SOMBRAS, VIEWMODEL E GRANADAS NA GPU...'
+        );
+        grenadeSystem.prewarmShadersAndTextures(renderer, isSoftwareGl);
+        renderer.render(scene, camera);
       }
     } catch {
-      renderer.compile(scene, camera);
+      try {
+        renderer.compile(scene, camera);
+      } catch {
+        /* optional warm */
+      }
+      reportProgress(97, 'COMPILE FALHOU — SEGUINDO COM FLOOR PRONTO...');
     }
-
-    reportProgress(
-      96,
-      'AQUECENDO PIPELINE DE SOMBRAS, VIEWMODEL E GRANADAS NA GPU...'
-    );
-    grenadeSystem.prewarmShadersAndTextures(renderer, isSoftwareGl);
-    renderer.render(scene, camera);
   }
 
   reportProgress(
     100,
-    'ARENA 100% COMPILADA — LIBERANDO CÂMERA E CONTROLES DE COMBATE!'
+    'ARENA PRONTA — LIBERANDO CÂMERA E CONTROLES DE COMBATE!'
   );
 }
 

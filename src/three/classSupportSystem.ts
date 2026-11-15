@@ -414,12 +414,17 @@ export function reviveLocalPlayer(engine: any, viaLabel = 'REANIMADO'): void {
     engine.playerDeathTp?.getCorpsePosition?.() ||
     engine.playerPos;
   if (corpse) {
-    engine.playerPos.set(corpse.x, corpse.y, corpse.z);
-    engine.yawObject.position.set(
-      corpse.x,
-      corpse.y + (engine.currentEyeHeight || 1.6),
-      corpse.z
-    );
+    // Same playable-floor path as first spawn — never revive under FrontSide.
+    if (typeof engine.snapLocalPlayerToPlayableFloor === 'function') {
+      engine.snapLocalPlayerToPlayableFloor(corpse.x, corpse.z, corpse.y);
+    } else {
+      engine.playerPos.set(corpse.x, corpse.y, corpse.z);
+      engine.yawObject.position.set(
+        corpse.x,
+        corpse.y + (engine.currentEyeHeight || 1.6),
+        corpse.z
+      );
+    }
   }
   try {
     engine.playerDeathTp?.stop?.(engine.camera, engine.weaponRig.root);
