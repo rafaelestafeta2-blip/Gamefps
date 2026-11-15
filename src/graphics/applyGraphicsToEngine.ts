@@ -21,9 +21,6 @@ interface InternalEngineAccess {
   configurePostFx?: (opts: {
     enabled: boolean;
     sharpen?: number;
-    bloom?: number;
-    exposure?: number;
-    lift?: number;
   }) => void;
   state: {
     fpsLimit: number;
@@ -99,14 +96,9 @@ export function applyGraphicsToEngine(
     settings.fpsLimit !== 30 &&
     settings.resolution !== 'SCALE_50';
   if (typeof engine.configurePostFx === 'function') {
-    // Keep grit like Dust2 mid-alley: less lift/bloom, slight sharpen; avoid milky walls.
-    const acesOn = settings.acesToneMapping;
     engine.configurePostFx({
       enabled: postEnabled,
-      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.3 : 0.22,
-      bloom: settings.muzzleLight ? 0.1 : 0.06,
-      exposure: acesOn ? 0.98 : 0.96,
-      lift: acesOn ? 0.008 : 0.005,
+      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.7 : 0.55,
     });
   }
 
