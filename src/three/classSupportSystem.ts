@@ -17,6 +17,7 @@ import {
   isOnlineMatchActive,
   publishClassSupportEvent,
 } from '../multiplayer/onlineRoomService';
+import { transitionBotAnim } from './botCharacterClips';
 import { YardBotEntity } from './yardPropsBuilder';
 import {
   getKitUseTimings,
@@ -362,7 +363,10 @@ export function reviveAllyBot(engine: any, bot: YardBotEntity): void {
   const ctrl = bot.root.userData?.botAnimCtrl;
   if (ctrl) {
     ctrl.deathElapsed = 0;
-    ctrl.currentState = 'RIFLE_IDLE';
+    // Leave the clamped death clip. Forcing currentState to idle without a
+    // transition skips the recovery path and the ally stays in the corpse pose.
+    const resume = ctrl.crouchStance ? 'RIFLE_CROUCH' : 'RIFLE_IDLE';
+    transitionBotAnim(ctrl, resume, 0.15);
   }
   if (engine.yardBombSystem?.info) {
     // alliesAlive recount happens in bomb tick; nudge score feel
@@ -984,7 +988,7 @@ export function updateClassSupport(engine: any, dt: number): void {
       } else if (!cs.cprGestureStarted && cs.reviveCharge > 0.05) {
         cs.cprGestureStarted = true;
         try {
-          engine.playerGesture?.playCpr?.(target.root.position, engine.yaw);
+          engine.playerGesture?.playCpr?.(engine.playerPos, engine.yaw);
         } catch {
           /* optional */
         }

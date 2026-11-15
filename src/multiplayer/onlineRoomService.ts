@@ -299,6 +299,10 @@ export async function createMultiplayerRoom(
       attachRoomSnapshotListener(roomId);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `rooms/${roomId}`);
+      // Rules reject unknown arenaMode. A local ghost room hides bots and
+      // leaves the queue stuck at 1/10 because nobody can join.
+      await leaveActiveRoom();
+      return null;
     }
   }
   return newRoom;

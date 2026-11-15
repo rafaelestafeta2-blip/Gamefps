@@ -59,6 +59,7 @@ let vanguardMedicAllyMatMap: Map<string, THREE.MeshStandardMaterial> | null = nu
 let vanguardMedicEnemyMatMap: Map<string, THREE.MeshStandardMaterial> | null = null;
 
 let loadPromise: Promise<void> | null = null;
+let medicLoadAttempts = 0;
 let sharedInvisibleHitMat: THREE.MeshBasicMaterial | null = null;
 
 export function isSniperWeaponId(weaponId?: WeaponId | null): boolean {
@@ -98,8 +99,17 @@ function ensureSharedHitMat(): void {
   if (!sharedInvisibleHitMat) sharedInvisibleHitMat = new THREE.MeshBasicMaterial({ visible: false });
 }
 
+function medicCharacterReady(): boolean {
+  return !!(
+    vanguardMedicTemplateScene &&
+    vanguardMedicClips &&
+    vanguardMedicAllyMatMap &&
+    vanguardMedicEnemyMatMap
+  );
+}
+
 export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManager): Promise<void> {
-  if (
+  const othersReady = !!(
     templateScene &&
     sharedClips &&
     sniperTemplateScene &&
@@ -108,10 +118,14 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
     vanguardRiflemanClips &&
     vanguardEngineerTemplateScene &&
     vanguardEngineerClips
-  ) {
+  );
+  // Medic GLB used to be omitted from this guard. One failed fetch then
+  // skipped every later preload and the medic silently became a rifleman.
+  if (othersReady && (medicCharacterReady() || medicLoadAttempts >= 2)) {
     return Promise.resolve();
   }
   if (loadPromise) return Promise.resolve(loadPromise);
+  medicLoadAttempts += 1;
 
   loadPromise = (async () => {
     const dracoLoader = new DRACOLoader(loadingManager);
@@ -322,7 +336,23 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
     } finally {
       dracoLoader.dispose();
     }
-  })().catch((err) => console.warn('ProRifleBotCharacter fallback:', err));
+  })()
+    .catch((err) => console.warn('ProRifleBotCharacter fallback:', err))
+    .finally(() => {
+      const coreNow = !!(
+        templateScene &&
+        sharedClips &&
+        sniperTemplateScene &&
+        sniperClips &&
+        vanguardRiflemanTemplateScene &&
+        vanguardRiflemanClips &&
+        vanguardEngineerTemplateScene &&
+        vanguardEngineerClips
+      );
+      // Keep the settled promise when the whole pack failed so the frame
+      // loop does not restart every GLB download. Retry only the medic miss.
+      if (coreNow && !medicCharacterReady()) loadPromise = null;
+    });
 
   return Promise.resolve(loadPromise);
 }

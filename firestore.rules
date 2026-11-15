@@ -62,6 +62,16 @@ service cloud.firestore {
         && data.updatedAt is string && data.updatedAt.size() <= 40;
     }
 
+    function isAllowedArenaMode(mode) {
+      return mode == 'DUST2_BOMB_5V5'
+        || mode == 'ASSAULT_BOMB_5V5'
+        || mode == 'YARD_BOMB_5V5'
+        || mode == 'INDUSTRIA_BOMB_5V5'
+        || mode == 'HANGAR_BOMB_5V5'
+        || mode == 'EASTERN_CITY_BOMB_5V5'
+        || mode == 'MIRAGE_ANUBIS_BOMB_5V5';
+    }
+
     function isValidMultiplayerRoom(data) {
       return data.keys().hasAll([
           'roomId', 'hostUid', 'arenaMode', 'isPrivate', 'status',
@@ -76,7 +86,7 @@ service cloud.firestore {
         ])
         && data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 16
         && data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128
-        && data.arenaMode is string && data.arenaMode in ['DUST2_BOMB_5V5', 'ASSAULT_BOMB_5V5', 'YARD_BOMB_5V5']
+        && data.arenaMode is string && isAllowedArenaMode(data.arenaMode)
         && data.isPrivate is bool
         && (!('queueType' in data) || (data.queueType is string && data.queueType in ['CASUAL', 'RANKED', 'Casual', 'Ranked']))
         && (!('averageMmr' in data) || isNonNegativeNumber(data.averageMmr))
