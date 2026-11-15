@@ -51,7 +51,6 @@ export class PlayerGestureThirdPerson {
     this.root.name = 'PlayerGestureThirdPerson';
     this.root.visible = false;
     this.scene.add(this.root);
-    void preloadProRifleBotCharacter();
   }
 
   private ensureModel(): boolean {

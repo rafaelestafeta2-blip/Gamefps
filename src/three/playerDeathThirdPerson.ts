@@ -54,7 +54,6 @@ export class PlayerDeathThirdPersonController {
     this.rootGroup.name = 'PlayerDeathThirdPersonAvatar';
     this.rootGroup.visible = false;
     this.scene.add(this.rootGroup);
-    void preloadProRifleBotCharacter();
   }
 
   private ensureAvatarReady(weaponId?: WeaponId): boolean {
