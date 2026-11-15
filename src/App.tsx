@@ -269,33 +269,6 @@ export default function App() {
         </div>
       )}
 
-      {/* SPAWNDBG — App-level (not buried in HUD); impossible to miss on APK */}
-      {hud.screen === 'PLAYING' &&
-        hud.spawnDebug &&
-        (gameSettings.showSpawnDebug ||
-          hud.spawnDebug.harness ||
-          (typeof window !== 'undefined' &&
-            /(?:\?|&)spawndbg=1\b/.test(window.location.search))) && (
-          <div
-            className="absolute bottom-3 left-2 right-2 z-[200] pointer-events-none font-mono text-[12px] sm:text-sm leading-snug text-black bg-lime-300 border-4 border-black px-3 py-2 shadow-[0_0_0_3px_#84cc16]"
-            style={{ textShadow: 'none' }}
-          >
-            <div className="font-black tracking-wide">
-              SPAWNDBG {hud.spawnDebug.harness ? '· TESTE MAPA' : ''} ·{' '}
-              {hud.spawnDebug.mode}
-            </div>
-            <div>
-              xz={hud.spawnDebug.xz} · feetY={hud.spawnDebug.feetY} · ground=
-              {hud.spawnDebug.groundY}
-            </div>
-            <div>
-              ready={String(hud.spawnDebug.ready)} · tris={hud.spawnDebug.tris} ·{' '}
-              {hud.spawnDebug.note || ''}
-            </div>
-            <div className="truncate">aabb {hud.spawnDebug.aabb}</div>
-          </div>
-        )}
-
       {hud.screen === 'INTRO' && (
         <IntroScreen
           onComplete={() => {

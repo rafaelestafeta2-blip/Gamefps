@@ -43,15 +43,11 @@ export function isNewGlbBombArena(mode: DrillMode): boolean {
   );
 }
 
-/** SPAWNDBG always-on for new GLB arenas / harness / ?spawndbg=1 */
+/** Spawn numbers stay off the match screen. Only ?spawndbg=1 turns them on. */
 export function shouldForceSpawnDebug(
   mode: DrillMode,
   settingsFlag?: boolean
 ): boolean {
-  if (settingsFlag === true) return true;
-  if (settingsFlag === false && !isMapSpawnHarness(mode) && !isNewGlbBombArena(mode)) {
-    return false;
-  }
   if (typeof window !== 'undefined') {
     try {
       const q = new URLSearchParams(window.location.search);
@@ -61,6 +57,5 @@ export function shouldForceSpawnDebug(
       /* ignore */
     }
   }
-  // Default ON for new maps + harness so APK void debug cannot be missed.
-  return isNewGlbBombArena(mode) || isMapSpawnHarness(mode);
+  return settingsFlag === true && (isNewGlbBombArena(mode) || isMapSpawnHarness(mode));
 }

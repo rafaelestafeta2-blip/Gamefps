@@ -310,7 +310,6 @@ export const GraphicsSettingsPanel: React.FC<GraphicsSettingsPanelProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <SettingsToggle label="Contador de FPS em Tempo Real" description="Exibe FPS, ms e DPI no topo da tela" value={settings.showFpsCounter} onChange={(v) => update({ showFpsCounter: v })} />
-                <SettingsToggle label="SPAWNDBG (chão / void)" description="Overlay grosso com feetY/groundY/ready — default ON nos mapas novos. Também ?spawndbg=1" value={settings.showSpawnDebug} onChange={(v) => update({ showSpawnDebug: v })} />
                 <SettingsToggle label="Modo Economia de Bateria" description="Trava 30 FPS, sombras LOW e sem luz de tiro" value={settings.batterySaver} onChange={(v) => update({ batterySaver: v })} />
               </div>
             </div>

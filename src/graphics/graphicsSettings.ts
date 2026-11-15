@@ -247,7 +247,7 @@ export function getDefaultGameSettings(): GameSettings {
     preset: 'AUTO',
     tacticalPostFx: cap.tier === 'HIGH' || cap.tier === 'ULTRA',
     showFpsCounter: false,
-    showSpawnDebug: true,
+    showSpawnDebug: false,
     batterySaver: false,
     vibration: true,
     volumeMaster: 100,

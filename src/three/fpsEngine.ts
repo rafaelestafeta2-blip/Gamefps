@@ -3622,7 +3622,7 @@ export class TacticalFPSEngine {
 
   private emitHud(force = false): void {
     const mode = this.state.drillMode;
-    if (shouldForceSpawnDebug(mode, true)) {
+    if (shouldForceSpawnDebug(mode, false)) {
       const col = this.getActiveGlbCollider();
       const wb = col?.worldBounds;
       const groundY = col?.ready
