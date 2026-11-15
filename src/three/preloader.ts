@@ -1,10 +1,6 @@
 import * as THREE from 'three';
 import { soundEngine } from '../audio/soundEngine';
-import { preloadProRifleBotCharacter } from './botCharacterSystem';
-import {
-  enableMapAssetCache,
-  prefetchDracoDecoder,
-} from './mapAssetCatalog';
+import { enableMapAssetCache } from './mapAssetCatalog';
 
 export interface PreloadProgressCallback {
   (progressPercent: number, statusLabel: string): void;
@@ -21,7 +17,8 @@ const BOOT_UI_IMAGES: string[] = [
 /**
  * Loading 1 (Boot/Lobby):
  * Gerencia o pré-carregamento real de assets leves do menu/lobby (ícones UI via THREE.LoadingManager,
- * áudios globais .mp3/.wav e compilação do contexto WebGL do showroom) sem carregar o mapa .glb pesado.
+ * áudios globais .mp3/.wav e compilação do contexto WebGL do showroom).
+ * Mapas, operadores e animações de partida ficam para o loading da partida.
  */
 export class AssetPreloader {
   public static async executePreloadSequence(
@@ -39,9 +36,6 @@ export class AssetPreloader {
 
     report(6, 'INICIALIZANDO CONTEXTO WEBGL2 E THREE.LOADINGMANAGER DO LOBBY...');
     enableMapAssetCache();
-    void preloadProRifleBotCharacter();
-    // Warm Draco early so Loading 2 map decode is fluid (Warface-style).
-    void prefetchDracoDecoder();
 
     // 1. Carrega ícones de classes e artes de UI usando THREE.LoadingManager real (6% -> 40%)
     await new Promise<void>((resolve) => {

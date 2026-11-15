@@ -294,9 +294,8 @@ class TacticalSoundEngine {
   }
 
   constructor() {
-    if (typeof window !== 'undefined') {
-      this.init();
-    }
+    // Combat samples stay unloaded through the intro and the trailer.
+    // prewarmBootAudio() fills them on the lobby loading screen.
   }
 
   public init(): void {

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGameGltfLoader, disposeGameGltfLoader, ensureMeshoptDecoder } from './gltfLoaderFactory';
 import {
   ColliderBox,
   TacticalLevelData,
@@ -9,10 +8,8 @@ import {
 import { populateStanderTiroTargetsAndArmory } from './paperTargetBuilder';
 import { buildStanderObstacleHall } from './standerObstacleHallBuilder';
 
-/** Optimized V5 FAB shooting range (2K JPEG + Draco). */
+/** Shooting range — ETC1S GPU textures + Meshopt geometry. */
 const STANDER_TIRO_LOCAL_URL = '/models/maps/shooting_range_2k.glb';
-const DRACO_DECODER_PATH =
-  'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
 
 /** Lift so floor planes (~y=-1.16) sit at world y=0. */
 export const STANDER_FLOOR_Y_LIFT = 1.164;
@@ -167,12 +164,8 @@ export async function loadStanderTiroMapGeometry(
       });
     }
 
-    const dracoLoader = new DRACOLoader(loadingManager);
-    dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
-    dracoLoader.setDecoderConfig({ type: 'js' });
-
-    const loader = new GLTFLoader(loadingManager);
-    loader.setDRACOLoader(dracoLoader);
+    await ensureMeshoptDecoder();
+    const loader = createGameGltfLoader(loadingManager);
 
     const loadFromUrl = (url: string) =>
       new Promise<THREE.Group>((resolve, reject) => {
@@ -188,7 +181,7 @@ export async function loadStanderTiroMapGeometry(
     try {
       gltfScene = await loadFromUrl(STANDER_TIRO_LOCAL_URL);
     } finally {
-      dracoLoader.dispose();
+      disposeGameGltfLoader(loader);
     }
 
     gltfScene.name = 'ShootingRange2kGLB';

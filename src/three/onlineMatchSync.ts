@@ -225,7 +225,8 @@ export function syncOnlineMatchFrame(ctx: OnlineMatchSyncContext): void {
         bot.root.position.set(corpsePose.x, gy, corpsePose.z);
         bot.root.rotation.y = corpsePose.yaw + Math.PI;
         bot.pivotGroup.position.y = 0;
-        bot.pivotGroup.rotation.x = -Math.PI * 0.5;
+        // Death clip owns the pose. Forcing -90° stacked a ragdoll on the
+        // Mixamo fall and left a twisted corpse the medic could not read.
       }
       continue;
     }

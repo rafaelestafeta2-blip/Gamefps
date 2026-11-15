@@ -5,9 +5,11 @@
  */
 
 import * as THREE from 'three';
+import { getPlayerInventoryState } from '../progression/loadoutSystem';
 import {
   cloneVanguardCharacterAvatar,
   preloadProRifleBotCharacter,
+  resolveCharacterAvatarKind,
 } from './botCharacterSystem';
 import {
   getAnimPackClip,
@@ -41,6 +43,7 @@ export class PlayerGestureThirdPerson {
   private kitPickupDur = 0.7;
   private kitHoldDur = 0.7;
   private kitPutDur = 0.8;
+  private avatarKind: string | null = null;
 
   constructor(scene: THREE.Scene, isSoftwareGl: boolean) {
     this.scene = scene;
@@ -48,18 +51,27 @@ export class PlayerGestureThirdPerson {
     this.root.name = 'PlayerGestureThirdPerson';
     this.root.visible = false;
     this.scene.add(this.root);
-    void preloadProRifleBotCharacter();
   }
 
   private ensureModel(): boolean {
-    if (this.model && this.mixer) return true;
-    const cloned = cloneVanguardCharacterAvatar(this.isSoftwareGl, undefined, null);
+    const selectedClass = getPlayerInventoryState().selectedClass;
+    const wantKind = resolveCharacterAvatarKind(undefined, selectedClass, true);
+    if (this.model && this.mixer && this.avatarKind === wantKind) return true;
+    const cloned = cloneVanguardCharacterAvatar(
+      this.isSoftwareGl,
+      undefined,
+      selectedClass
+    );
     if (!cloned) {
       void preloadProRifleBotCharacter();
       return false;
     }
-    if (this.model) this.root.remove(this.model);
+    if (this.model) {
+      this.mixer?.stopAllAction();
+      this.root.remove(this.model);
+    }
     this.model = cloned.modelRoot;
+    this.avatarKind = cloned.avatarKind;
     this.root.add(this.model);
     this.mixer = new THREE.AnimationMixer(this.model);
     this.rHandBone = null;

@@ -159,7 +159,7 @@
         },
         "arenaMode": {
           "type": "string",
-          "description": "Selected 5v5 map mode (DUST2_BOMB_5V5, ASSAULT_BOMB_5V5, YARD_BOMB_5V5)."
+          "description": "Selected 5v5 map mode (DUST2_BOMB_5V5, ASSAULT_BOMB_5V5, YARD_BOMB_5V5, INDUSTRIA_BOMB_5V5, HANGAR_BOMB_5V5, EASTERN_CITY_BOMB_5V5, MIRAGE_ANUBIS_BOMB_5V5)."
         },
         "isPrivate": {
           "type": "boolean",

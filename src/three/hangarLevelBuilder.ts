@@ -1,16 +1,13 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WeaponId } from '../types/game';
+import { createGameGltfLoader, disposeGameGltfLoader, ensureMeshoptDecoder } from './gltfLoaderFactory';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { Dust2LevelBundle, runExclusiveGlbLoad } from './dust2LevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
 
-/** Hangar/Angar (angar.fbx + boxes.fbx + V7 textures) — 2K JPEG + Draco. */
+/** Hangar — ETC1S GPU textures + Meshopt geometry. */
 const HANGAR_LOCAL_URL = '/models/maps/hangar_2k.glb';
-const DRACO_DECODER_PATH =
-  'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
 
 /**
  * angar.fbx floor sits near y≈0 (AABB y≈[-0.6, 27]). Small lift clears floor thickness.
@@ -20,7 +17,8 @@ export const HANGAR_FLOOR_Y_LIFT = 0.6;
 /** Vanguard attackers — south hangar entrance (inset for floor snap). */
 /** Attacker spawn — Y = measured walkable floor at (0,-14) after FLOOR_Y_LIFT. */
 export const HANGAR_ATTACKER_SPAWN = new THREE.Vector3(0.0, 0.6, -14.0);
-export const HANGAR_SPAWN_YAW = 0;
+/** Camera local -Z. π looks +Z into the hangar, not out the south gate. */
+export const HANGAR_SPAWN_YAW = Math.PI;
 /** Blackthorn defenders — north interior near office/room. */
 export const HANGAR_DEFENDER_SPAWN = new THREE.Vector3(0.0, 0.2, 10.0);
 /** Bomb A — container stack side. */
@@ -47,6 +45,73 @@ export function getHangarCalloutForPos(
   return 'HANGAR INDUSTRIAL (ANGAR)';
 }
 
+/**
+ * `ray` is a light-shaft card. Drawn as opaque it becomes black shards
+ * across the bay and hides the containers behind it.
+ */
+function turnHangarLightShaft(mesh: THREE.Mesh): void {
+  const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  const next = list.map((m) => {
+    const src = m as THREE.MeshStandardMaterial;
+    const basic = new THREE.MeshBasicMaterial({
+      map: src.map ?? null,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.75,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: true,
+    });
+    if (basic.map) {
+      basic.map.colorSpace = THREE.SRGBColorSpace;
+      basic.map.needsUpdate = true;
+    }
+    src.map = null;
+    src.dispose();
+    return basic;
+  });
+  mesh.material = Array.isArray(mesh.material) ? next : next[0];
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 2;
+  mesh.userData.ignoreCollider = true;
+  mesh.userData.isEnvironment = true;
+}
+
+/**
+ * Floor and roof albedos in the source file are solid black, so the bay
+ * reads as an empty void. Drop that map and keep the normal.
+ */
+function restoreHangarMaterial(
+  std: THREE.MeshStandardMaterial,
+  isSoftwareGl: boolean
+): void {
+  if (!std) return;
+  const matName = (std.name || '').toLowerCase();
+  if (matName === 'floor' || matName === 'room_ceiling') {
+    if (std.map) {
+      std.map.dispose();
+      std.map = null;
+    }
+    std.color.setHex(matName === 'floor' ? 0xc8c1b6 : 0x8e969e);
+  } else if (std.map) {
+    std.map.colorSpace = THREE.SRGBColorSpace;
+    std.map.anisotropy = isSoftwareGl ? 1 : 8;
+    std.map.needsUpdate = true;
+  }
+  if (std.normalMap) {
+    std.normalMap.anisotropy = isSoftwareGl ? 1 : 8;
+    std.normalMap.needsUpdate = true;
+  }
+  std.roughness = Math.max(0.5, std.roughness ?? 0.72);
+  std.metalness = Math.min(0.35, std.metalness ?? 0.08);
+  std.envMapIntensity = matName === 'floor' || matName === 'room_ceiling' ? 0.3 : 0.9;
+  // Unity planes often wind downward. FrontSide then hides the floor from above.
+  std.side = THREE.DoubleSide;
+}
+
 export function buildHangarLevel(
   isSoftwareGl: boolean
 ): Dust2LevelBundle {
@@ -57,12 +122,13 @@ export function buildHangarLevel(
   const targets: TacticalTargetEntity[] = [];
   const collider = new Dust2TriangleCollider();
 
-  const hemi = new THREE.HemisphereLight(0xdbeafe, 0x4b5563, 0.85);
+  // Concrete bounce, not a navy void. The scene sun still supplies the direction.
+  const hemi = new THREE.HemisphereLight(0xfff6ea, 0x8a8176, 0.9);
   levelGroup.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xfff1e0, 1.15);
-  sun.position.set(40, 55, -25);
-  sun.target.position.set(20, 2, 0);
+  const sun = new THREE.DirectionalLight(0xfff1e0, 1.2);
+  sun.position.set(6, 28, -24);
+  sun.target.position.set(0, 3, 8);
   sun.castShadow = false;
   levelGroup.add(sun);
   levelGroup.add(sun.target);
@@ -95,12 +161,8 @@ export async function loadHangarMapGeometry(
   await runExclusiveGlbLoad(bundle, async () => {
   disposeHangarMapGeometry(bundle);
 
-  const dracoLoader = new DRACOLoader(loadingManager);
-  dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
-  dracoLoader.preload();
-
-  const gltfLoader = new GLTFLoader(loadingManager);
-  gltfLoader.setDRACOLoader(dracoLoader);
+  await ensureMeshoptDecoder();
+  const gltfLoader = createGameGltfLoader(loadingManager);
 
   try {
     const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
@@ -129,28 +191,24 @@ export async function loadHangarMapGeometry(
       if (!(child instanceof THREE.Mesh)) return;
       child.castShadow = false;
       child.receiveShadow = !isSoftwareGl;
-      child.frustumCulled = true;
+      child.frustumCulled = false;
       child.userData.isEnvironment = true;
 
       const mats = Array.isArray(child.material)
         ? child.material
         : [child.material];
+      if (
+        mats.some(
+          (m) =>
+            child.name.toLowerCase() === 'ray' ||
+            (m?.name || '').toLowerCase() === 'ray'
+        )
+      ) {
+        turnHangarLightShaft(child);
+        return;
+      }
       mats.forEach((m) => {
-        const std = m as THREE.MeshStandardMaterial;
-        if (!std) return;
-        if (std.map) {
-          std.map.colorSpace = THREE.SRGBColorSpace;
-          std.map.anisotropy = isSoftwareGl ? 1 : 4;
-          std.map.needsUpdate = true;
-        }
-        std.roughness = Math.max(0.55, std.roughness ?? 0.72);
-        std.metalness = Math.min(0.35, std.metalness ?? 0.08);
-        std.envMapIntensity = 0.75;
-        std.side = THREE.FrontSide;
-        // Lattice fence bits need double-sided.
-        if ((child.name || '').toLowerCase().includes('lattice')) {
-          std.side = THREE.DoubleSide;
-        }
+        restoreHangarMaterial(m as THREE.MeshStandardMaterial, isSoftwareGl);
       });
     });
 
@@ -174,7 +232,7 @@ export async function loadHangarMapGeometry(
     bundle.isLoaded = true;
     onByteProgress?.(1.0);
   } finally {
-    dracoLoader.dispose();
+    disposeGameGltfLoader(gltfLoader);
   }
   }, onByteProgress);
 }
@@ -472,8 +530,8 @@ function spawnHangarSquads(
     callsign: 'RECON-02',
     weaponId: 'SNIPER_BOLT',
     x: -2.5,
-    y: 0.15,
-    z: -16.5,
+    y: 0.6,
+    z: -8.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 2.2,
@@ -484,8 +542,8 @@ function spawnHangarSquads(
     callsign: 'STRIKER-03',
     weaponId: 'AK47_RIFLE',
     x: 2.5,
-    y: 0.15,
-    z: -16.5,
+    y: 0.6,
+    z: -8.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 2.8,
@@ -496,8 +554,8 @@ function spawnHangarSquads(
     callsign: 'LIFELINE-04',
     weaponId: 'M4_CARBINE',
     x: -2.0,
-    y: 0.15,
-    z: -19.0,
+    y: 0.6,
+    z: -6.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 2.5,
@@ -507,8 +565,8 @@ function spawnHangarSquads(
     callsign: 'WARDEN-05',
     weaponId: 'SMG_MP5',
     x: 2.0,
-    y: 0.15,
-    z: -19.0,
+    y: 0.6,
+    z: -6.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 2.8,

@@ -158,10 +158,12 @@ const ONLINE_BARRIER_TIMEOUT_MS = 25000;
  * if still hung, abort (or force-enter TESTE MAPA) — never spin at 99% forever.
  */
 const PREPARE_TIMEOUT_MS = 90000;
+/** Industria/Hangar/Eastern/Mirage + operators are tens of MB on device storage. */
+const HEAVY_MAP_PREPARE_TIMEOUT_MS = 180000;
 /** TESTE MAPA must finish in seconds–low minutes; shorter hard deadline. */
 const HARNESS_PREPARE_TIMEOUT_MS = 45000;
-/** Extra grace after soft timeout before aborting. */
-const PREPARE_GRACE_MS = 8000;
+/** Extra wait when the file itself has not proven a floor yet. */
+const PREPARE_DOWNLOAD_GRACE_MS = 45000;
 
 export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   mode = 'YARD_BOMB_5V5',
@@ -274,9 +276,21 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
     }
 
     const harness = isMapSpawnHarness(mode);
+    const heavyGlb =
+      mode === 'INDUSTRIA_BOMB_5V5' ||
+      mode === 'HANGAR_BOMB_5V5' ||
+      mode === 'EASTERN_CITY_BOMB_5V5' ||
+      mode === 'MIRAGE_ANUBIS_BOMB_5V5' ||
+      mode === 'FREE_RANGE' ||
+      mode === 'MAP_TEST_INDUSTRIA' ||
+      mode === 'MAP_TEST_HANGAR' ||
+      mode === 'MAP_TEST_EASTERN' ||
+      mode === 'MAP_TEST_MIRAGE';
     const prepareLimitMs = harness
       ? HARNESS_PREPARE_TIMEOUT_MS
-      : PREPARE_TIMEOUT_MS;
+      : heavyGlb
+        ? HEAVY_MAP_PREPARE_TIMEOUT_MS
+        : PREPARE_TIMEOUT_MS;
     let lastRealPct = 0;
 
     const abortToMenu = (msg: string) => {
@@ -318,39 +332,43 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
             }),
           ]);
           if (timed === 'timeout') {
-            console.warn('Arena prepare soft-timeout — grace then settle:', mode);
-            setStatusText(
-              harness
-                ? 'TESTE MAPA LENTO — AGUARDANDO GRACE CURTO...'
-                : 'MAPA PESADO / WARMUP LENTO — AGUARDANDO GRACE (DEPOIS SAI DO 99%)...'
-            );
-            const settled = await Promise.race([
-              preparePromise.then(() => 'ok' as const),
-              new Promise<'timeout'>((resolve) => {
-                window.setTimeout(() => resolve('timeout'), PREPARE_GRACE_MS);
-              }),
-            ]);
-            if (settled === 'timeout') {
-              if (cancelled) return;
-              // Floor was proven in prepare (≥70) — force enter rather than void at 99%.
-              if (harness && lastRealPct >= 70) {
-                setStatusText(
-                  'TIMEOUT APÓS FLOOR — FORÇANDO ENTRADA NO TESTE MAPA...'
-                );
-                localMapReadyRef.current = true;
-                setProgress(100);
-                setIsArenaReady(true);
-                window.setTimeout(() => {
-                  if (!cancelled) finishLoading();
-                }, 300);
+            console.warn('Arena prepare soft-timeout:', mode, 'pct', lastRealPct);
+            if (cancelled) return;
+            // ≥70 means the GLB and the floor collider are already in the scene.
+            // Warmups after that have their own limits, so wait them out instead
+            // of dumping the player back to the menu at a fake 99%.
+            if (lastRealPct >= 70) {
+              setStatusText('PISO DO MAPA PRONTO — FINALIZANDO OPERADORES E GPU...');
+              try {
+                await preparePromise;
+              } catch (err) {
+                console.error('Erro ao preparar arena 3D:', err);
+                if (!cancelled) {
+                  abortToMenu(
+                    'FALHA NO GLB/COLISOR — VOLTANDO AO MENU (NÃO INICIAR NO VOID)'
+                  );
+                }
                 return;
               }
-              abortToMenu(
-                harness
-                  ? 'TIMEOUT TESTE MAPA — VOLTANDO AO MENU (TOQUE CANCELAR SE TRAVAR)'
-                  : 'TIMEOUT NO LOADING (99% soft) — VOLTANDO AO MENU'
+            } else {
+              setStatusText(
+                'MAPA AINDA BAIXANDO — MAIS UM POUCO ANTES DE VOLTAR AO MENU...'
               );
-              return;
+              const settled = await Promise.race([
+                preparePromise.then(() => 'ok' as const),
+                new Promise<'timeout'>((resolve) => {
+                  window.setTimeout(() => resolve('timeout'), PREPARE_DOWNLOAD_GRACE_MS);
+                }),
+              ]);
+              if (settled === 'timeout') {
+                if (cancelled) return;
+                abortToMenu(
+                  harness
+                    ? 'TIMEOUT TESTE MAPA — VOLTANDO AO MENU (TOQUE CANCELAR SE TRAVAR)'
+                    : 'O MAPA NÃO TERMINOU DE BAIXAR — VOLTANDO AO MENU'
+                );
+                return;
+              }
             }
           }
         }
@@ -384,11 +402,13 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       const remainingSec = Math.max(0, Math.ceil((BRIEFING_DURATION_MS - elapsed) / 1000));
       setSecondsLeft(remainingSec);
 
-      // Heartbeat — may climb to 99 while warmups run (real stages report 90→100).
+      // Heartbeat moves the bar while bytes are in flight, but it must not
+      // pretend the match is at 99% and then kick back to the menu.
       if (!localMapReadyRef.current) {
         setProgress((prev) => {
           if (prev >= 99) return prev;
-          const soft = Math.min(99, Math.floor(elapsed / 900));
+          const softCap = Math.min(96, Math.max(lastRealPct, 6) + 12);
+          const soft = Math.min(softCap, Math.floor(elapsed / 900));
           return Math.max(prev, soft);
         });
       }

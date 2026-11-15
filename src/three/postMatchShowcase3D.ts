@@ -70,7 +70,6 @@ export class PostMatchShowcase3D {
     this.scene.add(this.stageRoot);
 
     this.buildTacticalPodiumStage();
-    void preloadProRifleBotCharacter();
   }
 
   private createSunsetBackdropTexture(): THREE.CanvasTexture {

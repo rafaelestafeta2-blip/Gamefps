@@ -1,17 +1,14 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WeaponId } from '../types/game';
+import { createGameGltfLoader, disposeGameGltfLoader, ensureMeshoptDecoder } from './gltfLoaderFactory';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { Dust2LevelBundle, runExclusiveGlbLoad } from './dust2LevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
 import { consolidateDuplicateMeshesToInstances } from './scenePerfOptimizer';
 import { YardBotEntity } from './yardPropsBuilder';
 
-/** Eastern City / Cidade Leste (V8 glTF + props) — 2K JPEG + Draco. */
+/** Eastern City — ETC1S GPU textures + Meshopt geometry. */
 const EASTERN_CITY_LOCAL_URL = '/models/maps/eastern_city_2k.glb';
-const DRACO_DECODER_PATH =
-  'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
 
 /**
  * Source AABB y≈[-3.34, 21.2]; lift brings street level near y≈0.
@@ -23,7 +20,8 @@ export const EASTERN_CITY_FLOOR_Y_LIFT = 3.5;
  * ~15.6/18.8). (0,-20) has street groundBand ≈ 3.25 after FLOOR_Y_LIFT.
  */
 export const EASTERN_CITY_ATTACKER_SPAWN = new THREE.Vector3(0.0, 3.25, -20.0);
-export const EASTERN_CITY_SPAWN_YAW = 0;
+/** Camera local -Z. π looks +Z into the city, not back down the south approach. */
+export const EASTERN_CITY_SPAWN_YAW = Math.PI;
 /** Blackthorn defenders — north plaza (Y = lowest walkable at that XZ). */
 export const EASTERN_CITY_DEFENDER_SPAWN = new THREE.Vector3(-6.0, 7.46, 36.0);
 /** Bomb A — west ruin / market block. */
@@ -98,12 +96,8 @@ export async function loadEasternCityMapGeometry(
   await runExclusiveGlbLoad(bundle, async () => {
   disposeEasternCityMapGeometry(bundle);
 
-  const dracoLoader = new DRACOLoader(loadingManager);
-  dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
-  dracoLoader.preload();
-
-  const gltfLoader = new GLTFLoader(loadingManager);
-  gltfLoader.setDRACOLoader(dracoLoader);
+  await ensureMeshoptDecoder();
+  const gltfLoader = createGameGltfLoader(loadingManager);
 
   try {
     const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
@@ -132,7 +126,7 @@ export async function loadEasternCityMapGeometry(
       if (!(child instanceof THREE.Mesh)) return;
       child.castShadow = false;
       child.receiveShadow = !isSoftwareGl;
-      child.frustumCulled = true;
+      child.frustumCulled = false;
       child.userData.isEnvironment = true;
 
       const mats = Array.isArray(child.material)
@@ -149,11 +143,7 @@ export async function loadEasternCityMapGeometry(
         std.roughness = Math.max(0.55, std.roughness ?? 0.72);
         std.metalness = Math.min(0.35, std.metalness ?? 0.08);
         std.envMapIntensity = 0.75;
-        std.side = THREE.FrontSide;
-        // Lattice fence bits need double-sided.
-        if ((child.name || '').toLowerCase().includes('glass') || (child.name || '').toLowerCase().includes('fence')) {
-          std.side = THREE.DoubleSide;
-        }
+        std.side = THREE.DoubleSide;
       });
     });
 
@@ -181,7 +171,7 @@ export async function loadEasternCityMapGeometry(
     bundle.isLoaded = true;
     onByteProgress?.(1.0);
   } finally {
-    dracoLoader.dispose();
+    disposeGameGltfLoader(gltfLoader);
   }
   }, onByteProgress);
 }
@@ -479,8 +469,8 @@ function spawnEasternCitySquads(
     callsign: 'RECON-02',
     weaponId: 'SNIPER_BOLT',
     x: -3.0,
-    y: 0.2,
-    z: -46.0,
+    y: 3.25,
+    z: -14.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 3.0,
@@ -491,8 +481,8 @@ function spawnEasternCitySquads(
     callsign: 'STRIKER-03',
     weaponId: 'AK47_RIFLE',
     x: 3.0,
-    y: 0.2,
-    z: -46.0,
+    y: 3.25,
+    z: -14.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 3.0,
@@ -502,9 +492,9 @@ function spawnEasternCitySquads(
     id: 'ec_vg_3',
     callsign: 'LIFELINE-04',
     weaponId: 'M4_CARBINE',
-    x: -3.0,
-    y: 0.2,
-    z: -50.0,
+    x: -2.0,
+    y: 3.25,
+    z: -12.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 2.8,
@@ -513,9 +503,9 @@ function spawnEasternCitySquads(
     id: 'ec_vg_4',
     callsign: 'WARDEN-05',
     weaponId: 'SMG_MP5',
-    x: 3.0,
-    y: 0.2,
-    z: -50.0,
+    x: 2.0,
+    y: 3.25,
+    z: -12.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 2.8,

@@ -122,12 +122,12 @@ export class TacticalSkySystem {
       if (uniforms.cloudElevation) uniforms.cloudElevation.value = 0.48;
 
       const industrialSky = isAssault || isIndustria || isHangar || isEasternCity;
-      this.outdoorFallbackBg.setHex(industrialSky ? 0x1e293b : 0xcbd5e1);
+      this.outdoorFallbackBg.setHex(isHangar ? 0xc5ced6 : industrialSky ? 0xb7c3ce : 0xcbd5e1);
       this.scene.background = this.outdoorFallbackBg;
       this.scene.fog = fogEnabled
         ? new THREE.FogExp2(
-            industrialSky ? 0x1e293b : 0xcbd5e1,
-            isEasternCity ? 0.0010 : isHangar ? 0.0014 : isIndustria ? 0.0009 : isAssault ? 0.0011 : 0.0048
+            isHangar ? 0xc5ced6 : industrialSky ? 0xb7c3ce : 0xcbd5e1,
+            isEasternCity ? 0.0010 : isHangar ? 0.00115 : isIndustria ? 0.0009 : isAssault ? 0.0011 : 0.0048
           )
         : null;
 
@@ -140,9 +140,9 @@ export class TacticalSkySystem {
         .copy(this.keyLightTarget.position)
         .addScaledVector(this.sunDirection, 80);
       this.keyLight.color.setHex(0xfffbeb);
-      this.keyLight.intensity = industrialSky ? 1.55 : 1.95;
+      this.keyLight.intensity = isHangar ? 1.9 : industrialSky ? 1.75 : 1.95;
       this.updateShadowFrustum(isEasternCity ? 95 : isHangar ? 55 : isIndustria ? 90 : isAssault ? 65 : 52, 165);
-      this.applyFillRig('outdoor');
+      this.applyFillRig(isHangar ? 'hangar' : 'outdoor');
       if ('environmentIntensity' in this.scene) {
         (this.scene as THREE.Scene & { environmentIntensity: number }).environmentIntensity = 0.65;
       }
@@ -165,16 +165,20 @@ export class TacticalSkySystem {
     this.keyLightTarget.updateMatrixWorld();
   }
 
-  private applyFillRig(kind: 'desert' | 'outdoor' | 'indoor'): void {
+  private applyFillRig(kind: 'desert' | 'outdoor' | 'hangar' | 'indoor'): void {
     if (this.hemiLight) {
       if (kind === 'desert') {
         this.hemiLight.color.setHex(0xfff7e6);
         this.hemiLight.groundColor.setHex(0x6e5944);
         this.hemiLight.intensity = 0.42;
+      } else if (kind === 'hangar') {
+        this.hemiLight.color.setHex(0xfff6ea);
+        this.hemiLight.groundColor.setHex(0x8a8176);
+        this.hemiLight.intensity = 0.72;
       } else if (kind === 'outdoor') {
-        this.hemiLight.color.setHex(0x93c5fd);
-        this.hemiLight.groundColor.setHex(0x1e293b);
-        this.hemiLight.intensity = 0.55;
+        this.hemiLight.color.setHex(0xfff4e8);
+        this.hemiLight.groundColor.setHex(0x6e675f);
+        this.hemiLight.intensity = 0.62;
       } else {
         this.hemiLight.color.setHex(0x93c5fd);
         this.hemiLight.groundColor.setHex(0x1e293b);
@@ -185,9 +189,12 @@ export class TacticalSkySystem {
       if (kind === 'desert') {
         this.rimLight.color.setHex(0xffd6a5);
         this.rimLight.intensity = 0.22;
+      } else if (kind === 'hangar') {
+        this.rimLight.color.setHex(0xffe4c4);
+        this.rimLight.intensity = 0.32;
       } else if (kind === 'outdoor') {
-        this.rimLight.color.setHex(0x38bdf8);
-        this.rimLight.intensity = 0.35;
+        this.rimLight.color.setHex(0xffe8d2);
+        this.rimLight.intensity = 0.26;
       } else {
         this.rimLight.color.setHex(0x38bdf8);
         this.rimLight.intensity = 0.55;

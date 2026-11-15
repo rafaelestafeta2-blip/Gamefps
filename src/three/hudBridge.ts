@@ -78,7 +78,12 @@ export function buildHudFingerprint(state: HudState, yaw: number): string {
     state.armor | 0,
     state.supportCharges,
     Math.round(state.reviveChargeProgress * 10),
-    state.reviveMarkers?.length ?? 0,
+    (state.reviveMarkers || [])
+      .map(
+        (m) =>
+          `${m.id}:${Math.ceil(m.remainingSec)}:${m.inRange ? 1 : 0}:${Math.round(m.bearingRad * 8)}`
+      )
+      .join('|'),
     state.supportPrompt || '-',
     state.stamina | 0,
     state.isAds ? 1 : 0,

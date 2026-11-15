@@ -164,6 +164,24 @@ export async function prepareMatchArena(
     onProgress(clamped, label);
   };
 
+  const withTimeout = async <T,>(
+    work: Promise<T>,
+    ms: number
+  ): Promise<'ok' | 'timeout'> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const raced = await Promise.race([
+        work.then(() => 'ok' as const),
+        new Promise<'timeout'>((resolve) => {
+          timer = setTimeout(() => resolve('timeout'), ms);
+        }),
+      ]);
+      return raced;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
   loadingManager.onProgress = (url, itemsLoaded, itemsTotal) => {
     if (itemsTotal > 0) {
       const ratio = itemsLoaded / itemsTotal;
@@ -183,14 +201,14 @@ export async function prepareMatchArena(
               : 'de_dust2.glb');
       reportProgress(
         mappedPct,
-        `BAIXANDO & DESCOMPRIMINDO ${shortName.toUpperCase()} (${itemsLoaded}/${itemsTotal})...`
+        `ABRINDO ${shortName.toUpperCase()} NA GPU (${itemsLoaded}/${itemsTotal})...`
       );
     }
   };
 
   // Etapa 1: Download real do .GLB externo + descompressão DRACO + geração de Box3 e Colisores
   if (isDust2) {
-    reportProgress(8, 'BAIXANDO ARENA 3D DE_DUST2.GLB VIA GLTFLOADER + DRACO...');
+    reportProgress(8, 'ABRINDO ARENA DE_DUST2 NA GPU...');
     await loadDust2MapGeometry(
       dust2LevelData,
       isSoftwareGl,
@@ -199,7 +217,7 @@ export async function prepareMatchArena(
         const mappedPct = 8 + byteRatio * 52;
         reportProgress(
           mappedPct,
-          `TRANSFERINDO MALHA 3D DE_DUST2.GLB (${Math.round(byteRatio * 100)}%)...`
+          `ENVIANDO DE_DUST2 PARA A GPU (${Math.round(byteRatio * 100)}%)...`
         );
       }
     );
@@ -210,7 +228,7 @@ export async function prepareMatchArena(
       `COLISORES BOX3 (${dust2LevelData.collider.boundingBoxes.length}) E ${dust2LevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
     );
   } else if (isAssault) {
-    reportProgress(8, 'BAIXANDO ARENA 3D CS_ASSAULT.GLB VIA GLTFLOADER + DRACO...');
+    reportProgress(8, 'ABRINDO ARENA CS_ASSAULT NA GPU...');
     await loadAssaultMapGeometry(
       assaultLevelData,
       isSoftwareGl,
@@ -219,7 +237,7 @@ export async function prepareMatchArena(
         const mappedPct = 8 + byteRatio * 52;
         reportProgress(
           mappedPct,
-          `TRANSFERINDO MALHA 3D CS_ASSAULT.GLB (${Math.round(byteRatio * 100)}%)...`
+          `ENVIANDO CS_ASSAULT PARA A GPU (${Math.round(byteRatio * 100)}%)...`
         );
       }
     );
@@ -230,7 +248,7 @@ export async function prepareMatchArena(
       `COLISORES BOX3 (${assaultLevelData.collider.boundingBoxes.length}) E ${assaultLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
     );
   } else if (isIndustria) {
-    reportProgress(8, 'BAIXANDO ARENA 3D INDUSTRIA_2K.GLB VIA GLTFLOADER + DRACO...');
+    reportProgress(8, 'ABRINDO ARENA INDUSTRIA NA GPU...');
     await loadIndustriaMapGeometry(
       industriaLevelData,
       isSoftwareGl,
@@ -239,7 +257,7 @@ export async function prepareMatchArena(
         const mappedPct = 8 + byteRatio * 52;
         reportProgress(
           mappedPct,
-          `TRANSFERINDO MALHA 3D INDUSTRIA_2K.GLB (${Math.round(byteRatio * 100)}%)...`
+          `ENVIANDO INDUSTRIA PARA A GPU (${Math.round(byteRatio * 100)}%)...`
         );
       }
     );
@@ -252,7 +270,7 @@ export async function prepareMatchArena(
     );
   
   } else if (isHangar) {
-    reportProgress(8, 'BAIXANDO ARENA 3D HANGAR_2K.GLB VIA GLTFLOADER + DRACO...');
+    reportProgress(8, 'ABRINDO ARENA HANGAR NA GPU...');
     await loadHangarMapGeometry(
       hangarLevelData,
       isSoftwareGl,
@@ -261,7 +279,7 @@ export async function prepareMatchArena(
         const mappedPct = 8 + byteRatio * 52;
         reportProgress(
           mappedPct,
-          `TRANSFERINDO MALHA 3D HANGAR_2K.GLB (${Math.round(byteRatio * 100)}%)...`
+          `ENVIANDO HANGAR PARA A GPU (${Math.round(byteRatio * 100)}%)...`
         );
       }
     );
@@ -273,7 +291,7 @@ export async function prepareMatchArena(
       `COLISORES BOX3 (${hangarLevelData.collider.boundingBoxes.length}) E ${hangarLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
     );
   } else if (isEasternCity) {
-    reportProgress(8, 'BAIXANDO ARENA 3D EASTERN_CITY_2K.GLB VIA GLTFLOADER + DRACO...');
+    reportProgress(8, 'ABRINDO ARENA CIDADE LESTE NA GPU...');
     await loadEasternCityMapGeometry(
       easternCityLevelData,
       isSoftwareGl,
@@ -282,7 +300,7 @@ export async function prepareMatchArena(
         const mappedPct = 8 + byteRatio * 52;
         reportProgress(
           mappedPct,
-          `TRANSFERINDO MALHA 3D EASTERN_CITY_2K.GLB (${Math.round(byteRatio * 100)}%)...`
+          `ENVIANDO CIDADE LESTE PARA A GPU (${Math.round(byteRatio * 100)}%)...`
         );
       }
     );
@@ -294,7 +312,7 @@ export async function prepareMatchArena(
       `COLISORES BOX3 (${easternCityLevelData.collider.boundingBoxes.length}) E ${easternCityLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
     );
   } else if (isMirageAnubis) {
-    reportProgress(8, 'BAIXANDO ARENA 3D MIRAGE_ANUBIS_2K.GLB VIA GLTFLOADER + DRACO...');
+    reportProgress(8, 'ABRINDO ARENA MIRAGE ANUBIS NA GPU...');
     await loadMirageAnubisMapGeometry(
       mirageAnubisLevelData,
       isSoftwareGl,
@@ -303,7 +321,7 @@ export async function prepareMatchArena(
         const mappedPct = 8 + byteRatio * 52;
         reportProgress(
           mappedPct,
-          `TRANSFERINDO MALHA 3D MIRAGE_ANUBIS_2K.GLB (${Math.round(byteRatio * 100)}%)...`
+          `ENVIANDO MIRAGE ANUBIS PARA A GPU (${Math.round(byteRatio * 100)}%)...`
         );
       }
     );
@@ -315,7 +333,7 @@ export async function prepareMatchArena(
       `COLISORES BOX3 (${mirageAnubisLevelData.collider.boundingBoxes.length}) E ${mirageAnubisLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
     );
 } else if (isFreeRange) {
-    reportProgress(12, 'BAIXANDO ARENA 3D SHOOTING_RANGE_2K.GLB VIA GLTFLOADER + DRACO...');
+    reportProgress(12, 'ABRINDO ESTANDE DE TIRO NA GPU...');
     await loadStanderTiroMapGeometry(
       standerTiroLevelData as StanderTiroBundle,
       isSoftwareGl,
@@ -332,9 +350,20 @@ export async function prepareMatchArena(
   if (!isFreeRange && !skipBots) {
     reportProgress(
       72,
-      'CARREGANDO OPERADORES 3D (PRO.RIFLE.PACK.GLB) E ANIMAÇÕES MIXAMO...'
+      'ABRINDO OPERADORES NA GPU...'
     );
-    await preloadProRifleBotCharacter(loadingManager);
+    // Five character GLBs are ~50MB. A stuck fetch used to hold Loading 2 at
+    // 99% until the screen gave up and sent the player back to the menu.
+    const operators = await withTimeout(
+      preloadProRifleBotCharacter(loadingManager),
+      40000
+    );
+    if (operators === 'timeout') {
+      reportProgress(
+        73,
+        'OPERADORES AINDA EM BACKGROUND — ENTRANDO COM O MAPA PRONTO...'
+      );
+    }
     const activeTargets = isDust2
       ? dust2LevelData.targets
       : isAssault
@@ -457,24 +486,6 @@ export async function prepareMatchArena(
   // Etapa 3: optional warmups — MUST NOT block match forever.
   // Android WebView often stalls at 92% on compileAsync for Eastern/Hangar
   // (~minutes, no progress). Floor/collider is already proven above.
-  const withTimeout = async <T,>(
-    work: Promise<T>,
-    ms: number
-  ): Promise<'ok' | 'timeout'> => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const raced = await Promise.race([
-        work.then(() => 'ok' as const),
-        new Promise<'timeout'>((resolve) => {
-          timer = setTimeout(() => resolve('timeout'), ms);
-        }),
-      ]);
-      return raced;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  };
-
   reportProgress(90, 'PRÉ-DECODIFICANDO ÁUDIOS TÁTICOS...');
   await withTimeout(soundEngine.prewarmGrenadeAudio(), 8000);
 

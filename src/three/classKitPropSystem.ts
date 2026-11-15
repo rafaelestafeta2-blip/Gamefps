@@ -169,8 +169,6 @@ export class ClassKitPropSystem {
     this.viewmodelGroup.name = 'ClassKitViewmodel';
     this.viewmodelGroup.visible = false;
     this.camera.add(this.viewmodelGroup);
-    void preloadClassKitProps();
-    void preloadMixamoAnimPack();
   }
 
   public isHolding(): boolean {

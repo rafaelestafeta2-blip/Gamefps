@@ -187,7 +187,6 @@ export class C4PlantViewmodel {
     this.root.name = 'C4PlantViewmodel';
     this.root.visible = false;
     this.camera.add(this.root);
-    void this.ensureVisual();
   }
 
   private async ensureVisual(): Promise<void> {

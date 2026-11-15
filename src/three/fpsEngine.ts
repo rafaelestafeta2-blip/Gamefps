@@ -100,6 +100,7 @@ import {
   loadDust2MapGeometry,
 } from './dust2LevelBuilder';
 import type { Dust2TriangleCollider } from './dust2Collider';
+import { attachCompressedTextureSupport } from './gltfLoaderFactory';
 import {
   cleanupMatchArenaAssets,
   prepareMatchArena,
@@ -207,12 +208,8 @@ import {
   ClassSupportRuntime,
 } from './classSupportSystem';
 import { PlayerGestureThirdPerson } from './playerGestureThirdPerson';
-import {
-  ClassKitPropSystem,
-  preloadClassKitProps,
-} from './classKitPropSystem';
-import { C4PlantViewmodel, preloadC4BombProp } from './c4BombProp';
-import { preloadMixamoAnimPack } from './mixamoAnimPackLoader';
+import { ClassKitPropSystem } from './classKitPropSystem';
+import { C4PlantViewmodel } from './c4BombProp';
 
 export class TacticalFPSEngine {
   private container: HTMLElement;
@@ -534,6 +531,7 @@ export class TacticalFPSEngine {
       : Math.min(window.devicePixelRatio || 1, 1.35);
     this.renderer.setPixelRatio(this.currentRenderScale);
     this.renderer.setSize(container.clientWidth, container.clientHeight);
+    attachCompressedTextureSupport(this.renderer);
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     // PCF (not Soft) — Soft is significantly heavier on mobile GPUs.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -625,9 +623,6 @@ export class TacticalFPSEngine {
     );
     this.classKitProps = new ClassKitPropSystem(this.camera);
     this.c4PlantView = new C4PlantViewmodel(this.camera);
-    void preloadMixamoAnimPack();
-    void preloadClassKitProps();
-    void preloadC4BombProp();
     this.postMatchShowcase = new PostMatchShowcase3D(
       this.scene,
       this.isSoftwareGl
@@ -730,14 +725,6 @@ export class TacticalFPSEngine {
     onProgress: (pct: number, statusLabel: string) => void
   ): Promise<void> {
     this.stopLoop();
-    try {
-      await loadStanderTiroMapGeometry(
-        this.standerTiroLevelData,
-        this.isSoftwareGl
-      );
-    } catch {
-      // Continua se o carregamento inicial falhar
-    }
     await AssetPreloader.executePreloadSequence(
       this.renderer,
       this.scene,
@@ -1614,7 +1601,11 @@ export class TacticalFPSEngine {
     }
 
     this.magCheckTimer = 1.8;
-    soundEngine.playWeaponSwap();
+    // Boot calls selectWeapon while the intro video is on screen. The swap
+    // sample is the character-equip sound the player was hearing underneath it.
+    if (this.state.screen === 'PLAYING') {
+      soundEngine.playWeaponSwap();
+    }
     if (
       (weaponId === 'AK47_RIFLE' || weaponId === 'AK12_RIFLE') &&
       this.state.screen === 'PLAYING'
@@ -1922,16 +1913,10 @@ export class TacticalFPSEngine {
   public configurePostFx(opts: {
     enabled: boolean;
     sharpen?: number;
-    bloom?: number;
-    exposure?: number;
-    lift?: number;
   }): void {
     configureTacticalPostFx(this.postFx, this.renderer, {
       enabled: opts.enabled,
-      sharpen: opts.sharpen ?? 0.2,
-      bloom: opts.bloom ?? 0.12,
-      exposure: opts.exposure,
-      lift: opts.lift,
+      sharpen: opts.sharpen ?? 0.55,
     });
   }
 
@@ -3631,7 +3616,7 @@ export class TacticalFPSEngine {
 
   private emitHud(force = false): void {
     const mode = this.state.drillMode;
-    if (shouldForceSpawnDebug(mode, true)) {
+    if (shouldForceSpawnDebug(mode, false)) {
       const col = this.getActiveGlbCollider();
       const wb = col?.worldBounds;
       const groundY = col?.ready

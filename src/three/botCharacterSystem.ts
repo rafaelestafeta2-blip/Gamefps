@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { createGameGltfLoader, disposeGameGltfLoader, ensureMeshoptDecoder } from './gltfLoaderFactory';
 import { WarfaceClassId } from '../components/WarfaceClassIcons';
 import { WeaponId } from '../types/game';
 import { BotAnimController, BotAnimState, BotClipMap, buildProRiflePackClips, retargetClipsRotationOnly, selectDirectionalDeathState, syncBotWeaponWithMixamoHands, transitionBotAnim } from './botCharacterClips';
@@ -20,8 +19,6 @@ const SNIPER_OPERATOR_LOCAL_URL = '/models/characters/sniper_operator.glb';
 const VANGUARD_RIFLEMAN_LOCAL_URL = '/models/characters/vanguard_rifleman.glb';
 const VANGUARD_ENGINEER_LOCAL_URL = '/models/characters/vanguard_engineer.glb';
 const VANGUARD_MEDIC_LOCAL_URL = '/models/characters/vanguard_medic.glb';
-const DRACO_DECODER_PATH = 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/';
-
 export type CharacterAvatarKind =
   | 'VANGUARD_FUZILEIRO'
   | 'VANGUARD_ENGENHEIRO'
@@ -59,6 +56,7 @@ let vanguardMedicAllyMatMap: Map<string, THREE.MeshStandardMaterial> | null = nu
 let vanguardMedicEnemyMatMap: Map<string, THREE.MeshStandardMaterial> | null = null;
 
 let loadPromise: Promise<void> | null = null;
+let medicLoadAttempts = 0;
 let sharedInvisibleHitMat: THREE.MeshBasicMaterial | null = null;
 
 export function isSniperWeaponId(weaponId?: WeaponId | null): boolean {
@@ -98,8 +96,17 @@ function ensureSharedHitMat(): void {
   if (!sharedInvisibleHitMat) sharedInvisibleHitMat = new THREE.MeshBasicMaterial({ visible: false });
 }
 
+function medicCharacterReady(): boolean {
+  return !!(
+    vanguardMedicTemplateScene &&
+    vanguardMedicClips &&
+    vanguardMedicAllyMatMap &&
+    vanguardMedicEnemyMatMap
+  );
+}
+
 export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManager): Promise<void> {
-  if (
+  const othersReady = !!(
     templateScene &&
     sharedClips &&
     sniperTemplateScene &&
@@ -108,17 +115,18 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
     vanguardRiflemanClips &&
     vanguardEngineerTemplateScene &&
     vanguardEngineerClips
-  ) {
+  );
+  // Medic GLB used to be omitted from this guard. One failed fetch then
+  // skipped every later preload and the medic silently became a rifleman.
+  if (othersReady && (medicCharacterReady() || medicLoadAttempts >= 2)) {
     return Promise.resolve();
   }
   if (loadPromise) return Promise.resolve(loadPromise);
+  medicLoadAttempts += 1;
 
   loadPromise = (async () => {
-    const dracoLoader = new DRACOLoader(loadingManager);
-    dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
-    dracoLoader.setDecoderConfig({ type: 'js' });
-    const loader = new GLTFLoader(loadingManager);
-    loader.setDRACOLoader(dracoLoader);
+    await ensureMeshoptDecoder();
+    const loader = createGameGltfLoader(loadingManager);
 
     const loadUrl = (url: string) =>
       new Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] }>((resolve, reject) => {
@@ -255,6 +263,18 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
           });
         });
 
+        if (label === 'VanguardMedicCharacter') {
+          // Tripo wrote Mixamo joint positions in meters (same as the rifleman)
+          // but baked inverse-bind matrices ~3.3× too small. Three then stretches
+          // every vertex into the shredded preview. Rebuild the bind from the joints.
+          root.updateMatrixWorld(true);
+          root.traverse((child) => {
+            const skinned = child as THREE.SkinnedMesh;
+            if (!skinned.isSkinnedMesh || !skinned.skeleton) return;
+            skinned.bind(skinned.skeleton);
+          });
+        }
+
         // Tripo mesh-only exports (medic) ship without embedded Mixamo clips —
         // caller reuses rifleman/shared Mixamo clips (same bone names).
         const clips =
@@ -320,9 +340,25 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
         vanguardMedicClips = retargetClipsRotationOnly(vanguardMedicClips);
       }
     } finally {
-      dracoLoader.dispose();
+      disposeGameGltfLoader(loader);
     }
-  })().catch((err) => console.warn('ProRifleBotCharacter fallback:', err));
+  })()
+    .catch((err) => console.warn('ProRifleBotCharacter fallback:', err))
+    .finally(() => {
+      const coreNow = !!(
+        templateScene &&
+        sharedClips &&
+        sniperTemplateScene &&
+        sniperClips &&
+        vanguardRiflemanTemplateScene &&
+        vanguardRiflemanClips &&
+        vanguardEngineerTemplateScene &&
+        vanguardEngineerClips
+      );
+      // Keep the settled promise when the whole pack failed so the frame
+      // loop does not restart every GLB download. Retry only the medic miss.
+      if (coreNow && !medicCharacterReady()) loadPromise = null;
+    });
 
   return Promise.resolve(loadPromise);
 }

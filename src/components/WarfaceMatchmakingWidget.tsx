@@ -38,6 +38,7 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
   const [activeRoom, setActiveRoom] = useState<OnlineRoomState | null>(null);
   const [isConnecting, setIsConnecting] = useState(true);
   const [matchFound, setMatchFound] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const launchedRef = useRef(false);
 
   // Cronômetro em segundo plano
@@ -53,6 +54,7 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
     let cancelled = false;
     setIsConnecting(true);
     setMatchFound(false);
+    setQueueError(null);
     launchedRef.current = false;
 
     quickMatchOrCreateRoom(selectedMode)
@@ -60,6 +62,11 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
         if (cancelled) return;
         setActiveRoom(room);
         setIsConnecting(false);
+        if (!room) {
+          setQueueError(
+            'A fila recusou este mapa. Publique as regras do Firestore ou use ENTRAR C/ BOTS.'
+          );
+        }
       })
       .catch(() => {
         if (!cancelled) setIsConnecting(false);
@@ -252,11 +259,13 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
 
         <div className="mt-1 flex items-center justify-between gap-2 text-[8px] font-mono text-slate-300">
           <span className="truncate">
-            {isConnecting
-              ? 'Conectando à fila global Firebase...'
-              : matchFound
-                ? '10/10 Jogadores prontos! Iniciando mapa...'
-                : `Aguardando jogadores online (${playersCount}/10)...`}
+            {queueError
+              ? queueError
+              : isConnecting
+                ? 'Conectando à fila global Firebase...'
+                : matchFound
+                  ? '10/10 Jogadores prontos! Iniciando mapa...'
+                  : `Aguardando jogadores online (${playersCount}/10)...`}
           </span>
           <button
             type="button"

@@ -21,9 +21,6 @@ interface InternalEngineAccess {
   configurePostFx?: (opts: {
     enabled: boolean;
     sharpen?: number;
-    bloom?: number;
-    exposure?: number;
-    lift?: number;
   }) => void;
   state: {
     fpsLimit: number;
@@ -99,14 +96,9 @@ export function applyGraphicsToEngine(
     settings.fpsLimit !== 30 &&
     settings.resolution !== 'SCALE_50';
   if (typeof engine.configurePostFx === 'function') {
-    // Keep grit like Dust2 mid-alley: less lift/bloom, slight sharpen; avoid milky walls.
-    const acesOn = settings.acesToneMapping;
     engine.configurePostFx({
       enabled: postEnabled,
-      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.3 : 0.22,
-      bloom: settings.muzzleLight ? 0.1 : 0.06,
-      exposure: acesOn ? 0.98 : 0.96,
-      lift: acesOn ? 0.008 : 0.005,
+      sharpen: settings.preset === 'ULTRA' || settings.textures === 'ULTRA' ? 0.7 : 0.55,
     });
   }
 
@@ -257,6 +249,18 @@ export function applyGraphicsToEngine(
     case 'ULTRA':
       targetFar = 260;
       break;
+  }
+  const mode = (engine.state as { drillMode?: string }).drillMode;
+  if (
+    mode === 'INDUSTRIA_BOMB_5V5' ||
+    mode === 'EASTERN_CITY_BOMB_5V5' ||
+    mode === 'MIRAGE_ANUBIS_BOMB_5V5' ||
+    mode === 'MAP_TEST_INDUSTRIA' ||
+    mode === 'MAP_TEST_EASTERN' ||
+    mode === 'MAP_TEST_MIRAGE'
+  ) {
+    // These yards are ~200m. NEAR (115) clipped the far blocks into empty sky.
+    targetFar = Math.max(targetFar, 280);
   }
   if (Math.abs(camera.far - targetFar) > 0.5) {
     camera.far = targetFar;

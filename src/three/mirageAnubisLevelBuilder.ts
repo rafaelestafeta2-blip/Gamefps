@@ -1,16 +1,13 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WeaponId } from '../types/game';
+import { createGameGltfLoader, disposeGameGltfLoader, ensureMeshoptDecoder } from './gltfLoaderFactory';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { Dust2LevelBundle, runExclusiveGlbLoad } from './dust2LevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
 
-/** Mirage Anubis (V9 glTF) — WebP ≤2K + Draco. */
+/** Mirage Anubis — ETC1S GPU textures + Meshopt geometry. */
 const MIRAGE_ANUBIS_LOCAL_URL = '/models/maps/mirage_anubis_2k.glb';
-const DRACO_DECODER_PATH =
-  'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
 
 /**
  * Source AABB y≈[-1.11, 44.7]; lift brings street level near y≈0.
@@ -22,7 +19,8 @@ export const MIRAGE_ANUBIS_FLOOR_Y_LIFT = 1.2;
  * (-33,-40) has groundBand ≈ 5.16 after FLOOR_Y_LIFT (excludes sky lid).
  */
 export const MIRAGE_ANUBIS_ATTACKER_SPAWN = new THREE.Vector3(-33.0, 5.16, -40.0);
-export const MIRAGE_ANUBIS_SPAWN_YAW = 0;
+/** Camera local -Z. π looks +Z into the blocks, not off the south edge. */
+export const MIRAGE_ANUBIS_SPAWN_YAW = Math.PI;
 /** Blackthorn defenders — north / east edge near Z+. */
 export const MIRAGE_ANUBIS_DEFENDER_SPAWN = new THREE.Vector3(-20.0, 7.59, 0.0);
 /** Bomb A — west building cluster. */
@@ -98,12 +96,8 @@ export async function loadMirageAnubisMapGeometry(
   await runExclusiveGlbLoad(bundle, async () => {
   disposeMirageAnubisMapGeometry(bundle);
 
-  const dracoLoader = new DRACOLoader(loadingManager);
-  dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
-  dracoLoader.preload();
-
-  const gltfLoader = new GLTFLoader(loadingManager);
-  gltfLoader.setDRACOLoader(dracoLoader);
+  await ensureMeshoptDecoder();
+  const gltfLoader = createGameGltfLoader(loadingManager);
 
   try {
     const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
@@ -132,7 +126,7 @@ export async function loadMirageAnubisMapGeometry(
       if (!(child instanceof THREE.Mesh)) return;
       child.castShadow = false;
       child.receiveShadow = !isSoftwareGl;
-      child.frustumCulled = true;
+      child.frustumCulled = false;
       child.userData.isEnvironment = true;
 
       const mats = Array.isArray(child.material)
@@ -154,18 +148,8 @@ export async function loadMirageAnubisMapGeometry(
         if (std.color) {
           std.color.multiplyScalar(0.92);
         }
-        std.side = THREE.FrontSide;
-        const n = (child.name || '').toLowerCase();
+        std.side = THREE.DoubleSide;
         const matName = (std.name || '').toLowerCase();
-        // Foliage / cutout atlases need double-sided + alphaTest.
-        if (
-          n.includes('palm') ||
-          n.includes('pot') ||
-          matName.includes('palm') ||
-          matName.includes('pot')
-        ) {
-          std.side = THREE.DoubleSide;
-        }
         if (std.alphaTest !== undefined && (std.transparent || std.alphaTest > 0 || matName.includes('palm'))) {
           std.alphaTest = Math.max(std.alphaTest || 0, 0.45);
         }
@@ -192,7 +176,7 @@ export async function loadMirageAnubisMapGeometry(
     bundle.isLoaded = true;
     onByteProgress?.(1.0);
   } finally {
-    dracoLoader.dispose();
+    disposeGameGltfLoader(gltfLoader);
   }
   }, onByteProgress);
 }
@@ -490,8 +474,8 @@ function spawnMirageAnubisSquads(
     callsign: 'RECON-02',
     weaponId: 'SNIPER_BOLT',
     x: -36.0,
-    y: 0.2,
-    z: -70.0,
+    y: 5.16,
+    z: -34.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 3.0,
@@ -502,8 +486,8 @@ function spawnMirageAnubisSquads(
     callsign: 'STRIKER-03',
     weaponId: 'AK47_RIFLE',
     x: -30.0,
-    y: 0.2,
-    z: -70.0,
+    y: 5.16,
+    z: -34.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 3.0,
@@ -513,9 +497,9 @@ function spawnMirageAnubisSquads(
     id: 'ma_vg_3',
     callsign: 'LIFELINE-04',
     weaponId: 'M4_CARBINE',
-    x: -36.0,
-    y: 0.2,
-    z: -74.0,
+    x: -34.0,
+    y: 5.16,
+    z: -32.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 2.8,
@@ -525,8 +509,8 @@ function spawnMirageAnubisSquads(
     callsign: 'WARDEN-05',
     weaponId: 'SMG_MP5',
     x: -30.0,
-    y: 0.2,
-    z: -74.0,
+    y: 5.16,
+    z: -32.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 2.8,
