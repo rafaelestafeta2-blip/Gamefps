@@ -21,7 +21,8 @@ export const INDUSTRIA_FLOOR_Y_LIFT = 13.18;
 /** Vanguard attackers — south road apron, facing north into the yard. */
 /** Attacker spawn — Y = measured walkable floor at (8,-28) after FLOOR_Y_LIFT. */
 export const INDUSTRIA_ATTACKER_SPAWN = new THREE.Vector3(8.0, 2.28, -28.0);
-export const INDUSTRIA_SPAWN_YAW = 0;
+/** Camera local -Z. π looks +Z, into the yard instead of the empty south edge. */
+export const INDUSTRIA_SPAWN_YAW = Math.PI;
 /** Blackthorn defenders — north hangar apron. */
 export const INDUSTRIA_DEFENDER_SPAWN = new THREE.Vector3(-5.0, 2.0, 40.0);
 /** Bomb A — container cluster mid-yard. */
@@ -130,7 +131,9 @@ export async function loadIndustriaMapGeometry(
       if (!(child instanceof THREE.Mesh)) return;
       child.castShadow = false;
       child.receiveShadow = !isSoftwareGl;
-      child.frustumCulled = true;
+      // Scale-100 tiles cull their bounding sphere and miss the frame.
+      // Unity windings are often flipped — FrontSide then draws only the underside.
+      child.frustumCulled = false;
       child.userData.isEnvironment = true;
 
       const mats = Array.isArray(child.material)
@@ -147,11 +150,7 @@ export async function loadIndustriaMapGeometry(
         std.roughness = Math.max(0.55, std.roughness ?? 0.72);
         std.metalness = Math.min(0.35, std.metalness ?? 0.08);
         std.envMapIntensity = 0.75;
-        std.side = THREE.FrontSide;
-        // Lattice fence bits need double-sided.
-        if ((child.name || '').toLowerCase().includes('lattice')) {
-          std.side = THREE.DoubleSide;
-        }
+        std.side = THREE.DoubleSide;
       });
     });
 
@@ -467,14 +466,14 @@ function spawnIndustriaSquads(
     hasArmor: true,
   });
 
-  // Vanguard allies — south apron with player
+  // Vanguard allies — on the south road, in front of the player (camera looks +Z).
   spawnBot({
     id: 'ind_vg_1',
     callsign: 'RECON-02',
     weaponId: 'SNIPER_BOLT',
-    x: 9.0,
-    y: 1.85,
-    z: -38.0,
+    x: 6.0,
+    y: 2.28,
+    z: -22.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 2.2,
@@ -484,9 +483,9 @@ function spawnIndustriaSquads(
     id: 'ind_vg_2',
     callsign: 'STRIKER-03',
     weaponId: 'AK47_RIFLE',
-    x: 15.0,
-    y: 1.85,
-    z: -38.0,
+    x: 12.0,
+    y: 2.28,
+    z: -22.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 2.8,
@@ -496,9 +495,9 @@ function spawnIndustriaSquads(
     id: 'ind_vg_3',
     callsign: 'LIFELINE-04',
     weaponId: 'M4_CARBINE',
-    x: 10.0,
-    y: 1.85,
-    z: -42.0,
+    x: 8.0,
+    y: 2.28,
+    z: -18.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 2.5,
@@ -507,9 +506,9 @@ function spawnIndustriaSquads(
     id: 'ind_vg_4',
     callsign: 'WARDEN-05',
     weaponId: 'SMG_MP5',
-    x: 14.5,
-    y: 1.85,
-    z: -42.0,
+    x: 14.0,
+    y: 2.28,
+    z: -18.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 2.8,

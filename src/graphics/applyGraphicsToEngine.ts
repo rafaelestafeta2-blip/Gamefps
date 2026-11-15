@@ -258,6 +258,18 @@ export function applyGraphicsToEngine(
       targetFar = 260;
       break;
   }
+  const mode = (engine.state as { drillMode?: string }).drillMode;
+  if (
+    mode === 'INDUSTRIA_BOMB_5V5' ||
+    mode === 'EASTERN_CITY_BOMB_5V5' ||
+    mode === 'MIRAGE_ANUBIS_BOMB_5V5' ||
+    mode === 'MAP_TEST_INDUSTRIA' ||
+    mode === 'MAP_TEST_EASTERN' ||
+    mode === 'MAP_TEST_MIRAGE'
+  ) {
+    // These yards are ~200m. NEAR (115) clipped the far blocks into empty sky.
+    targetFar = Math.max(targetFar, 280);
+  }
   if (Math.abs(camera.far - targetFar) > 0.5) {
     camera.far = targetFar;
     camera.updateProjectionMatrix();

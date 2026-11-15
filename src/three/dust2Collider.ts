@@ -258,7 +258,9 @@ export class Dust2TriangleCollider {
       ? this.worldBounds.max.y - 1.5
       : this.walkableYCap();
     let bestY = -999;
+    let bestFlippedY = -999;
     let closestWalkableAboveY = 999;
+    let closestFlippedAboveY = 999;
     let fallbackHighestFloorY = -999;
 
     // Search home cell + 8-neighborhood (spawns near cell borders / thin floors).
@@ -281,8 +283,25 @@ export class Dust2TriangleCollider {
           const yOnTri = this.sampleTriangleY(t, x, z);
           if (yOnTri === null) continue;
           if (yOnTri > skyCut) continue;
-          // Upward walkables only for support / rescue (skip ceiling lids).
-          if (t.normal.y < 0.45) continue;
+          const upward = t.normal.y >= 0.45;
+          // Unity floors often wind downward. Use them only when this column
+          // has no real upward street — a ceiling stays a ceiling if a floor exists.
+          const flippedFloor = t.normal.y <= -0.45;
+          if (!upward && !flippedFloor) continue;
+
+          if (flippedFloor) {
+            if (yOnTri > yBottom + 0.05 && yOnTri < closestFlippedAboveY) {
+              closestFlippedAboveY = yOnTri;
+            }
+            if (
+              yOnTri <= yBottom + 0.65 &&
+              yOnTri >= yBottom - 0.85 &&
+              yOnTri > bestFlippedY
+            ) {
+              bestFlippedY = yOnTri;
+            }
+            continue;
+          }
 
           if (yOnTri > yBottom + 0.05 && yOnTri < closestWalkableAboveY) {
             closestWalkableAboveY = yOnTri;
@@ -307,7 +326,12 @@ export class Dust2TriangleCollider {
     // UNDER a walkable floor with no near-feet support → rescue UP (FrontSide white void).
     // Old order returned deep AABB-min slabs (y≈0.09) before closestWalkableAbove and
     // glued the player under Industria/Hangar/Eastern/Mirage streets every movement tick.
-    if (closestWalkableAboveY < 900 && bestY < -900) {
+    // Cap the jump so a hangar roof ~14m up is not treated as the street.
+    if (
+      closestWalkableAboveY < 900 &&
+      bestY < -900 &&
+      closestWalkableAboveY - yBottom < 12
+    ) {
       return closestWalkableAboveY;
     }
     if (
@@ -319,9 +343,30 @@ export class Dust2TriangleCollider {
       return closestWalkableAboveY;
     }
     if (bestY > -900) return bestY;
-    if (closestWalkableAboveY < 900) return closestWalkableAboveY;
-    if (fallbackHighestFloorY > -900 && fallbackHighestFloorY <= skyCut) {
+    if (closestWalkableAboveY < 900 && closestWalkableAboveY - yBottom < 12) {
+      return closestWalkableAboveY;
+    }
+    if (
+      fallbackHighestFloorY > -900 &&
+      fallbackHighestFloorY <= skyCut &&
+      fallbackHighestFloorY - yBottom < 12
+    ) {
       return fallbackHighestFloorY;
+    }
+    // A roof in the same column must not hide a flipped Unity street under it.
+    const upwardNear =
+      bestY > -900 ||
+      (closestWalkableAboveY < 900 && closestWalkableAboveY - yBottom < 12) ||
+      (fallbackHighestFloorY > -900 &&
+        Math.abs(fallbackHighestFloorY - yBottom) < 12);
+    if (!upwardNear) {
+      if (bestFlippedY > -900) return bestFlippedY;
+      if (
+        closestFlippedAboveY < 900 &&
+        closestFlippedAboveY - yBottom < 12
+      ) {
+        return closestFlippedAboveY;
+      }
     }
     if (!this.worldBounds.isEmpty() && yBottom < this.worldBounds.min.y - 1) {
       return Math.max(yBottom, this.worldBounds.min.y);
@@ -390,11 +435,10 @@ export class Dust2TriangleCollider {
     const cy = tryPoint(cx, cz);
     if (cy !== null) return { x: cx, y: cy, z: cz };
 
-    return {
-      x: hintX,
-      y: this.snapToWalkableFloor(hintX, hintZ, hintY),
-      z: hintZ,
-    };
+    const snapped = this.snapToWalkableFloor(hintX, hintZ, hintY);
+    // Roof-only columns used to glue bots ~14m up, so they read as floating in the sky.
+    const y = snapped <= hintY + 6 ? snapped : hintY;
+    return { x: hintX, y, z: hintZ };
   }
 
   /**
@@ -422,6 +466,7 @@ export class Dust2TriangleCollider {
     const cx = Math.floor(x / this.cellSize);
     const cz = Math.floor(z / this.cellSize);
     const candidates: number[] = [];
+    const flipped: number[] = [];
 
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
@@ -429,8 +474,9 @@ export class Dust2TriangleCollider {
         if (!bucket) continue;
         for (let i = 0; i < bucket.length; i++) {
           const t = bucket[i];
-          // Upward walkables only (skip ceilings / lid undersides).
-          if (t.normal.y < 0.45) continue;
+          const upward = t.normal.y >= 0.45;
+          const flippedFloor = t.normal.y <= -0.45;
+          if (!upward && !flippedFloor) continue;
           if (
             x < t.minX - 0.08 ||
             x > t.maxX + 0.08 ||
@@ -442,40 +488,36 @@ export class Dust2TriangleCollider {
           const yOnTri = this.sampleTriangleY(t, x, z);
           if (yOnTri === null) continue;
           if (yOnTri < minY || yOnTri > skyCut) continue;
-          candidates.push(yOnTri);
+          if (flippedFloor) flipped.push(yOnTri);
+          else candidates.push(yOnTri);
         }
       }
     }
 
-    if (candidates.length === 0) {
-      // Fallback: old high-probe path but still clamp out sky lid.
-      const probeY = !this.worldBounds.isEmpty()
-        ? this.worldBounds.max.y + 4
-        : Math.max(hintY, 0) + 48;
-      let snapped = this.getGroundHeight(x, probeY, z);
-      if (!Number.isFinite(snapped) || Math.abs(snapped - probeY) < 0.01) {
-        return hintY;
+    const pick = (list: number[]): number | null => {
+      if (list.length === 0) return null;
+      list.sort((a, b) => a - b);
+      let best = list[0];
+      let bestDist = Math.abs(best - hintY);
+      for (let i = 1; i < list.length; i++) {
+        const d = Math.abs(list[i] - hintY);
+        if (d < bestDist) {
+          best = list[i];
+          bestDist = d;
+        }
       }
-      if (snapped > skyCut) snapped = hintY;
-      return snapped;
-    }
+      // Hint below every surface: take the lowest, but not a roof far above the feet.
+      if (hintY < list[0] - 0.75) {
+        return list[0] - hintY <= 12 ? list[0] : null;
+      }
+      return bestDist <= 12 ? best : null;
+    };
 
-    candidates.sort((a, b) => a - b);
-    // Prefer the candidate closest to the authored spawn/bot hint Y.
-    let best = candidates[0];
-    let bestDist = Math.abs(best - hintY);
-    for (let i = 1; i < candidates.length; i++) {
-      const d = Math.abs(candidates[i] - hintY);
-      if (d < bestDist) {
-        best = candidates[i];
-        bestDist = d;
-      }
-    }
-    // If hint is clearly below every floor, take the lowest (don't jump to a roof).
-    if (hintY < candidates[0] - 0.75) {
-      return candidates[0];
-    }
-    return best;
+    const upwardPick = pick(candidates);
+    if (upwardPick !== null) return upwardPick;
+    const flippedPick = pick(flipped);
+    if (flippedPick !== null) return flippedPick;
+    return hintY;
   }
 
 

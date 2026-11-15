@@ -23,7 +23,8 @@ export const EASTERN_CITY_FLOOR_Y_LIFT = 3.5;
  * ~15.6/18.8). (0,-20) has street groundBand ≈ 3.25 after FLOOR_Y_LIFT.
  */
 export const EASTERN_CITY_ATTACKER_SPAWN = new THREE.Vector3(0.0, 3.25, -20.0);
-export const EASTERN_CITY_SPAWN_YAW = 0;
+/** Camera local -Z. π looks +Z into the city, not back down the south approach. */
+export const EASTERN_CITY_SPAWN_YAW = Math.PI;
 /** Blackthorn defenders — north plaza (Y = lowest walkable at that XZ). */
 export const EASTERN_CITY_DEFENDER_SPAWN = new THREE.Vector3(-6.0, 7.46, 36.0);
 /** Bomb A — west ruin / market block. */
@@ -132,7 +133,7 @@ export async function loadEasternCityMapGeometry(
       if (!(child instanceof THREE.Mesh)) return;
       child.castShadow = false;
       child.receiveShadow = !isSoftwareGl;
-      child.frustumCulled = true;
+      child.frustumCulled = false;
       child.userData.isEnvironment = true;
 
       const mats = Array.isArray(child.material)
@@ -149,11 +150,7 @@ export async function loadEasternCityMapGeometry(
         std.roughness = Math.max(0.55, std.roughness ?? 0.72);
         std.metalness = Math.min(0.35, std.metalness ?? 0.08);
         std.envMapIntensity = 0.75;
-        std.side = THREE.FrontSide;
-        // Lattice fence bits need double-sided.
-        if ((child.name || '').toLowerCase().includes('glass') || (child.name || '').toLowerCase().includes('fence')) {
-          std.side = THREE.DoubleSide;
-        }
+        std.side = THREE.DoubleSide;
       });
     });
 
@@ -479,8 +476,8 @@ function spawnEasternCitySquads(
     callsign: 'RECON-02',
     weaponId: 'SNIPER_BOLT',
     x: -3.0,
-    y: 0.2,
-    z: -46.0,
+    y: 3.25,
+    z: -14.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 3.0,
@@ -491,8 +488,8 @@ function spawnEasternCitySquads(
     callsign: 'STRIKER-03',
     weaponId: 'AK47_RIFLE',
     x: 3.0,
-    y: 0.2,
-    z: -46.0,
+    y: 3.25,
+    z: -14.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 3.0,
@@ -502,9 +499,9 @@ function spawnEasternCitySquads(
     id: 'ec_vg_3',
     callsign: 'LIFELINE-04',
     weaponId: 'M4_CARBINE',
-    x: -3.0,
-    y: 0.2,
-    z: -50.0,
+    x: -2.0,
+    y: 3.25,
+    z: -12.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 2.8,
@@ -513,9 +510,9 @@ function spawnEasternCitySquads(
     id: 'ec_vg_4',
     callsign: 'WARDEN-05',
     weaponId: 'SMG_MP5',
-    x: 3.0,
-    y: 0.2,
-    z: -50.0,
+    x: 2.0,
+    y: 3.25,
+    z: -12.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 2.8,

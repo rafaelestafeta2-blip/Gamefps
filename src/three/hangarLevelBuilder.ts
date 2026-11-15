@@ -20,7 +20,8 @@ export const HANGAR_FLOOR_Y_LIFT = 0.6;
 /** Vanguard attackers — south hangar entrance (inset for floor snap). */
 /** Attacker spawn — Y = measured walkable floor at (0,-14) after FLOOR_Y_LIFT. */
 export const HANGAR_ATTACKER_SPAWN = new THREE.Vector3(0.0, 0.6, -14.0);
-export const HANGAR_SPAWN_YAW = 0;
+/** Camera local -Z. π looks +Z into the hangar, not out the south gate. */
+export const HANGAR_SPAWN_YAW = Math.PI;
 /** Blackthorn defenders — north interior near office/room. */
 export const HANGAR_DEFENDER_SPAWN = new THREE.Vector3(0.0, 0.2, 10.0);
 /** Bomb A — container stack side. */
@@ -129,7 +130,7 @@ export async function loadHangarMapGeometry(
       if (!(child instanceof THREE.Mesh)) return;
       child.castShadow = false;
       child.receiveShadow = !isSoftwareGl;
-      child.frustumCulled = true;
+      child.frustumCulled = false;
       child.userData.isEnvironment = true;
 
       const mats = Array.isArray(child.material)
@@ -146,11 +147,8 @@ export async function loadHangarMapGeometry(
         std.roughness = Math.max(0.55, std.roughness ?? 0.72);
         std.metalness = Math.min(0.35, std.metalness ?? 0.08);
         std.envMapIntensity = 0.75;
-        std.side = THREE.FrontSide;
-        // Lattice fence bits need double-sided.
-        if ((child.name || '').toLowerCase().includes('lattice')) {
-          std.side = THREE.DoubleSide;
-        }
+        // Unity planes often wind downward. FrontSide then hides the floor from above.
+        std.side = THREE.DoubleSide;
       });
     });
 
@@ -472,8 +470,8 @@ function spawnHangarSquads(
     callsign: 'RECON-02',
     weaponId: 'SNIPER_BOLT',
     x: -2.5,
-    y: 0.15,
-    z: -16.5,
+    y: 0.6,
+    z: -8.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 2.2,
@@ -484,8 +482,8 @@ function spawnHangarSquads(
     callsign: 'STRIKER-03',
     weaponId: 'AK47_RIFLE',
     x: 2.5,
-    y: 0.15,
-    z: -16.5,
+    y: 0.6,
+    z: -8.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 2.8,
@@ -496,8 +494,8 @@ function spawnHangarSquads(
     callsign: 'LIFELINE-04',
     weaponId: 'M4_CARBINE',
     x: -2.0,
-    y: 0.15,
-    z: -19.0,
+    y: 0.6,
+    z: -6.0,
     isAlly: true,
     patrolAxis: 'X',
     patrolRange: 2.5,
@@ -507,8 +505,8 @@ function spawnHangarSquads(
     callsign: 'WARDEN-05',
     weaponId: 'SMG_MP5',
     x: 2.0,
-    y: 0.15,
-    z: -19.0,
+    y: 0.6,
+    z: -6.0,
     isAlly: true,
     patrolAxis: 'Z',
     patrolRange: 2.8,
