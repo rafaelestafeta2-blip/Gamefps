@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { stopMatchEndFanfare } from '../audio/characterAndBombAudio';
+import { getCloudSyncState } from '../firebase/playerCloudSync';
 import { SquadOperatorStats, WeaponId, YardBombHudInfo } from '../types/game';
 import { bindTap } from './hudTapUtils';
+import { PostMatchRewardsOverlay } from './PostMatchRewardsOverlay';
 import { BlackthornTeamEmblem, VanguardTeamEmblem } from './WarfaceClassIcons';
 
 interface PostMatchSummaryOverlayProps {
@@ -25,14 +27,6 @@ const WEAPON_LABELS: Record<WeaponId, string> = {
   KNIFE_TACTICAL: 'KARAMBIT',
 };
 
-const OPERATOR_LEVELS: Record<string, number> = {
-  VOCÊ: 154,
-  'RECON-02': 98,
-  'STRIKER-03': 112,
-  'LIFELINE-04': 85,
-  'WARDEN-05': 109,
-};
-
 const FALLBACK_SQUAD: SquadOperatorStats[] = [
   { callsign: 'VOCÊ', roleTitle: 'LÍDER DE ESQUADRÃO', weaponId: 'M4_CARBINE', kills: 5, deaths: 1, assists: 2, headshots: 2, score: 650, isPlayer: true },
   { callsign: 'RECON-02', roleTitle: 'ATIRADOR DE ELITE', weaponId: 'SNIPER_BOLT', kills: 4, deaths: 2, assists: 3, headshots: 2, score: 550, isPlayer: false },
@@ -46,6 +40,8 @@ export const PostMatchSummaryOverlay: React.FC<PostMatchSummaryOverlayProps> = (
   onCloseToMenu,
 }) => {
   const [statsModalOpen, setStatsModalOpen] = useState(false);
+  const [showRewards, setShowRewards] = useState(false);
+  const profile = getCloudSyncState().profile;
 
   const isVictory = yardBomb.matchWinner === 'VANGUARD';
   const rawSquad =
@@ -57,10 +53,27 @@ export const PostMatchSummaryOverlay: React.FC<PostMatchSummaryOverlayProps> = (
     (a, b) => b.score - a.score || b.kills - a.kills
   );
 
+  const operatorLevel = (op: SquadOperatorStats): number => {
+    if (op.isPlayer) return profile.rankLevel || 1;
+    // Stable fake ranks for AI squadmates from callsign hash
+    let h = 0;
+    for (let i = 0; i < op.callsign.length; i++) h = (h + op.callsign.charCodeAt(i) * 17) % 97;
+    return 40 + (h % 80);
+  };
+
   const handleCloseToLobby = () => {
     stopMatchEndFanfare();
-    onCloseToMenu?.();
+    setShowRewards(true);
   };
+
+  if (showRewards) {
+    return (
+      <PostMatchRewardsOverlay
+        yardBomb={yardBomb}
+        onContinue={() => onCloseToMenu?.()}
+      />
+    );
+  }
 
   return (
     <div
@@ -154,7 +167,7 @@ export const PostMatchSummaryOverlay: React.FC<PostMatchSummaryOverlayProps> = (
           <div className="flex-1 grid grid-cols-2 sm:grid-cols-5 gap-1.5 sm:gap-2">
             {sortedSquad.slice(0, 5).map((op, idx) => {
               const isMvp = idx === 0;
-              const opLevel = OPERATOR_LEVELS[op.callsign] || 100;
+              const opLevel = operatorLevel(op);
               return (
                 <div
                   key={op.callsign}

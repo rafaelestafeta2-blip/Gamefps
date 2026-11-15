@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useRef, useState } from 'react';
+// startTransition is only used for same-screen HUD ticks — never for screen changes.
 import { applyAudioSettings, initAudioSystem } from './audio/audioSettings';
 import { AuthLoginScreen } from './components/AuthLoginScreen';
 import { GameShellModals } from './components/GameShellModals';
@@ -12,6 +13,7 @@ import { VideoIntroScreen } from './components/VideoIntroScreen';
 import { WarfaceMatchmakingWidget } from './components/WarfaceMatchmakingWidget';
 import { WarfaceRankUpModal } from './components/WarfaceRankUpModal';
 import { YardMatchLoadingModal } from './components/YardMatchLoadingModal';
+import { resumePendingGoogleSignInIfNeeded } from './firebase/googleAuthService';
 import { subscribePlayerProfile } from './firebase/playerCloudSync';
 import { ControlSettings, loadControlSettings, saveControlSettings } from './controls/hudLayoutSettings';
 import { applyGraphicsToEngine } from './graphics/applyGraphicsToEngine';
@@ -19,6 +21,7 @@ import { FpsLimit, GameSettings, getDefaultSettings, loadGameSettings, saveGameS
 import { mobileHardware } from './mobile/nativeHardware';
 import { getClassCombatModifiers } from './progression/loadoutSystem';
 import { TacticalFPSEngine } from './three/fpsEngine';
+import { prefetchMapAssetsForMode } from './three/mapAssetCatalog';
 import { DrillMode, GyroMode, HudState, OpticType, WeaponId } from './types/game';
 import { INITIAL_HUD_STATE } from './types/initialHudState';
 
@@ -44,6 +47,14 @@ export default function App() {
   useEffect(() => {
     initAudioSystem(gameSettingsRef.current);
     applyAudioSettings(gameSettingsRef.current);
+    // After Android process death mid-Google-login, finish OAuth from native prefs.
+    resumePendingGoogleSignInIfNeeded();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        resumePendingGoogleSignInIfNeeded();
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
     const unsub = subscribePlayerProfile((state) => {
       if (engineRef.current) {
         engineRef.current.syncProgressionFromCloud(
@@ -67,6 +78,7 @@ export default function App() {
       }
     });
     return () => {
+      document.removeEventListener('visibilitychange', onVis);
       unsub();
     };
   }, []);
@@ -79,6 +91,7 @@ export default function App() {
     engine.setLookSensitivity(next.lookSensitivity);
     engine.setAdsSensitivity(next.adsSensitivity);
     engine.setGyroSensitivity(next.gyroSensitivity);
+    engine.setAimAssistStrength(next.aimAssistStrength ?? 0.45);
     if (!prev || prev.gyroMode !== next.gyroMode) {
       void engine.setGyroMode(next.gyroMode);
     }
@@ -117,11 +130,10 @@ export default function App() {
     if (!engineRef.current) return;
     setMatchmakingTargetMode(null);
     const targetMode: DrillMode = mode || hud.drillMode || 'DUST2_BOMB_5V5';
-    if (targetMode === 'FREE_RANGE') {
-      launchMatchNow(targetMode);
-      return;
-    }
+    // FREE_RANGE must also go through Loading 2 / prepareMatchArena so
+    // shooting_range_2k.glb is fully loaded (previously fire-and-forget → empty range).
     if (hud.screen === 'MAIN_MENU' || targetMode !== hud.drillMode) {
+      void prefetchMapAssetsForMode(targetMode);
       setLoadingBombMode(targetMode);
       return;
     }
@@ -129,8 +141,19 @@ export default function App() {
   };
 
   const handleStartWarfaceMatchmaking = (targetMode: DrillMode) => {
+    void prefetchMapAssetsForMode(targetMode);
     setMatchmakingTargetMode(targetMode);
   };
+
+  // Stable prepare callback — inline lambdas recreated every App render and
+  // restarted YardMatchLoadingModal's effect mid-download (stuck VS / 0%).
+  const prepareMapForMatch = useCallback(
+    (targetMode: DrillMode, onProg: (pct: number, statusLabel: string) => void) =>
+      engineRef.current
+        ? engineRef.current.prepareMapForMatch(targetMode, onProg)
+        : Promise.resolve(),
+    []
+  );
 
   const handleSelectWeapon = (weaponId: WeaponId) => {
     if (!engineRef.current) return;
@@ -142,7 +165,39 @@ export default function App() {
     const container = canvasMountRef.current;
     if (!container) return;
 
-    const engine = new TacticalFPSEngine(container, (nextHud) => setHud(nextHud));
+    // HUD bridge dirty-checks. Screen changes MUST be synchronous — deferring
+    // PLAYING with startTransition caused a one-frame MAIN_MENU flash after loading.
+    // Weapon/grenade equip must also be sync — startTransition made grenade taps feel lagged.
+    const hudScreenRef = { current: 'INTRO' as string };
+    const hudInteractionRef = {
+      equippedGrenade: null as string | null,
+      isThrowingGrenade: false,
+      activeWeapon: '' as string,
+    };
+    const engine = new TacticalFPSEngine(container, (nextHud) => {
+      if (nextHud.screen !== hudScreenRef.current) {
+        hudScreenRef.current = nextHud.screen;
+        hudInteractionRef.equippedGrenade = nextHud.equippedGrenade;
+        hudInteractionRef.isThrowingGrenade = nextHud.isThrowingGrenade;
+        hudInteractionRef.activeWeapon = nextHud.activeWeapon;
+        setHud(nextHud);
+        return;
+      }
+      const interactionChanged =
+        nextHud.equippedGrenade !== hudInteractionRef.equippedGrenade ||
+        nextHud.isThrowingGrenade !== hudInteractionRef.isThrowingGrenade ||
+        nextHud.activeWeapon !== hudInteractionRef.activeWeapon;
+      if (interactionChanged) {
+        hudInteractionRef.equippedGrenade = nextHud.equippedGrenade;
+        hudInteractionRef.isThrowingGrenade = nextHud.isThrowingGrenade;
+        hudInteractionRef.activeWeapon = nextHud.activeWeapon;
+        setHud(nextHud);
+        return;
+      }
+      startTransition(() => {
+        setHud(nextHud);
+      });
+    });
     engineRef.current = engine;
     const initialLoadout = getClassCombatModifiers();
     if (initialLoadout.primaryWeapon) {
@@ -205,7 +260,7 @@ export default function App() {
       />
 
       {gameSettings.showFpsCounter && hud.screen === 'PLAYING' && (
-        <div className="absolute top-2 left-2 z-50 pointer-events-none px-2 py-0.5 rounded bg-black/80 border border-amber-500/50 font-mono text-[10px] text-amber-400 flex items-center gap-2 shadow-lg">
+        <div className="absolute top-2 right-2 z-50 pointer-events-none px-2 py-0.5 rounded bg-black/80 border border-amber-500/50 font-mono text-[10px] text-amber-400 flex items-center gap-2 shadow-lg">
           <span className="font-bold">{hud.liveFps} FPS</span>
           <span className="text-zinc-500">|</span>
           <span className="text-zinc-400">{(1000 / Math.max(1, hud.liveFps)).toFixed(1)}ms</span>
@@ -213,6 +268,33 @@ export default function App() {
           <span className="text-zinc-400">DPI {hud.renderScalePercent}%</span>
         </div>
       )}
+
+      {/* SPAWNDBG — App-level (not buried in HUD); impossible to miss on APK */}
+      {hud.screen === 'PLAYING' &&
+        hud.spawnDebug &&
+        (gameSettings.showSpawnDebug ||
+          hud.spawnDebug.harness ||
+          (typeof window !== 'undefined' &&
+            /(?:\?|&)spawndbg=1\b/.test(window.location.search))) && (
+          <div
+            className="absolute bottom-3 left-2 right-2 z-[200] pointer-events-none font-mono text-[12px] sm:text-sm leading-snug text-black bg-lime-300 border-4 border-black px-3 py-2 shadow-[0_0_0_3px_#84cc16]"
+            style={{ textShadow: 'none' }}
+          >
+            <div className="font-black tracking-wide">
+              SPAWNDBG {hud.spawnDebug.harness ? '· TESTE MAPA' : ''} ·{' '}
+              {hud.spawnDebug.mode}
+            </div>
+            <div>
+              xz={hud.spawnDebug.xz} · feetY={hud.spawnDebug.feetY} · ground=
+              {hud.spawnDebug.groundY}
+            </div>
+            <div>
+              ready={String(hud.spawnDebug.ready)} · tris={hud.spawnDebug.tris} ·{' '}
+              {hud.spawnDebug.note || ''}
+            </div>
+            <div className="truncate">aabb {hud.spawnDebug.aabb}</div>
+          </div>
+        )}
 
       {hud.screen === 'INTRO' && (
         <IntroScreen
@@ -254,15 +336,17 @@ export default function App() {
       {loadingBombMode && (
         <YardMatchLoadingModal
           mode={loadingBombMode}
-          onPrepareMap={(targetMode, onProg) =>
-            engineRef.current
-              ? engineRef.current.prepareMapForMatch(targetMode, onProg)
-              : Promise.resolve()
-          }
+          onPrepareMap={prepareMapForMatch}
           onComplete={() => {
             const targetMode = loadingBombMode;
-            setLoadingBombMode(null);
+            // Enter PLAYING first, then dismiss loading — avoids MAIN_MENU flash.
             launchMatchNow(targetMode);
+            setLoadingBombMode(null);
+          }}
+          onCancel={() => {
+            setLoadingBombMode(null);
+            engineRef.current?.returnToMainMenu?.();
+            setHud((prev) => ({ ...prev, screen: 'MAIN_MENU' }));
           }}
         />
       )}
@@ -297,7 +381,8 @@ export default function App() {
       {hud.screen === 'PLAYING' && (
         <>
           {!hud.yardBomb?.isSpectating &&
-            hud.yardBomb?.roundState !== 'MATCH_OVER' && (
+            hud.yardBomb?.roundState !== 'MATCH_OVER' &&
+            hud.yardBomb?.roundState !== 'EQUIP' && (
               <MobileTouchControls
               hud={hud}
               controlSettings={controlSettings}
@@ -331,6 +416,7 @@ export default function App() {
             onToggleLaser={() => engineRef.current?.toggleLaser()}
             onCycleFireMode={() => engineRef.current?.cycleFireMode()}
             onResupply={() => engineRef.current?.resupplyAmmo()}
+            onSupportHeld={(held) => engineRef.current?.setClassSupportHeld(held)}
             onThrowGrenade={(type) => engineRef.current?.throwGrenade(type)}
             onToggleMute={() => engineRef.current?.toggleMute()}
             onToggleDock={() => engineRef.current?.toggleDockCollapsed()}

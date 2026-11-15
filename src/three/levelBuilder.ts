@@ -34,6 +34,12 @@ export interface TacticalTargetEntity {
   downTimer: number;
   hitTiltAngle: number;
   hitTiltVelocity: number;
+  /** Sticky flag for directional death anim selection (set on lethal hit). */
+  lastDeathWasHeadshot?: boolean;
+  /** Warface medic revive: epoch-sec deadline; 0 = none. */
+  reviveUntilSec?: number;
+  /** True after revive window expired — corpse hidden permanently this round. */
+  reviveExpired?: boolean;
   // Combat AI telegraph state
   canShootBack: boolean;
   windupTimer: number;

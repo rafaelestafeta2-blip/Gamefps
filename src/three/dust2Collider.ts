@@ -177,8 +177,15 @@ export class Dust2TriangleCollider {
     });
 
     this.triangleCount = totalTris;
-    this.generateTopDownRadarDataUrl(allFloors, allWalls);
+    // Mark ready BEFORE radar bake. Radar can take tens of seconds on Eastern
+    // (~1.3M floors) and used to leave ready=false while Loading 2 timed out and
+    // startGame disposed the in-flight GLB → empty arena / white void.
     this.ready = true;
+    try {
+      this.generateTopDownRadarDataUrl(allFloors, allWalls);
+    } catch {
+      this.radarDataUrl = '';
+    }
   }
 
   private isBoxInLadderZone(
@@ -224,6 +231,18 @@ export class Dust2TriangleCollider {
   }
 
   /**
+   * Max Y considered a walkable floor (not a skybox/prop spike).
+   * Dust2 used a hard 10.5m cap — that dropped players UNDER Industria/Hangar/
+   * Eastern/Mirage walkables (post-lift roofs/courts sit at 12–45m).
+   */
+  private walkableYCap(): number {
+    if (!this.worldBounds.isEmpty()) {
+      return this.worldBounds.max.y + 0.5;
+    }
+    return 80;
+  }
+
+  /**
    * Computes exact barycentric Y height on floor/ramp/stair triangles under (x, z).
    * Ignores downward-facing ceiling triangles (`normal.y < -0.45`) above feet so climbing
    * near a ceiling never snaps the player onto the roof of the map, and rescues the player
@@ -234,45 +253,229 @@ export class Dust2TriangleCollider {
 
     const cx = Math.floor(x / this.cellSize);
     const cz = Math.floor(z / this.cellSize);
-    const bucket = this.floorGrid.get(this.cellKey(cx, cz));
-    if (!bucket || bucket.length === 0) return Math.max(0, yBottom);
-
+    // Drop sky-lid / roof-cap band (Mirage lid ≈ max.y) — same cut as snapToWalkableFloor.
+    const skyCut = !this.worldBounds.isEmpty()
+      ? this.worldBounds.max.y - 1.5
+      : this.walkableYCap();
     let bestY = -999;
     let closestWalkableAboveY = 999;
     let fallbackHighestFloorY = -999;
 
-    for (let i = 0; i < bucket.length; i++) {
-      const t = bucket[i];
-      if (x < t.minX - 0.05 || x > t.maxX + 0.05 || z < t.minZ - 0.05 || z > t.maxZ + 0.05) {
-        continue;
-      }
+    // Search home cell + 8-neighborhood (spawns near cell borders / thin floors).
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const bucket = this.floorGrid.get(this.cellKey(cx + dx, cz + dz));
+        if (!bucket || bucket.length === 0) continue;
 
-      const yOnTri = this.sampleTriangleY(t, x, z);
-      if (yOnTri === null) continue;
+        for (let i = 0; i < bucket.length; i++) {
+          const t = bucket[i];
+          if (
+            x < t.minX - 0.05 ||
+            x > t.maxX + 0.05 ||
+            z < t.minZ - 0.05 ||
+            z > t.maxZ + 0.05
+          ) {
+            continue;
+          }
 
-      if (yOnTri < 10.5 && yOnTri > yBottom && yOnTri < closestWalkableAboveY) {
-        closestWalkableAboveY = yOnTri;
-      }
+          const yOnTri = this.sampleTriangleY(t, x, z);
+          if (yOnTri === null) continue;
+          if (yOnTri > skyCut) continue;
+          // Upward walkables only for support / rescue (skip ceiling lids).
+          if (t.normal.y < 0.45) continue;
 
-      if (yOnTri < 10.5 && yOnTri > fallbackHighestFloorY) {
-        fallbackHighestFloorY = yOnTri;
-      }
+          if (yOnTri > yBottom + 0.05 && yOnTri < closestWalkableAboveY) {
+            closestWalkableAboveY = yOnTri;
+          }
 
-      // Never treat a downward-facing ceiling above the player's feet as a step-up floor
-      if (t.normal.y < -0.45 && yOnTri > yBottom + 0.08) {
-        continue;
-      }
+          if (yOnTri > fallbackHighestFloorY) {
+            fallbackHighestFloorY = yOnTri;
+          }
 
-      if (yOnTri <= yBottom + 0.65 && yOnTri > bestY) {
-        bestY = yOnTri;
+          // Support surface near feet (step-up ≤0.65, step-down ≤0.85).
+          if (
+            yOnTri <= yBottom + 0.65 &&
+            yOnTri >= yBottom - 0.85 &&
+            yOnTri > bestY
+          ) {
+            bestY = yOnTri;
+          }
+        }
       }
     }
 
+    // UNDER a walkable floor with no near-feet support → rescue UP (FrontSide white void).
+    // Old order returned deep AABB-min slabs (y≈0.09) before closestWalkableAbove and
+    // glued the player under Industria/Hangar/Eastern/Mirage streets every movement tick.
+    if (closestWalkableAboveY < 900 && bestY < -900) {
+      return closestWalkableAboveY;
+    }
+    if (
+      closestWalkableAboveY < 900 &&
+      bestY > -900 &&
+      bestY < yBottom - 0.15 &&
+      closestWalkableAboveY - yBottom < 12
+    ) {
+      return closestWalkableAboveY;
+    }
     if (bestY > -900) return bestY;
-    // Rescue player if yBottom spawned or dipped below the floor at (x, z)
     if (closestWalkableAboveY < 900) return closestWalkableAboveY;
-    if (fallbackHighestFloorY > -900) return fallbackHighestFloorY;
-    return Math.max(0, yBottom);
+    if (fallbackHighestFloorY > -900 && fallbackHighestFloorY <= skyCut) {
+      return fallbackHighestFloorY;
+    }
+    if (!this.worldBounds.isEmpty() && yBottom < this.worldBounds.min.y - 1) {
+      return Math.max(yBottom, this.worldBounds.min.y);
+    }
+    return yBottom;
+  }
+
+  /**
+   * Resolve a playable spawn inside the collider footprint (XZ + Y).
+   * Prefer hint; if that column has no street-band floor, search nearby then AABB.
+   */
+  public findPlayableSpawn(
+    hintX: number,
+    hintZ: number,
+    hintY = 0.35
+  ): { x: number; y: number; z: number } {
+    if (!this.ready || this.worldBounds.isEmpty()) {
+      return { x: hintX, y: hintY, z: hintZ };
+    }
+
+    const skyCut = this.worldBounds.max.y - 1.5;
+    const streetMax = Math.min(
+      skyCut,
+      Math.max(hintY + 6, this.worldBounds.min.y + 10)
+    );
+
+    const tryPoint = (x: number, z: number): number | null => {
+      const y = this.snapToWalkableFloor(x, z, hintY);
+      if (!Number.isFinite(y)) return null;
+      if (y < this.worldBounds.min.y - 0.1 || y > streetMax) return null;
+      // Must actually have upward floor support at result.
+      const gh = this.getGroundHeight(x, y + 0.1, z);
+      if (Math.abs(gh - y) > 0.75) return null;
+      return y;
+    };
+
+    const atHint = tryPoint(hintX, hintZ);
+    if (atHint !== null) return { x: hintX, y: atHint, z: hintZ };
+
+    const radii = [4, 8, 12, 20, 32, 48];
+    let best: { x: number; y: number; z: number; dist: number } | null = null;
+    for (const r of radii) {
+      for (let ang = 0; ang < Math.PI * 2; ang += Math.PI / 6) {
+        const x = hintX + Math.cos(ang) * r;
+        const z = hintZ + Math.sin(ang) * r;
+        if (
+          x < this.worldBounds.min.x + 1 ||
+          x > this.worldBounds.max.x - 1 ||
+          z < this.worldBounds.min.z + 1 ||
+          z > this.worldBounds.max.z - 1
+        ) {
+          continue;
+        }
+        const y = tryPoint(x, z);
+        if (y === null) continue;
+        const dist = Math.hypot(x - hintX, z - hintZ);
+        if (!best || dist < best.dist) best = { x, y, z, dist };
+      }
+      if (best && best.dist <= r + 0.1) break;
+    }
+    if (best) return { x: best.x, y: best.y, z: best.z };
+
+    // Last resort: AABB center column.
+    const cx = (this.worldBounds.min.x + this.worldBounds.max.x) * 0.5;
+    const cz = (this.worldBounds.min.z + this.worldBounds.max.z) * 0.5;
+    const cy = tryPoint(cx, cz);
+    if (cy !== null) return { x: cx, y: cy, z: cz };
+
+    return {
+      x: hintX,
+      y: this.snapToWalkableFloor(hintX, hintZ, hintY),
+      z: hintZ,
+    };
+  }
+
+  /**
+   * Snap spawn/bot onto the correct walkable floor at (x,z).
+   *
+   * IMPORTANT: probing via getGroundHeight(from AABB max) picks the *highest*
+   * triangle (roofs / Mirage sky-lid ≈ max.y) — that left players on lids or,
+   * when collider wasn't ready yet, at authored Y under FrontSide floors
+   * (white void). Collect upward floors, drop sky-lid band, pick closest to hint.
+   */
+  public snapToWalkableFloor(
+    x: number,
+    z: number,
+    hintY = 0.2
+  ): number {
+    if (!this.ready) return hintY;
+
+    const skyCut = !this.worldBounds.isEmpty()
+      ? this.worldBounds.max.y - 1.5
+      : 1e9;
+    const minY = !this.worldBounds.isEmpty()
+      ? this.worldBounds.min.y - 0.25
+      : -5;
+
+    const cx = Math.floor(x / this.cellSize);
+    const cz = Math.floor(z / this.cellSize);
+    const candidates: number[] = [];
+
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const bucket = this.floorGrid.get(this.cellKey(cx + dx, cz + dz));
+        if (!bucket) continue;
+        for (let i = 0; i < bucket.length; i++) {
+          const t = bucket[i];
+          // Upward walkables only (skip ceilings / lid undersides).
+          if (t.normal.y < 0.45) continue;
+          if (
+            x < t.minX - 0.08 ||
+            x > t.maxX + 0.08 ||
+            z < t.minZ - 0.08 ||
+            z > t.maxZ + 0.08
+          ) {
+            continue;
+          }
+          const yOnTri = this.sampleTriangleY(t, x, z);
+          if (yOnTri === null) continue;
+          if (yOnTri < minY || yOnTri > skyCut) continue;
+          candidates.push(yOnTri);
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      // Fallback: old high-probe path but still clamp out sky lid.
+      const probeY = !this.worldBounds.isEmpty()
+        ? this.worldBounds.max.y + 4
+        : Math.max(hintY, 0) + 48;
+      let snapped = this.getGroundHeight(x, probeY, z);
+      if (!Number.isFinite(snapped) || Math.abs(snapped - probeY) < 0.01) {
+        return hintY;
+      }
+      if (snapped > skyCut) snapped = hintY;
+      return snapped;
+    }
+
+    candidates.sort((a, b) => a - b);
+    // Prefer the candidate closest to the authored spawn/bot hint Y.
+    let best = candidates[0];
+    let bestDist = Math.abs(best - hintY);
+    for (let i = 1; i < candidates.length; i++) {
+      const d = Math.abs(candidates[i] - hintY);
+      if (d < bestDist) {
+        best = candidates[i];
+        bestDist = d;
+      }
+    }
+    // If hint is clearly below every floor, take the lowest (don't jump to a roof).
+    if (hintY < candidates[0] - 0.75) {
+      return candidates[0];
+    }
+    return best;
   }
 
 
@@ -418,9 +621,25 @@ export class Dust2TriangleCollider {
     dir: THREE.Vector3,
     maxDist: number
   ): number | null {
+    const hit = this.raycastDetailed(origin, dir, maxDist);
+    return hit ? hit.distance : null;
+  }
+
+  /**
+   * Spatial-hash triangle raycast with hit point + face normal.
+   * Used for bullet world impacts without Three.js mesh traversal of the whole GLB.
+   */
+  public raycastDetailed(
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    maxDist: number,
+    outPoint?: THREE.Vector3,
+    outNormal?: THREE.Vector3
+  ): { distance: number } | null {
     if (!this.ready) return null;
     _ray.set(origin, dir);
     let closestDist = maxDist + 1;
+    let hitTri: Dust2TriEntry | null = null;
     const step = 1.45;
     const steps = Math.max(1, Math.ceil(maxDist / step));
     let lastKey = '';
@@ -442,7 +661,11 @@ export class Dust2TriangleCollider {
           if (py + step < w.minY || py - step > w.maxY) continue;
           if (_ray.intersectTriangle(w.a, w.b, w.c, false, _hitPt)) {
             const dist = origin.distanceTo(_hitPt);
-            if (dist <= maxDist && dist < closestDist) closestDist = dist;
+            if (dist <= maxDist && dist < closestDist) {
+              closestDist = dist;
+              hitTri = w;
+              if (outPoint) outPoint.copy(_hitPt);
+            }
           }
         }
       }
@@ -453,13 +676,27 @@ export class Dust2TriangleCollider {
           if (py + step < f.minY || py - step > f.maxY) continue;
           if (_ray.intersectTriangle(f.a, f.b, f.c, false, _hitPt)) {
             const dist = origin.distanceTo(_hitPt);
-            if (dist <= maxDist && dist < closestDist) closestDist = dist;
+            if (dist <= maxDist && dist < closestDist) {
+              closestDist = dist;
+              hitTri = f;
+              if (outPoint) outPoint.copy(_hitPt);
+            }
           }
         }
       }
     }
 
-    return closestDist <= maxDist ? closestDist : null;
+    if (closestDist > maxDist || !hitTri) return null;
+
+    if (outPoint) {
+      outPoint.copy(origin).addScaledVector(dir, closestDist);
+    }
+    if (outNormal) {
+      outNormal.copy(hitTri.normal);
+      // Ensure normal faces the shooter
+      if (outNormal.dot(dir) > 0) outNormal.negate();
+    }
+    return { distance: closestDist };
   }
 
   private sampleTriangleY(t: Dust2TriEntry, x: number, z: number): number | null {
@@ -496,7 +733,9 @@ export class Dust2TriangleCollider {
     const toPx = (wx: number) => ((wx - minX) / spanX) * 256;
     const toPz = (wz: number) => ((wz - minZ) / spanZ) * 256;
 
-    for (let i = 0; i < floors.length; i++) {
+    // Subsample huge maps (Eastern) — full 1M+ fills freeze Android WebView.
+    const floorStep = floors.length > 80000 ? Math.ceil(floors.length / 40000) : 1;
+    for (let i = 0; i < floors.length; i += floorStep) {
       const f = floors[i];
       if (f.maxY > 9.6) continue;
       ctx.beginPath();
@@ -510,7 +749,8 @@ export class Dust2TriangleCollider {
 
     ctx.strokeStyle = '#64748b';
     ctx.lineWidth = 1.1;
-    for (let i = 0; i < walls.length; i++) {
+    const wallStep = walls.length > 40000 ? Math.ceil(walls.length / 20000) : 1;
+    for (let i = 0; i < walls.length; i += wallStep) {
       const w = walls[i];
       if (w.minY > 8.5 || w.maxY < 1.0) continue;
       ctx.beginPath();

@@ -1,6 +1,7 @@
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, onSnapshot, setDoc, Unsubscribe } from 'firebase/firestore';
 import { evaluateUnlockedAchievements } from '../progression/achievementsData';
+import { canGrantMatchProgressionRewards } from '../progression/matchProgressionGate';
 import {
   getRankForXp,
   registerCloudCashSpendHook,
@@ -165,14 +166,20 @@ export async function signInWithGoogleAccount(): Promise<boolean> {
   state.syncError = null;
   state.isSyncing = true;
   emitState();
-  const res = await performGoogleSignIn();
-  if (!res.ok) {
-    state.syncError = res.error || 'Não foi possível concluir o login com Google.';
+  try {
+    const res = await performGoogleSignIn();
+    if (!res.ok) {
+      state.syncError =
+        res.error || 'Não foi possível concluir o login com Google.';
+      return false;
+    }
+    // Credential applied — onAuthStateChanged pulls profile. Never leave
+    // isSyncing=true if the Promise hung; finally clears either way.
+    return true;
+  } finally {
     state.isSyncing = false;
     emitState();
-    return false;
   }
-  return true;
 }
 
 export async function signOutGoogleAccount(): Promise<void> {
@@ -237,6 +244,9 @@ export function recordCombatTelemetryDelta(delta: {
   kills?: number; deaths?: number; assists?: number; headshots?: number;
   matchesPlayed?: number; matchesWon?: number; bombsPlanted?: number; activeWeapon?: WeaponId;
 }): void {
+  // Profile combat / match / MMR progression only from online human matches.
+  if (!canGrantMatchProgressionRewards()) return;
+
   const p = state.profile;
   const totalKills = p.totalKills + (delta.kills || 0);
   const totalDeaths = p.totalDeaths + (delta.deaths || 0);

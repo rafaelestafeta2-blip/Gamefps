@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
 import {
+  cancelGoogleSignInInFlight,
+  getOAuthPendingAgeMs,
+  resumePendingGoogleSignInIfNeeded,
+} from '../firebase/googleAuthService';
+import {
   CloudSyncState,
   getCloudSyncState,
   signInWithGoogleAccount,
@@ -15,6 +20,8 @@ interface AuthLoginScreenProps {
   onContinueToMenu: () => void;
 }
 
+const UI_CONNECTING_TIMEOUT_MS = 95_000;
+
 export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
   onContinueToMenu,
 }) => {
@@ -22,27 +29,72 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
     getCloudSyncState()
   );
   const [signingIn, setSigningIn] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
     soundEngine.playMenuMusic();
+    // Resume mid-OAuth only if pending is fresh; stale flags used to leave
+    // CONECTANDO forever after process death / abandoned login.
+    const age = getOAuthPendingAgeMs();
+    if (age != null && age < UI_CONNECTING_TIMEOUT_MS) {
+      setSigningIn(true);
+      resumePendingGoogleSignInIfNeeded();
+    } else if (age != null) {
+      cancelGoogleSignInInFlight('Sessão de login anterior expirou.');
+      setLocalError('Sessão de login anterior expirou. Toque em ENTRAR COM GOOGLE.');
+    }
     const unsub = subscribePlayerProfile((next) => {
       setSyncState(next);
+      if (next.isGoogleLinked) {
+        setSigningIn(false);
+        setLocalError(null);
+      }
+      if (next.syncError) {
+        setSigningIn(false);
+      }
     });
     return () => {
       unsub();
     };
   }, []);
 
+  useEffect(() => {
+    if (!signingIn) return;
+    const t = window.setTimeout(() => {
+      cancelGoogleSignInInFlight(
+        'Login demorou demais. Toque em TENTAR DE NOVO.'
+      );
+      setSigningIn(false);
+      setLocalError(
+        'Login demorou demais (timeout). Toque em TENTAR DE NOVO.'
+      );
+    }, UI_CONNECTING_TIMEOUT_MS);
+    return () => window.clearTimeout(t);
+  }, [signingIn]);
+
+  const handleCancelConnecting = () => {
+    soundEngine.playMenuSelect();
+    cancelGoogleSignInInFlight('Login cancelado.');
+    setSigningIn(false);
+    setLocalError('Login cancelado. Toque em TENTAR DE NOVO.');
+  };
+
   const handleGoogleLogin = async () => {
     soundEngine.playMenuSelect();
     soundEngine.playMenuMusic();
-    void mobileHardware.enterFullscreenLandscape();
+    // Do NOT request fullscreen / orientation lock before OAuth — that can
+    // recreate the Activity while Google Account Picker is open and kill the flow.
+    setLocalError(null);
     setSigningIn(true);
     const ok = await signInWithGoogleAccount();
     setSigningIn(false);
     if (ok) {
       soundEngine.playMenuSelect();
+      void mobileHardware.enterFullscreenLandscape();
       onContinueToMenu();
+    } else {
+      const err = getCloudSyncState().syncError;
+      setLocalError(err || 'Não foi possível concluir o login com Google.');
     }
   };
 
@@ -247,9 +299,9 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
                 ))}
               </div>
 
-              {syncError && (
+              {(syncError || localError) && (
                 <div className="p-2 rounded-md bg-red-500/15 border border-red-500/40 font-mono text-[10px] text-red-200 text-center">
-                  {syncError}
+                  {localError || syncError}
                 </div>
               )}
 
@@ -280,9 +332,21 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
                 <span>
                   {signingIn || isSyncing
                     ? 'CONECTANDO...'
-                    : 'ENTRAR COM GOOGLE'}
+                    : localError
+                      ? 'TENTAR DE NOVO'
+                      : 'ENTRAR COM GOOGLE'}
                 </span>
               </button>
+
+              {(signingIn || isSyncing) && (
+                <button
+                  type="button"
+                  onClick={handleCancelConnecting}
+                  className="w-full py-2 px-3 rounded-lg border border-red-400/70 bg-red-950/70 text-red-100 font-display font-black text-[11px] tracking-wider uppercase active:scale-[0.99]"
+                >
+                  CANCELAR LOGIN
+                </button>
+              )}
 
               <div className="py-1 px-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-center font-mono text-[8.5px] font-bold text-amber-300 uppercase tracking-wider">
                 🔒 ACESSO EXCLUSIVO COM CONTA GOOGLE REAL

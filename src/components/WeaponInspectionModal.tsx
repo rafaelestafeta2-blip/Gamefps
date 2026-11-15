@@ -30,6 +30,10 @@ import {
   KNIFE_LOCAL_URL,
 } from '../three/weaponBuilder';
 import { createBotThirdPersonWeaponMesh } from '../three/botWeaponProps';
+import {
+  createSecondaryWebGLRenderer,
+  disposeSecondaryWebGLRenderer,
+} from '../three/webglContextGuard';
 import { WeaponId } from '../types/game';
 import { WarfaceRankIcon } from './WarfaceRankIcon';
 
@@ -572,7 +576,7 @@ export const WeaponInspectionModal: React.FC<WeaponInspectionModalProps> = ({
     const width = Math.max(1, container.clientWidth);
     const height = Math.max(1, container.clientHeight);
 
-    const renderer = new THREE.WebGLRenderer({
+    const renderer = createSecondaryWebGLRenderer({
       antialias: true,
       alpha: true,
       powerPreference: 'high-performance',
@@ -693,7 +697,8 @@ export const WeaponInspectionModal: React.FC<WeaponInspectionModalProps> = ({
     return () => {
       cancelAnimationFrame(animId);
       resizeObserver.disconnect();
-      renderer.dispose();
+      rendererRef.current = null;
+      disposeSecondaryWebGLRenderer(renderer);
     };
   }, []);
 

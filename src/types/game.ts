@@ -41,7 +41,16 @@ export type DrillMode =
   | 'TACTICAL_WAVE'
   | 'YARD_BOMB_5V5'
   | 'DUST2_BOMB_5V5'
-  | 'ASSAULT_BOMB_5V5';
+  | 'ASSAULT_BOMB_5V5'
+  | 'INDUSTRIA_BOMB_5V5'
+  | 'HANGAR_BOMB_5V5'
+  | 'EASTERN_CITY_BOMB_5V5'
+  | 'MIRAGE_ANUBIS_BOMB_5V5'
+  /** Isolated GLB+floor harness (no online / bomb / bots). */
+  | 'MAP_TEST_INDUSTRIA'
+  | 'MAP_TEST_HANGAR'
+  | 'MAP_TEST_EASTERN'
+  | 'MAP_TEST_MIRAGE';
 export type QualityPreset = 'COMPETITIVE_120' | 'BALANCED_60' | 'ULTRA_PBR';
 export type GyroMode = 'OFF' | 'ADS_ONLY' | 'ALWAYS';
 
@@ -82,15 +91,22 @@ export interface YardBombHudInfo {
   maxRounds: number; // 6
   vanguardScore: number;
   blackthornScore: number;
-  roundState: 'PLAYING' | 'ROUND_OVER' | 'MATCH_OVER';
+  roundState: 'EQUIP' | 'PLAYING' | 'ROUND_OVER' | 'MATCH_OVER';
   roundWinner: 'VANGUARD' | 'BLACKTHORN' | null;
   roundWinReason: string;
   roundTransitionSec: number;
+  /** Pre-round equip countdown (Warface-style ~7s). */
+  equipTimerSec: number;
   matchWinner: 'VANGUARD' | 'BLACKTHORN' | null;
   lastRoundXp: number;
   lastRoundCash: number;
   totalMatchXp: number;
   totalMatchCash: number;
+  /** Snapshot at match start for post-match XP theater. */
+  matchStartXp?: number;
+  matchStartRank?: number;
+  matchStartCash?: number;
+  matchStartUnlockedWeapons?: WeaponId[];
   isSpectating?: boolean;
   spectatedCallsign?: string;
   spectatedWeapon?: WeaponId;
@@ -149,6 +165,37 @@ export interface HudState {
   // Player Stance, Position & Radar Telemetry
   health: number;
   maxHealth: number;
+  /** Separate vest pool (engineer repairs; soaks damage before HP). */
+  armor: number;
+  maxArmor: number;
+  /** Active Warface class for HUD support kit. */
+  playerClass: 'FUZILEIRO' | 'MEDICO' | 'ENGENHEIRO' | 'FRANCO_ATIRADOR';
+  supportKind: 'AMMO' | 'HEAL' | 'ARMOR' | 'NONE';
+  supportCharges: number;
+  supportMaxCharges: number;
+  supportCooldownSec: number;
+  supportPrompt: string;
+  /** 0..1 progress while channeling ammo/heal/armor kit (~15s). */
+  kitChannelProgress: number;
+  reviveChargeProgress: number;
+  reviveMarkers: Array<{
+    id: string;
+    callsign: string;
+    bearingRad: number;
+    distanceM: number;
+    remainingSec: number;
+    inRange: boolean;
+  }>;
+  /** Class-filtered ally need edge icons (HP / ammo / armor). */
+  allyNeedMarkers: Array<{
+    id: string;
+    callsign: string;
+    need: 'HP' | 'AMMO' | 'ARMOR';
+    bearingRad: number;
+    distanceM: number;
+    severity: number;
+    inRange: boolean;
+  }>;
   stamina: number; // 0..100 for breath hold & sprint
   isHoldingBreath: boolean;
   isAds: boolean;
@@ -156,6 +203,18 @@ export interface HudState {
   stance: 'STAND' | 'CROUCH' | 'PRONE' | 'SPRINT' | 'SLIDE';
   leanDirection: -1 | 0 | 1; // -1 Left (Q), 0 Center, 1 Right (E)
   playerPos: { x: number; y?: number; z: number };
+  /** Android void-debug — forced on for new GLB / harness / ?spawndbg=1. */
+  spawnDebug?: {
+    mode: string;
+    xz: string;
+    feetY: number;
+    groundY: number;
+    ready: boolean;
+    tris: number;
+    aabb: string;
+    harness?: boolean;
+    note?: string;
+  };
   playerYaw: number;
   radarTargets: Array<{
     id: string;
@@ -209,6 +268,7 @@ export interface HudState {
   gyroSensitivity: number;
   lookSensitivity: number;
   adsSensitivity: number;
+  aimAssistStrength: number;
   hapticsEnabled: boolean;
   isFullscreen: boolean;
   graphicQuality: 'HIGH' | 'LOW';

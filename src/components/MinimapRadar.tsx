@@ -1,6 +1,22 @@
 import React, { useEffect, useRef } from 'react';
 import { ASSAULT_BOMB_SITE_A, ASSAULT_BOMB_SITE_B } from '../three/assaultLevelBuilder';
 import { DUST2_BOMB_SITE_A, DUST2_BOMB_SITE_B } from '../three/dust2LevelBuilder';
+import {
+  INDUSTRIA_BOMB_SITE_A,
+  INDUSTRIA_BOMB_SITE_B,
+} from '../three/industriaLevelBuilder';
+import {
+  HANGAR_BOMB_SITE_A,
+  HANGAR_BOMB_SITE_B,
+} from '../three/hangarLevelBuilder';
+import {
+  EASTERN_CITY_BOMB_SITE_A,
+  EASTERN_CITY_BOMB_SITE_B,
+} from '../three/easternCityLevelBuilder';
+import {
+  MIRAGE_ANUBIS_BOMB_SITE_A,
+  MIRAGE_ANUBIS_BOMB_SITE_B,
+} from '../three/mirageAnubisLevelBuilder';
 import { YARD_BOMB_SITE_A, YARD_BOMB_SITE_B } from '../three/yardMapData';
 import { DrillMode } from '../types/game';
 
@@ -45,8 +61,12 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
       const isYard = drillMode === 'YARD_BOMB_5V5';
       const isDust2 = drillMode === 'DUST2_BOMB_5V5';
       const isAssault = drillMode === 'ASSAULT_BOMB_5V5';
-      const isBombMode = isYard || isDust2 || isAssault;
-      const scale = isDust2 || isAssault ? 1.05 : isYard ? 1.35 : 2.0;
+      const isIndustria = drillMode === 'INDUSTRIA_BOMB_5V5';
+      const isHangar = drillMode === 'HANGAR_BOMB_5V5';
+      const isEasternCity = drillMode === 'EASTERN_CITY_BOMB_5V5';
+      const isMirageAnubis = drillMode === 'MIRAGE_ANUBIS_BOMB_5V5';
+      const isBombMode = isYard || isDust2 || isAssault || isIndustria || isHangar || isEasternCity || isMirageAnubis;
+      const scale = isDust2 || isAssault || isIndustria || isHangar || isEasternCity || isMirageAnubis ? 0.85 : isYard ? 1.35 : 2.0;
       const maxRange = center - 6;
 
       ctx.clearRect(0, 0, size, size);
@@ -98,6 +118,21 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
         drawSectorRect(-3, 2, 24, 26, '#2d3b4e', 'rgba(56,189,248,0.45)'); // Main Assault Warehouse & Site B
         drawSectorRect(-9, -7, 16, 10, '#36465c'); // Upper Warehouse Catwalk / Hostage Room
         drawSectorRect(14, 18, 14, 28, '#1e2938'); // East Backdoor Alley
+      } else if (isIndustria) {
+        // Post-lift collider AABB footprint (not Yard stub — that made players look "outside").
+        drawSectorRect(12, 11, 190, 186, '#1e293b');
+        drawSectorRect(8, -28, 28, 24, '#334155'); // south apron / attacker
+      } else if (isHangar) {
+        drawSectorRect(0, -2.5, 80, 36, '#1e293b');
+        drawSectorRect(0, -14, 22, 14, '#334155'); // south gate
+      } else if (isEasternCity) {
+        drawSectorRect(-8.5, 4.5, 140, 128, '#1e293b');
+        drawSectorRect(0, -20, 24, 20, '#334155'); // south street
+        drawSectorRect(-36, -4, 18, 16, '#3f1d1d', 'rgba(248,113,113,0.35)');
+        drawSectorRect(28, 16, 18, 16, '#1d2f3f', 'rgba(56,189,248,0.35)');
+      } else if (isMirageAnubis) {
+        drawSectorRect(-32.5, -31.5, 110, 112, '#292218');
+        drawSectorRect(-33, -40, 22, 18, '#3d3020'); // south approach
       } else {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
         ctx.lineWidth = 1;
@@ -122,12 +157,28 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
           ? DUST2_BOMB_SITE_A
           : isAssault
             ? ASSAULT_BOMB_SITE_A
-            : YARD_BOMB_SITE_A;
+            : isIndustria
+              ? INDUSTRIA_BOMB_SITE_A
+              : isHangar
+                ? HANGAR_BOMB_SITE_A
+                : isEasternCity
+                  ? EASTERN_CITY_BOMB_SITE_A
+                : isMirageAnubis
+                  ? MIRAGE_ANUBIS_BOMB_SITE_A
+                : YARD_BOMB_SITE_A;
         const siteB = isDust2
           ? DUST2_BOMB_SITE_B
           : isAssault
             ? ASSAULT_BOMB_SITE_B
-            : YARD_BOMB_SITE_B;
+            : isIndustria
+              ? INDUSTRIA_BOMB_SITE_B
+              : isHangar
+                ? HANGAR_BOMB_SITE_B
+                : isEasternCity
+                  ? EASTERN_CITY_BOMB_SITE_B
+                : isMirageAnubis
+                  ? MIRAGE_ANUBIS_BOMB_SITE_B
+                : YARD_BOMB_SITE_B;
         const drawSitePin = (sx: number, sz: number, label: string, color: string) => {
           let rx = (sx - playerX) * scale;
           let rz = (sz - playerZ) * scale;

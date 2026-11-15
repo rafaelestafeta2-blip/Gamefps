@@ -259,6 +259,29 @@ export const ControlsSettingsTab: React.FC<ControlsSettingsTabProps> = ({
           )}
         </div>
       </div>
+
+      {/* 4. Aim Assist */}
+      <div className="bg-white/[0.02] border border-white/10 rounded-lg p-2 space-y-2">
+        <div className="flex-1 min-w-[160px] bg-black/40 border border-white/10 rounded-lg px-2.5 py-1.5">
+          <div className="flex items-center justify-between text-[10px] font-mono text-slate-200 mb-1">
+            <span>Aim Assist (toque / giro)</span>
+            <span className="text-amber-400 font-bold tabular-nums">
+              {Math.round((controlSettings.aimAssistStrength ?? 0) * 100)}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={controlSettings.aimAssistStrength ?? 0}
+            onChange={(e) =>
+              patch({ aimAssistStrength: parseFloat(e.target.value) })
+            }
+            className="w-full h-1.5 accent-amber-500 cursor-pointer"
+          />
+        </div>
+      </div>
     </div>
   );
 };

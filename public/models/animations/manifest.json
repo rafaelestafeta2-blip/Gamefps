@@ -1,0 +1,60 @@
+{
+  "source": "Gamesfps@2bb315ac/Anima\u00e7ao",
+  "basicShooter": [
+    "firing_rifle.fbx",
+    "hit_reaction.fbx",
+    "reloading.fbx",
+    "rifle_aiming_idle.fbx",
+    "rifle_jump.fbx",
+    "rifle_run.fbx",
+    "run_backwards.fbx",
+    "strafe.fbx",
+    "strafe_2.fbx",
+    "strafe_left.fbx",
+    "strafe_right.fbx",
+    "toss_grenade.fbx",
+    "turn_left.fbx",
+    "turning_right_45_degrees.fbx",
+    "walking.fbx",
+    "walking_backwards.fbx"
+  ],
+  "pistolLoco": [
+    "pistol_idle.fbx",
+    "pistol_jump.fbx",
+    "pistol_jump_2.fbx",
+    "pistol_kneel_to_stand.fbx",
+    "pistol_kneeling_idle.fbx",
+    "pistol_run.fbx",
+    "pistol_run_arc.fbx",
+    "pistol_run_arc_2.fbx",
+    "pistol_run_backward.fbx",
+    "pistol_run_backward_arc.fbx",
+    "pistol_run_backward_arc_2.fbx",
+    "pistol_stand_to_kneel.fbx",
+    "pistol_strafe.fbx",
+    "pistol_strafe_2.fbx",
+    "pistol_walk.fbx",
+    "pistol_walk_arc.fbx",
+    "pistol_walk_arc_2.fbx",
+    "pistol_walk_backward.fbx",
+    "pistol_walk_backward_arc.fbx",
+    "pistol_walk_backward_arc_2.fbx"
+  ],
+  "singles": [
+    "administering_cpr.fbx",
+    "braced_hang_to_crouch.fbx",
+    "kneeling_down.fbx",
+    "kneeling_inspecting.fbx"
+  ],
+  "picup": {
+    "source": "Gamesfps@0c909a1d/Anima\u00e7ao/Picup",
+    "files": [
+      "picking_up_object.fbx",
+      "putting_down.fbx",
+      "standing_torch_hold.fbx"
+    ],
+    "ignored": [
+      "Gd"
+    ]
+  }
+}

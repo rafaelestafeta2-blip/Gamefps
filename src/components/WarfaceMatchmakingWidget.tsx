@@ -8,6 +8,7 @@ import {
 } from '../multiplayer/onlineRoomService';
 import { OnlineRoomState } from '../multiplayer/onlineTypes';
 import { DrillMode } from '../types/game';
+import { thumbForDrillMode } from './mapSelectThumbs';
 
 interface WarfaceMatchmakingWidgetProps {
   selectedMode: DrillMode;
@@ -17,6 +18,15 @@ interface WarfaceMatchmakingWidgetProps {
 }
 
 const REQUIRED_PUBLIC_PLAYERS = 10;
+
+const QUEUE_MAP_PICKS: Array<{ id: DrillMode; short: string }> = [
+  { id: 'DUST2_BOMB_5V5', short: 'DUST2' },
+  { id: 'ASSAULT_BOMB_5V5', short: 'ASSAULT' },
+  { id: 'INDUSTRIA_BOMB_5V5', short: 'INDUSTRIA' },
+  { id: 'HANGAR_BOMB_5V5', short: 'HANGAR' },
+  { id: 'EASTERN_CITY_BOMB_5V5', short: 'EASTERN' },
+  { id: 'MIRAGE_ANUBIS_BOMB_5V5', short: 'MIRAGE' },
+];
 
 export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> = ({
   selectedMode,
@@ -87,8 +97,18 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
   const playersCount = activeRoom ? Object.keys(activeRoom.players || {}).length : 1;
   const mins = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
   const secs = String(elapsedSec % 60).padStart(2, '0');
-  const isAssault = selectedMode === 'ASSAULT_BOMB_5V5';
-  const mapLabel = isAssault ? 'CS_ASSAULT' : 'DE_DUST2';
+  const mapLabel =
+    selectedMode === 'ASSAULT_BOMB_5V5'
+      ? 'CS_ASSAULT'
+      : selectedMode === 'INDUSTRIA_BOMB_5V5'
+        ? 'INDUSTRIA'
+        : selectedMode === 'HANGAR_BOMB_5V5'
+          ? 'HANGAR'
+          : selectedMode === 'EASTERN_CITY_BOMB_5V5'
+            ? 'EASTERN CITY'
+          : selectedMode === 'MIRAGE_ANUBIS_BOMB_5V5'
+            ? 'MIRAGE ANUBIS'
+          : 'DE_DUST2';
 
   const handleCancel = async () => {
     soundEngine.playMenuSelect();
@@ -144,7 +164,19 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
               type="button"
               onClick={() => {
                 soundEngine.playMenuSelect();
-                onChangeMode(isAssault ? 'DUST2_BOMB_5V5' : 'ASSAULT_BOMB_5V5');
+                onChangeMode(
+                  selectedMode === 'DUST2_BOMB_5V5'
+                    ? 'ASSAULT_BOMB_5V5'
+                    : selectedMode === 'ASSAULT_BOMB_5V5'
+                      ? 'INDUSTRIA_BOMB_5V5'
+                      : selectedMode === 'INDUSTRIA_BOMB_5V5'
+                        ? 'HANGAR_BOMB_5V5'
+                        : selectedMode === 'HANGAR_BOMB_5V5'
+                          ? 'EASTERN_CITY_BOMB_5V5'
+                        : selectedMode === 'EASTERN_CITY_BOMB_5V5'
+                          ? 'MIRAGE_ANUBIS_BOMB_5V5'
+                        : 'DUST2_BOMB_5V5'
+                );
               }}
               title="Alternar mapa da fila"
               className="px-1.5 py-0.5 rounded bg-white/8 hover:bg-white/15 border border-white/10 text-[8px] font-mono font-bold text-cyan-300 uppercase cursor-pointer"
@@ -160,6 +192,38 @@ export const WarfaceMatchmakingWidget: React.FC<WarfaceMatchmakingWidgetProps> =
               ✕
             </button>
           </div>
+        </div>
+
+        {/* Visible map thumbs — Industry/Hangar/Eastern/Mirage were cycle-only. */}
+        <div className="mt-1.5 grid grid-cols-6 gap-0.5">
+          {QUEUE_MAP_PICKS.map((m) => {
+            const active = selectedMode === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                title={m.short}
+                disabled={matchFound}
+                onClick={() => {
+                  if (matchFound || selectedMode === m.id) return;
+                  soundEngine.playMenuSelect();
+                  onChangeMode(m.id);
+                }}
+                className={`relative overflow-hidden rounded border cursor-pointer transition-all ${
+                  active
+                    ? 'border-amber-400 ring-1 ring-amber-400/40'
+                    : 'border-white/10 hover:border-white/30'
+                } ${matchFound ? 'opacity-60 cursor-not-allowed' : ''}`}
+              >
+                <img
+                  src={thumbForDrillMode(m.id)}
+                  alt={m.short}
+                  className="w-full h-6 object-cover object-center"
+                  draggable={false}
+                />
+              </button>
+            );
+          })}
         </div>
 
         {/* Barra de 10 Slots de Jogadores Reais */}

@@ -5,6 +5,7 @@ import {
   createSculptedThirdPersonWeaponMesh,
   isSculptedWeaponId,
 } from './sculptedFirearms';
+import { normalizeAnimatedM4A4Model } from './weaponBuilder';
 
 interface RealGlbWeaponSpec {
   id: WeaponId;
@@ -159,6 +160,7 @@ const WEAPON_GLB_SPECS: RealGlbWeaponSpec[] = [
   },
   {
     id: 'M4_CARBINE',
+    // Keep 3P/bot mount on proven pack — do not swap to spare M4A4 (breaks coverage).
     url: '/models/m4_fps_pack.glb',
     filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
     offset: [0.025, -1.365, -0.04],
@@ -244,6 +246,25 @@ const WEAPON_GLB_SPECS: RealGlbWeaponSpec[] = [
     scale: 0.011,
     rotX: 0,
     rotY: Math.PI / 2,
+  },
+];
+
+/**
+ * Inventory/thumbnail-only extras. Never written to glbWeaponTemplates (1P/3P mounts).
+ * Uses spare on-disk packs to improve inventory coverage without touching live M4 viewmodel.
+ */
+const INVENTORY_PREVIEW_OVERRIDE_SPECS: RealGlbWeaponSpec[] = [
+  {
+    id: 'M4_CARBINE',
+    url: '/models/weapons/animated_fps_m4a4.glb',
+    clipName: 'Armature|Take',
+    clipTime: 0.05,
+    filter: (m, n, mats) => !isExcludedMesh(m, n, mats),
+    // Approximate studio framing after normalizeAnimatedM4A4Model (bind-world meters).
+    offset: [0.02, -1.05, -0.08],
+    scale: 0.95,
+    rotX: 0.22,
+    rotY: 0,
   },
 ];
 
@@ -478,6 +499,38 @@ export function preloadRealBotWeaponGlbs(): Promise<void> {
     });
     glbWeaponPromises.set(spec.id, p);
     perSpecPromises.push(p.then(() => undefined));
+  }
+
+  // Spare GLBs → inventory preview only (never bot mounts / 1P).
+  for (const spec of INVENTORY_PREVIEW_OVERRIDE_SPECS) {
+    const p = new Promise<void>((resolve) => {
+      loader.load(
+        spec.url,
+        (gltf) => {
+          try {
+            if (spec.url.includes('animated_fps_m4a4')) {
+              normalizeAnimatedM4A4Model(gltf.scene);
+            }
+            const previewTpl = buildBakedStaticGroup(
+              gltf.scene,
+              gltf.animations,
+              spec,
+              0
+            );
+            // Only replace inventory preview when bake produced usable meshes.
+            if (previewTpl.children.length >= 2) {
+              glbLevelPreviewTemplates.set(spec.id, previewTpl);
+            }
+          } catch {
+            // Keep existing gameplay preview template on failure.
+          }
+          resolve();
+        },
+        undefined,
+        () => resolve()
+      );
+    });
+    perSpecPromises.push(p);
   }
 
   preloadAllPromise = Promise.all(perSpecPromises).then(() => undefined);

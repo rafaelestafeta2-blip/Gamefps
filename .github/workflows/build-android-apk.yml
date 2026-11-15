@@ -2,7 +2,7 @@ name: Build Native Android APK (Capacitor + WebGL GPU)
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'cursor/**' ]
   workflow_dispatch:
 
 jobs:
@@ -42,7 +42,7 @@ jobs:
           fi
           npx cap sync android
 
-      - name: 7. Otimizar AndroidManifest.xml (Landscape + GPU Hardware Acceleration + Haptics)
+      - name: 7. Patch Android (singleTask + GoogleOAuthActivity + landscape/GPU/haptics)
         run: |
           node scripts/patch-android-manifest.js
 

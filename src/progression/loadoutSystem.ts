@@ -978,7 +978,8 @@ export function getClassCombatModifiers(
     primaryWeapon: cfg.primaryWeapon,
     secondaryWeapon: cfg.secondaryWeapon,
     meleeWeapon: cfg.meleeWeapon,
-    totalMaxHealth: 100 + healthBonus + armorBonus,
+    // Armor is a separate vest pool (engineer repairs) — not folded into HP.
+    totalMaxHealth: 100 + healthBonus,
     armorBonus,
     headshotReductionPct,
     reloadSpeedMult: 1 + reloadBonusPct / 100,
