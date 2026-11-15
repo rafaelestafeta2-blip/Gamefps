@@ -8,6 +8,10 @@ import { auth, firebaseConfig, googleProvider } from './firebaseClient';
 
 const OAUTH_PENDING_KEY = 'kinetic_oauth_pending_v1';
 const OAUTH_STASH_URL_KEY = 'kinetic_oauth_stash_url_v1';
+/** Native WebView OAuth must not leave CONECTANDO forever. */
+const NATIVE_SIGN_IN_TIMEOUT_MS = 90_000;
+/** Stale pending flag from abandoned/cold-start attempts. */
+const OAUTH_PENDING_MAX_AGE_MS = 3 * 60_000;
 
 declare global {
   interface Window {
@@ -93,14 +97,51 @@ function isOAuthPending(): boolean {
     const raw = localStorage.getItem(OAUTH_PENDING_KEY);
     if (!raw) return false;
     const started = Number(raw);
-    // Expire after 15 minutes.
-    if (!Number.isFinite(started) || Date.now() - started > 15 * 60 * 1000) {
+    if (
+      !Number.isFinite(started) ||
+      Date.now() - started > OAUTH_PENDING_MAX_AGE_MS
+    ) {
       localStorage.removeItem(OAUTH_PENDING_KEY);
+      localStorage.removeItem(OAUTH_STASH_URL_KEY);
+      try {
+        window.KineticNativeAuth?.clearPendingOAuth?.();
+      } catch {
+        /* ignore */
+      }
       return false;
     }
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Clear stuck CONECTANDO state (UI cancel / timeout). */
+export function cancelGoogleSignInInFlight(reason?: string): void {
+  markOAuthPending(false);
+  try {
+    window.KineticNativeAuth?.clearPendingOAuth?.();
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.__kineticHandleNativeOAuthCancel?.(
+      reason || 'Login cancelado. Toque para tentar de novo.'
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getOAuthPendingAgeMs(): number | null {
+  try {
+    const raw = localStorage.getItem(OAUTH_PENDING_KEY);
+    if (!raw) return null;
+    const started = Number(raw);
+    if (!Number.isFinite(started)) return null;
+    return Math.max(0, Date.now() - started);
+  } catch {
+    return null;
   }
 }
 
@@ -268,18 +309,38 @@ export async function performGoogleSignIn(): Promise<GoogleSignInResult> {
     markOAuthPending(true);
 
     return new Promise<GoogleSignInResult>((resolve) => {
-      const cleanup = installDurableOAuthHooks((result) => {
+      let settled = false;
+      const settle = (result: GoogleSignInResult) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
         cleanup();
+        markOAuthPending(false);
         resolve(result);
+      };
+
+      const cleanup = installDurableOAuthHooks((result) => {
+        settle(result);
       });
+
+      const timeoutId = window.setTimeout(() => {
+        try {
+          window.KineticNativeAuth?.clearPendingOAuth?.();
+        } catch {
+          /* ignore */
+        }
+        settle({
+          ok: false,
+          error:
+            'Login Google expirou (90s). Toque em TENTAR DE NOVO — se a janela Google abriu, conclua ou cancele nela.',
+        });
+      }, NATIVE_SIGN_IN_TIMEOUT_MS);
 
       try {
         window.KineticNativeAuth!.startGoogleSignIn(oauthUrl);
       } catch (err) {
-        cleanup();
-        markOAuthPending(false);
         const msg = err instanceof Error ? err.message : String(err);
-        resolve({
+        settle({
           ok: false,
           error: `Falha ao abrir login Google nativo: ${msg}`,
         });

@@ -166,14 +166,20 @@ export async function signInWithGoogleAccount(): Promise<boolean> {
   state.syncError = null;
   state.isSyncing = true;
   emitState();
-  const res = await performGoogleSignIn();
-  if (!res.ok) {
-    state.syncError = res.error || 'Não foi possível concluir o login com Google.';
+  try {
+    const res = await performGoogleSignIn();
+    if (!res.ok) {
+      state.syncError =
+        res.error || 'Não foi possível concluir o login com Google.';
+      return false;
+    }
+    // Credential applied — onAuthStateChanged pulls profile. Never leave
+    // isSyncing=true if the Promise hung; finally clears either way.
+    return true;
+  } finally {
     state.isSyncing = false;
     emitState();
-    return false;
   }
-  return true;
 }
 
 export async function signOutGoogleAccount(): Promise<void> {

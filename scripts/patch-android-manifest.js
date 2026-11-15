@@ -391,6 +391,7 @@ import android.view.Gravity;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -399,8 +400,6 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import java.io.ByteArrayInputStream;
-import java.nio.charset.StandardCharsets;
 
 /**
  * Dedicated OAuth Activity so Google Account Picker / trust confirmation does not
@@ -473,24 +472,15 @@ public class GoogleOAuthActivity extends Activity {
                 @Override
                 public WebResourceResponse shouldInterceptRequest(
                     WebView view, WebResourceRequest request) {
+                    // NEVER replace bare /__/auth/handler — fragment tokens (#id_token)
+                    // are not in the network URL; swapping the page used to drop the
+                    // hash and leave MainActivity stuck on CONECTANDO forever.
                     String reqUrl = request.getUrl().toString();
-                    if (reqUrl.contains("/__/auth/handler")) {
-                        // Capture token URLs; for bare handler serve a bridge page.
-                        if (reqUrl.contains("id_token=")
+                    if (reqUrl.contains("/__/auth/handler")
+                        && (reqUrl.contains("id_token=")
                             || reqUrl.contains("access_token=")
-                            || reqUrl.contains("error=")) {
-                            runOnUiThread(() -> finishWithSuccess(reqUrl));
-                        }
-                        String html =
-                            "<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"></head>"
-                                + "<body style=\\"background:#06080c;color:#fbbf24;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\\">"
-                                + "<div>AUTENTICANDO CONTA GOOGLE NO KINETIC...</div>"
-                                + "<script>if(window.KineticPopupBridge){window.KineticPopupBridge.onCallbackUrl(window.location.href);}</script>"
-                                + "</body></html>";
-                        return new WebResourceResponse(
-                            "text/html",
-                            "UTF-8",
-                            new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8)));
+                            || reqUrl.contains("error="))) {
+                        runOnUiThread(() -> finishWithSuccess(reqUrl));
                     }
                     return super.shouldInterceptRequest(view, request);
                 }
@@ -498,10 +488,7 @@ public class GoogleOAuthActivity extends Activity {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     String url = request.getUrl().toString();
-                    if (url.contains("/__/auth/handler")
-                        && (url.contains("id_token=")
-                            || url.contains("access_token=")
-                            || url.contains("error="))) {
+                    if (urlContainsOAuthResult(url)) {
                         finishWithSuccess(url);
                         return true;
                     }
@@ -519,11 +506,7 @@ public class GoogleOAuthActivity extends Activity {
                 @Override
                 public void onPageStarted(WebView view, String url, Bitmap favicon) {
                     super.onPageStarted(view, url, favicon);
-                    if (url != null
-                        && url.contains("/__/auth/handler")
-                        && (url.contains("id_token=")
-                            || url.contains("access_token=")
-                            || url.contains("error="))) {
+                    if (urlContainsOAuthResult(url)) {
                         finishWithSuccess(url);
                     }
                 }
@@ -531,18 +514,26 @@ public class GoogleOAuthActivity extends Activity {
                 @Override
                 public void onPageFinished(WebView view, String url) {
                     super.onPageFinished(view, url);
+                    // Implicit OAuth puts tokens in the URL hash — read location.href.
                     if (url != null && url.contains("/__/auth/handler")) {
                         view.evaluateJavascript(
                             "(function(){return window.location.href;})()",
                             val -> {
-                                if (val != null
-                                    && (val.contains("id_token=")
-                                        || val.contains("access_token=")
-                                        || val.contains("error="))) {
-                                    String unquoted = val.replaceAll("^\\"|\\"$", "");
+                                if (val == null) return;
+                                String unquoted = val.replaceAll("^\\"|\\"$", "");
+                                if (urlContainsOAuthResult(unquoted)) {
                                     finishWithSuccess(unquoted);
                                 }
                             });
+                    }
+                }
+
+                @Override
+                public void onReceivedError(
+                    WebView view, WebResourceRequest request, WebResourceError error) {
+                    super.onReceivedError(view, request, error);
+                    if (request != null && request.isForMainFrame()) {
+                        finishWithCancel("Falha de rede no login Google. Tente de novo.");
                     }
                 }
             });
@@ -552,11 +543,28 @@ public class GoogleOAuthActivity extends Activity {
             new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         setContentView(rootLayout);
 
+        // Hard abort so OAuth Activity cannot orphan MainActivity CONECTANDO.
+        new android.os.Handler(android.os.Looper.getMainLooper())
+            .postDelayed(
+                () -> {
+                    if (!resultDelivered) {
+                        finishWithCancel("Login Google expirou na janela nativa (90s).");
+                    }
+                },
+                90_000L);
+
         if (savedInstanceState != null) {
             oauthWebView.restoreState(savedInstanceState);
         } else {
             oauthWebView.loadUrl(oauthUrl);
         }
+    }
+
+    private static boolean urlContainsOAuthResult(String url) {
+        if (url == null) return false;
+        return url.contains("id_token=")
+            || url.contains("access_token=")
+            || url.contains("error=");
     }
 
     @Override
