@@ -100,6 +100,7 @@ import {
   loadDust2MapGeometry,
 } from './dust2LevelBuilder';
 import type { Dust2TriangleCollider } from './dust2Collider';
+import { attachCompressedTextureSupport } from './gltfLoaderFactory';
 import {
   cleanupMatchArenaAssets,
   prepareMatchArena,
@@ -534,6 +535,7 @@ export class TacticalFPSEngine {
       : Math.min(window.devicePixelRatio || 1, 1.35);
     this.renderer.setPixelRatio(this.currentRenderScale);
     this.renderer.setSize(container.clientWidth, container.clientHeight);
+    attachCompressedTextureSupport(this.renderer);
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     // PCF (not Soft) — Soft is significantly heavier on mobile GPUs.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Dust2TriangleCollider } from './dust2Collider';
+import { createGameGltfLoader, disposeGameGltfLoader, ensureMeshoptDecoder } from './gltfLoaderFactory';
 import { TacticalLevelData, TacticalTargetEntity } from './levelBuilder';
 import { WeaponId } from '../types/game';
 import { YardBotEntity } from './yardPropsBuilder';
@@ -135,14 +134,8 @@ export async function loadDust2MapGeometry(
   // Clean any partial state before loading
   disposeDust2MapGeometry(bundle);
 
-  const dracoLoader = new DRACOLoader(loadingManager);
-  dracoLoader.setDecoderPath(
-    'https://www.gstatic.com/draco/versioned/decoders/1.5.6/'
-  );
-  dracoLoader.preload();
-
-  const gltfLoader = new GLTFLoader(loadingManager);
-  gltfLoader.setDRACOLoader(dracoLoader);
+  await ensureMeshoptDecoder();
+  const gltfLoader = createGameGltfLoader(loadingManager);
 
   try {
     const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
@@ -211,12 +204,16 @@ export async function loadDust2MapGeometry(
           const std = m as THREE.MeshStandardMaterial;
           if (std && std.map) {
             std.map.colorSpace = THREE.SRGBColorSpace;
-            // Cap anisotropy here; graphics settings can raise later if needed.
             std.map.anisotropy = isSoftwareGl ? 1 : 4;
-            std.map.minFilter = THREE.LinearMipmapLinearFilter;
-            std.map.magFilter = THREE.LinearFilter;
-            std.map.generateMipmaps = true;
-            std.map.needsUpdate = true;
+            // Cooked KTX2 already carries mipmaps. Regenerating them
+            // re-expands the GPU block back into raw pixels.
+            const compressed = (std.map as THREE.CompressedTexture).isCompressedTexture === true;
+            if (!compressed) {
+              std.map.minFilter = THREE.LinearMipmapLinearFilter;
+              std.map.magFilter = THREE.LinearFilter;
+              std.map.generateMipmaps = true;
+              std.map.needsUpdate = true;
+            }
           }
           if (std) {
             std.roughness = 0.74;
@@ -261,7 +258,7 @@ export async function loadDust2MapGeometry(
     bundle.isLoaded = true;
     onByteProgress?.(1.0);
   } finally {
-    dracoLoader.dispose();
+    disposeGameGltfLoader(gltfLoader);
   }
 }
 

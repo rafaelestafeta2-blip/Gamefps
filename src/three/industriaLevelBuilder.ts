@@ -1,16 +1,13 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WeaponId } from '../types/game';
+import { createGameGltfLoader, disposeGameGltfLoader, ensureMeshoptDecoder } from './gltfLoaderFactory';
 import { Dust2TriangleCollider } from './dust2Collider';
 import { Dust2LevelBundle, runExclusiveGlbLoad } from './dust2LevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
 
-/** Optimized V6 Industrial Map (Map_v1) — 2K JPEG + Draco. */
+/** Industrial yard — ETC1S GPU textures + Meshopt geometry. */
 const INDUSTRIA_LOCAL_URL = '/models/maps/industria_2k.glb';
-const DRACO_DECODER_PATH =
-  'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
 
 /**
  * Unity Map_v1 parent offset + floor lift so asphalt/road planes sit near y≈0.
@@ -97,12 +94,8 @@ export async function loadIndustriaMapGeometry(
   await runExclusiveGlbLoad(bundle, async () => {
   disposeIndustriaMapGeometry(bundle);
 
-  const dracoLoader = new DRACOLoader(loadingManager);
-  dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
-  dracoLoader.preload();
-
-  const gltfLoader = new GLTFLoader(loadingManager);
-  gltfLoader.setDRACOLoader(dracoLoader);
+  await ensureMeshoptDecoder();
+  const gltfLoader = createGameGltfLoader(loadingManager);
 
   try {
     const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
@@ -174,7 +167,7 @@ export async function loadIndustriaMapGeometry(
     bundle.isLoaded = true;
     onByteProgress?.(1.0);
   } finally {
-    dracoLoader.dispose();
+    disposeGameGltfLoader(gltfLoader);
   }
   }, onByteProgress);
 }

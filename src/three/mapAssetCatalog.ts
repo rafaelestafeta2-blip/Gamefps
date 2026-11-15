@@ -16,13 +16,12 @@ export const MAP_GLB_BY_MODE: Partial<Record<DrillMode, string>> = {
   MAP_TEST_MIRAGE: '/models/maps/mirage_anubis_2k.glb',
 };
 
-const DRACO_DECODER_PATH =
-  'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
-
-const DRACO_WARM_FILES = [
-  `${DRACO_DECODER_PATH}draco_wasm_wrapper.js`,
-  `${DRACO_DECODER_PATH}draco_decoder.wasm`,
-  `${DRACO_DECODER_PATH}draco_decoder.js`,
+/** Local decoders shipped in the APK. Maps use Meshopt + KTX2; Draco stays for weapons. */
+const DECODER_WARM_FILES = [
+  '/draco/draco_wasm_wrapper.js',
+  '/draco/draco_decoder.wasm',
+  '/basis/basis_transcoder.js',
+  '/basis/basis_transcoder.wasm',
 ];
 
 const inflight = new Map<string, Promise<void>>();
@@ -86,14 +85,14 @@ function loadArrayBuffer(url: string, onProgress?: (ratio0to1: number) => void):
   return promise;
 }
 
-/** Warm Draco WASM/JS so first GLB decode doesn't hitch mid-loading bar. */
+/** Warm local Meshopt companions (Draco + Basis) so the first map does not hitch. */
 export function prefetchDracoDecoder(): Promise<void> {
   enableMapAssetCache();
   if (dracoWarm) return dracoWarm;
   dracoWarm = Promise.all(
-    DRACO_WARM_FILES.map((url) =>
+    DECODER_WARM_FILES.map((url) =>
       loadArrayBuffer(url).catch(() => {
-        /* optional CDN — GLTFLoader will retry */
+        /* prepare retries from the same local path */
       })
     )
   ).then(() => undefined);
@@ -109,7 +108,7 @@ export async function prefetchMapAssetsForMode(
   onProgress?: (ratio0to1: number, label: string) => void
 ): Promise<void> {
   enableMapAssetCache();
-  onProgress?.(0.02, 'AQUECENDO DECODER DRACO...');
+  onProgress?.(0.02, 'AQUECENDO DECODER DO MAPA...');
   await prefetchDracoDecoder();
   const url = getMapGlbUrlForMode(mode);
   if (!url) {

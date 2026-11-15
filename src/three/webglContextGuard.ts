@@ -8,6 +8,7 @@
  */
 
 import * as THREE from 'three';
+import { attachCompressedTextureSupport } from './gltfLoaderFactory';
 
 type SecondaryMeta = {
   renderer: THREE.WebGLRenderer;
@@ -62,6 +63,7 @@ export function createSecondaryWebGLRenderer(
     pinned,
     createdAt: performance.now(),
   });
+  attachCompressedTextureSupport(renderer);
   return renderer;
 }
 

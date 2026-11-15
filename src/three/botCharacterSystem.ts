@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { createGameGltfLoader, disposeGameGltfLoader, ensureMeshoptDecoder } from './gltfLoaderFactory';
 import { WarfaceClassId } from '../components/WarfaceClassIcons';
 import { WeaponId } from '../types/game';
 import { BotAnimController, BotAnimState, BotClipMap, buildProRiflePackClips, retargetClipsRotationOnly, selectDirectionalDeathState, syncBotWeaponWithMixamoHands, transitionBotAnim } from './botCharacterClips';
@@ -20,8 +19,6 @@ const SNIPER_OPERATOR_LOCAL_URL = '/models/characters/sniper_operator.glb';
 const VANGUARD_RIFLEMAN_LOCAL_URL = '/models/characters/vanguard_rifleman.glb';
 const VANGUARD_ENGINEER_LOCAL_URL = '/models/characters/vanguard_engineer.glb';
 const VANGUARD_MEDIC_LOCAL_URL = '/models/characters/vanguard_medic.glb';
-const DRACO_DECODER_PATH = 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/';
-
 export type CharacterAvatarKind =
   | 'VANGUARD_FUZILEIRO'
   | 'VANGUARD_ENGENHEIRO'
@@ -128,11 +125,8 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
   medicLoadAttempts += 1;
 
   loadPromise = (async () => {
-    const dracoLoader = new DRACOLoader(loadingManager);
-    dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
-    dracoLoader.setDecoderConfig({ type: 'js' });
-    const loader = new GLTFLoader(loadingManager);
-    loader.setDRACOLoader(dracoLoader);
+    await ensureMeshoptDecoder();
+    const loader = createGameGltfLoader(loadingManager);
 
     const loadUrl = (url: string) =>
       new Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] }>((resolve, reject) => {
@@ -346,7 +340,7 @@ export function preloadProRifleBotCharacter(loadingManager?: THREE.LoadingManage
         vanguardMedicClips = retargetClipsRotationOnly(vanguardMedicClips);
       }
     } finally {
-      dracoLoader.dispose();
+      disposeGameGltfLoader(loader);
     }
   })()
     .catch((err) => console.warn('ProRifleBotCharacter fallback:', err))

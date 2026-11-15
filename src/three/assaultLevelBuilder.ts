@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WeaponId } from '../types/game';
+import { createGameGltfLoader, disposeGameGltfLoader, ensureMeshoptDecoder } from './gltfLoaderFactory';
 import {
   openAssaultDoorsAndVents,
   optimizeAssaultBakedMaterial,
@@ -105,12 +104,8 @@ export async function loadAssaultMapGeometry(
 
   disposeAssaultMapGeometry(bundle);
 
-  const dracoLoader = new DRACOLoader(loadingManager);
-  dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-  dracoLoader.preload();
-
-  const gltfLoader = new GLTFLoader(loadingManager);
-  gltfLoader.setDRACOLoader(dracoLoader);
+  await ensureMeshoptDecoder();
+  const gltfLoader = createGameGltfLoader(loadingManager);
 
   const loadWithFallback = (url: string): Promise<{ scene: THREE.Group }> =>
     new Promise((resolve, reject) => {
@@ -195,7 +190,7 @@ export async function loadAssaultMapGeometry(
     bundle.isLoaded = true;
     onByteProgress?.(1.0);
   } finally {
-    dracoLoader.dispose();
+    disposeGameGltfLoader(gltfLoader);
   }
 }
 
