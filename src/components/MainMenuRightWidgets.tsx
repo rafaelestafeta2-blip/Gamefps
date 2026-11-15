@@ -115,9 +115,11 @@ export const MainMenuRightWidgets: React.FC<MainMenuRightWidgetsProps> = ({
   const displayPct = Math.max(3, Math.round(progressPct));
 
   return (
-    <div className="h-full max-h-full min-h-0 flex flex-col justify-between items-end gap-1.5 lg:gap-2 w-[224px] sm:w-[248px] lg:w-[312px] shrink-0 pointer-events-auto py-0.5">
-      {/* BLOCO SUPERIOR: TEMPORADA 1 + PATENTE RANKED */}
-      <div className="w-full flex flex-col gap-1.5 lg:gap-2 min-h-0">
+    <div className="h-full max-h-full min-h-0 flex flex-col items-end gap-1.5 lg:gap-2 w-[224px] sm:w-[248px] lg:w-[312px] shrink-0 pointer-events-auto py-0.5 overflow-y-auto overscroll-contain">
+      {/* BLOCO SUPERIOR: TEMPORADA 1 + PATENTE RANKED
+          Short landscape phones were clipping the map thumb grid below — allow
+          this column to scroll and hide Temporada when viewport is short. */}
+      <div className="w-full flex flex-col gap-1.5 lg:gap-2 shrink-0">
         {/* 1. CARD TEMPORADA 1: A NOVA ERA */}
         <div
           onClick={() => {
@@ -126,7 +128,7 @@ export const MainMenuRightWidgets: React.FC<MainMenuRightWidgetsProps> = ({
           }}
           onMouseEnter={onHover}
           style={{ clipPath: CHAMFER_CLIP }}
-          className="relative overflow-hidden bg-gradient-to-r from-[#24070b]/95 via-[#14070a]/95 to-[#2b090e]/95 border border-red-500/80 hover:border-red-400 px-2.5 py-1.5 lg:px-3.5 lg:py-2.5 shadow-[0_0_22px_rgba(239,68,68,0.32)] cursor-pointer transition-all group backdrop-blur-md shrink-0"
+          className="relative overflow-hidden bg-gradient-to-r from-[#24070b]/95 via-[#14070a]/95 to-[#2b090e]/95 border border-red-500/80 hover:border-red-400 px-2.5 py-1.5 lg:px-3.5 lg:py-2.5 shadow-[0_0_22px_rgba(239,68,68,0.32)] cursor-pointer transition-all group backdrop-blur-md shrink-0 max-h-[430px]:hidden"
         >
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
@@ -219,9 +221,9 @@ export const MainMenuRightWidgets: React.FC<MainMenuRightWidgetsProps> = ({
         </div>
       </div>
 
-      {/* BLOCO INFERIOR: CARD COM A FOTO DO MAPA + BOTÃO INICIAR >> */}
-      <div className="w-full flex flex-col gap-1.5 lg:gap-2 shrink-0">
-        {/* 3. CARD DO MAPA SELECIONADO COM FOTO REAL DO MAPA (DUST2 / ASSAULT / ETC) */}
+      {/* BLOCO INFERIOR: modo ativo + grade MAPAS (fora do clipPath) + INICIAR */}
+      <div className="w-full flex flex-col gap-1.5 lg:gap-2 shrink-0 mt-auto">
+        {/* 3a. Modo ativo (TROCAR cicla ranked/range/killhouse também) */}
         <div
           onClick={handleNextMode}
           onMouseEnter={onHover}
@@ -241,42 +243,55 @@ export const MainMenuRightWidgets: React.FC<MainMenuRightWidgetsProps> = ({
 
           <div className="p-1 lg:p-1.5 bg-[#0d0608]">
             <div className="overflow-hidden rounded-xs border border-white/15">
-              <MapPreviewBanner modeId={selectedPlayMode} />
+              <MapPreviewBanner
+                modeId={selectedPlayMode}
+                className="h-[28px] lg:h-[56px]"
+              />
             </div>
-            {/* Always-visible map thumbs — Industria/Hangar/Eastern/Mirage were
-                "missing" because only TROCAR cycling exposed them. */}
-            <div className="mt-1.5 grid grid-cols-3 gap-1">
-              {CASUAL_MAP_PICKS.map((m) => {
-                const active = selectedPlayMode === m.playMode;
-                return (
-                  <button
-                    key={m.arena}
-                    type="button"
-                    title={m.short}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      soundEngine.playMenuSelect();
-                      onCyclePlayMode(m.playMode);
-                    }}
-                    className={`relative overflow-hidden rounded border text-left transition-all cursor-pointer ${
-                      active
-                        ? 'border-amber-400 ring-1 ring-amber-400/50'
-                        : 'border-white/15 hover:border-white/35'
-                    }`}
-                  >
-                    <img
-                      src={thumbForDrillMode(m.arena)}
-                      alt={m.short}
-                      className="w-full h-7 lg:h-9 object-cover object-center"
-                      draggable={false}
-                    />
-                    <span className="absolute inset-x-0 bottom-0 bg-black/65 px-0.5 py-[1px] text-[7px] lg:text-[8px] font-mono font-bold text-amber-200 truncate text-center">
-                      {m.short}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+          </div>
+        </div>
+
+        {/* 3b. Grade de mapas SEMPRE visível (sem clipPath — thumbs não cortam) */}
+        <div className="w-full rounded border border-amber-500/50 bg-[#0d0608]/95 p-1 lg:p-1.5 shadow-[0_0_16px_rgba(245,158,11,0.2)]">
+          <div className="px-0.5 pb-1 flex items-center justify-between gap-1">
+            <span className="font-display font-black text-[9px] lg:text-[11px] tracking-wider uppercase text-amber-300">
+              MAPAS 5V5
+            </span>
+            <span className="text-[7px] lg:text-[9px] font-mono text-slate-400 uppercase truncate">
+              toque p/ escolher
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            {CASUAL_MAP_PICKS.map((m) => {
+              const active = selectedPlayMode === m.playMode;
+              return (
+                <button
+                  key={m.arena}
+                  type="button"
+                  title={m.short}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    soundEngine.playMenuSelect();
+                    onCyclePlayMode(m.playMode);
+                  }}
+                  className={`relative overflow-hidden rounded border text-left transition-all cursor-pointer ${
+                    active
+                      ? 'border-amber-400 ring-1 ring-amber-400/50'
+                      : 'border-white/15 hover:border-white/35'
+                  }`}
+                >
+                  <img
+                    src={thumbForDrillMode(m.arena)}
+                    alt={m.short}
+                    className="w-full h-9 sm:h-10 lg:h-12 object-cover object-center"
+                    draggable={false}
+                  />
+                  <span className="absolute inset-x-0 bottom-0 bg-black/70 px-0.5 py-[1px] text-[7px] lg:text-[8px] font-mono font-bold text-amber-200 truncate text-center">
+                    {m.short}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
