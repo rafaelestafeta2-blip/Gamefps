@@ -980,9 +980,30 @@ export class TacticalFPSEngine {
     );
   }
 
-  private scheduleFloorResnap(hintY: number, durationMs = 3500): void {
+  private scheduleFloorResnap(hintY: number, durationMs = 4500): void {
     this.pendingFloorSnapHintY = hintY;
     this.pendingFloorSnapUntilMs = performance.now() + durationMs;
+  }
+
+  /**
+   * Place local player on a collider-proven playable point (XZ inside footprint + Y on street).
+   * New GLB maps must not trust authored coords alone — movement used to glue Y to deep
+   * AABB-min slabs under FrontSide floors (white void).
+   */
+  private placePlayerOnPlayableSpawn(
+    col: Dust2TriangleCollider,
+    hint: THREE.Vector3,
+    readyFallback = true
+  ): void {
+    if (col.ready) {
+      const p = col.findPlayableSpawn(hint.x, hint.z, hint.y);
+      this.playerPos.set(p.x, p.y, p.z);
+    } else if (readyFallback) {
+      this.playerPos.set(hint.x, hint.y, hint.z);
+    }
+    this.playerVel.y = 0;
+    this.isGrounded = true;
+    this.syncYawObjectToPlayerFeet();
   }
 
   /** Snap feet onto walkable floor; returns true when collider applied a snap. */
@@ -991,24 +1012,27 @@ export class TacticalFPSEngine {
     const col = this.getActiveGlbCollider();
     if (!col?.ready) return false;
     const mode = this.state.drillMode;
-    const useHintSnap =
+    const usePlayable =
       mode === 'INDUSTRIA_BOMB_5V5' ||
       mode === 'HANGAR_BOMB_5V5' ||
       mode === 'EASTERN_CITY_BOMB_5V5' ||
       mode === 'MIRAGE_ANUBIS_BOMB_5V5';
-    const y = useHintSnap
-      ? col.snapToWalkableFloor(
-          this.playerPos.x,
-          this.playerPos.z,
-          this.pendingFloorSnapHintY
-        )
-      : col.getGroundHeight(
-          this.playerPos.x,
-          this.playerPos.y,
-          this.playerPos.z
-        );
-    if (!Number.isFinite(y)) return false;
-    this.playerPos.y = y;
+    if (usePlayable) {
+      const p = col.findPlayableSpawn(
+        this.playerPos.x,
+        this.playerPos.z,
+        this.pendingFloorSnapHintY || this.playerPos.y
+      );
+      this.playerPos.set(p.x, p.y, p.z);
+    } else {
+      const y = col.getGroundHeight(
+        this.playerPos.x,
+        this.playerPos.y,
+        this.playerPos.z
+      );
+      if (!Number.isFinite(y)) return false;
+      this.playerPos.y = y;
+    }
     this.playerVel.y = 0;
     this.isGrounded = true;
     this.syncYawObjectToPlayerFeet();
@@ -2309,28 +2333,16 @@ export class TacticalFPSEngine {
           new THREE.LoadingManager()
         ).then(() => {
           if (this.state.drillMode === 'INDUSTRIA_BOMB_5V5') {
-            this.playerPos.y = this.industriaLevelData.collider.snapToWalkableFloor(
-              this.playerPos.x,
-              this.playerPos.z,
-              INDUSTRIA_ATTACKER_SPAWN.y
+            this.placePlayerOnPlayableSpawn(
+              this.industriaLevelData.collider,
+              INDUSTRIA_ATTACKER_SPAWN
             );
-            this.playerVel.y = 0;
-            this.isGrounded = true;
-            this.syncYawObjectToPlayerFeet();
           }
         });
       }
-      const startY = this.industriaLevelData.collider.ready
-        ? this.industriaLevelData.collider.snapToWalkableFloor(
-            INDUSTRIA_ATTACKER_SPAWN.x,
-            INDUSTRIA_ATTACKER_SPAWN.z,
-            INDUSTRIA_ATTACKER_SPAWN.y
-          )
-        : INDUSTRIA_ATTACKER_SPAWN.y;
-      this.playerPos.set(
-        INDUSTRIA_ATTACKER_SPAWN.x,
-        startY,
-        INDUSTRIA_ATTACKER_SPAWN.z
+      this.placePlayerOnPlayableSpawn(
+        this.industriaLevelData.collider,
+        INDUSTRIA_ATTACKER_SPAWN
       );
       this.yaw = INDUSTRIA_SPAWN_YAW;
       this.pitch = 0;
@@ -2345,28 +2357,16 @@ export class TacticalFPSEngine {
           new THREE.LoadingManager()
         ).then(() => {
           if (this.state.drillMode === 'HANGAR_BOMB_5V5') {
-            this.playerPos.y = this.hangarLevelData.collider.snapToWalkableFloor(
-              this.playerPos.x,
-              this.playerPos.z,
-              HANGAR_ATTACKER_SPAWN.y
+            this.placePlayerOnPlayableSpawn(
+              this.hangarLevelData.collider,
+              HANGAR_ATTACKER_SPAWN
             );
-            this.playerVel.y = 0;
-            this.isGrounded = true;
-            this.syncYawObjectToPlayerFeet();
           }
         });
       }
-      const startY = this.hangarLevelData.collider.ready
-        ? this.hangarLevelData.collider.snapToWalkableFloor(
-            HANGAR_ATTACKER_SPAWN.x,
-            HANGAR_ATTACKER_SPAWN.z,
-            HANGAR_ATTACKER_SPAWN.y
-          )
-        : HANGAR_ATTACKER_SPAWN.y;
-      this.playerPos.set(
-        HANGAR_ATTACKER_SPAWN.x,
-        startY,
-        HANGAR_ATTACKER_SPAWN.z
+      this.placePlayerOnPlayableSpawn(
+        this.hangarLevelData.collider,
+        HANGAR_ATTACKER_SPAWN
       );
       this.yaw = HANGAR_SPAWN_YAW;
       this.pitch = 0;
@@ -2381,28 +2381,16 @@ export class TacticalFPSEngine {
           new THREE.LoadingManager()
         ).then(() => {
           if (this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') {
-            this.playerPos.y = this.easternCityLevelData.collider.snapToWalkableFloor(
-              this.playerPos.x,
-              this.playerPos.z,
-              EASTERN_CITY_ATTACKER_SPAWN.y
+            this.placePlayerOnPlayableSpawn(
+              this.easternCityLevelData.collider,
+              EASTERN_CITY_ATTACKER_SPAWN
             );
-            this.playerVel.y = 0;
-            this.isGrounded = true;
-            this.syncYawObjectToPlayerFeet();
           }
         });
       }
-      const startY = this.easternCityLevelData.collider.ready
-        ? this.easternCityLevelData.collider.snapToWalkableFloor(
-            EASTERN_CITY_ATTACKER_SPAWN.x,
-            EASTERN_CITY_ATTACKER_SPAWN.z,
-            EASTERN_CITY_ATTACKER_SPAWN.y
-          )
-        : EASTERN_CITY_ATTACKER_SPAWN.y;
-      this.playerPos.set(
-        EASTERN_CITY_ATTACKER_SPAWN.x,
-        startY,
-        EASTERN_CITY_ATTACKER_SPAWN.z
+      this.placePlayerOnPlayableSpawn(
+        this.easternCityLevelData.collider,
+        EASTERN_CITY_ATTACKER_SPAWN
       );
       this.yaw = EASTERN_CITY_SPAWN_YAW;
       this.pitch = 0;
@@ -2417,28 +2405,16 @@ export class TacticalFPSEngine {
           new THREE.LoadingManager()
         ).then(() => {
           if (this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') {
-            this.playerPos.y = this.mirageAnubisLevelData.collider.snapToWalkableFloor(
-              this.playerPos.x,
-              this.playerPos.z,
-              MIRAGE_ANUBIS_ATTACKER_SPAWN.y
+            this.placePlayerOnPlayableSpawn(
+              this.mirageAnubisLevelData.collider,
+              MIRAGE_ANUBIS_ATTACKER_SPAWN
             );
-            this.playerVel.y = 0;
-            this.isGrounded = true;
-            this.syncYawObjectToPlayerFeet();
           }
         });
       }
-      const startY = this.mirageAnubisLevelData.collider.ready
-        ? this.mirageAnubisLevelData.collider.snapToWalkableFloor(
-            MIRAGE_ANUBIS_ATTACKER_SPAWN.x,
-            MIRAGE_ANUBIS_ATTACKER_SPAWN.z,
-            MIRAGE_ANUBIS_ATTACKER_SPAWN.y
-          )
-        : MIRAGE_ANUBIS_ATTACKER_SPAWN.y;
-      this.playerPos.set(
-        MIRAGE_ANUBIS_ATTACKER_SPAWN.x,
-        startY,
-        MIRAGE_ANUBIS_ATTACKER_SPAWN.z
+      this.placePlayerOnPlayableSpawn(
+        this.mirageAnubisLevelData.collider,
+        MIRAGE_ANUBIS_ATTACKER_SPAWN
       );
       this.yaw = MIRAGE_ANUBIS_SPAWN_YAW;
       this.pitch = 0;

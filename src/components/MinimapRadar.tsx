@@ -118,6 +118,21 @@ export const MinimapRadar: React.FC<MinimapRadarProps> = React.memo(
         drawSectorRect(-3, 2, 24, 26, '#2d3b4e', 'rgba(56,189,248,0.45)'); // Main Assault Warehouse & Site B
         drawSectorRect(-9, -7, 16, 10, '#36465c'); // Upper Warehouse Catwalk / Hostage Room
         drawSectorRect(14, 18, 14, 28, '#1e2938'); // East Backdoor Alley
+      } else if (isIndustria) {
+        // Post-lift collider AABB footprint (not Yard stub — that made players look "outside").
+        drawSectorRect(12, 11, 190, 186, '#1e293b');
+        drawSectorRect(8, -28, 28, 24, '#334155'); // south apron / attacker
+      } else if (isHangar) {
+        drawSectorRect(0, -2.5, 80, 36, '#1e293b');
+        drawSectorRect(0, -14, 22, 14, '#334155'); // south gate
+      } else if (isEasternCity) {
+        drawSectorRect(-8.5, 4.5, 140, 128, '#1e293b');
+        drawSectorRect(0, -20, 24, 20, '#334155'); // south street
+        drawSectorRect(-36, -4, 18, 16, '#3f1d1d', 'rgba(248,113,113,0.35)');
+        drawSectorRect(28, 16, 18, 16, '#1d2f3f', 'rgba(56,189,248,0.35)');
+      } else if (isMirageAnubis) {
+        drawSectorRect(-32.5, -31.5, 110, 112, '#292218');
+        drawSectorRect(-33, -40, 22, 18, '#3d3020'); // south approach
       } else {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
         ctx.lineWidth = 1;

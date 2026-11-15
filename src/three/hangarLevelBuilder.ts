@@ -166,13 +166,13 @@ export async function loadHangarMapGeometry(
 
     for (let i = 0; i < bundle.targets.length; i++) {
       const bot = bundle.targets[i];
-      const exactY = bundle.collider.snapToWalkableFloor(
+      const p = bundle.collider.findPlayableSpawn(
         bot.basePosition.x,
         bot.basePosition.z,
         bot.basePosition.y
       );
-      bot.basePosition.y = exactY;
-      bot.root.position.y = exactY;
+      bot.basePosition.set(p.x, p.y, p.z);
+      bot.root.position.set(p.x, p.y, p.z);
     }
 
     bundle.isLoaded = true;
