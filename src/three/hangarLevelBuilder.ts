@@ -18,7 +18,8 @@ const DRACO_DECODER_PATH =
 export const HANGAR_FLOOR_Y_LIFT = 0.6;
 
 /** Vanguard attackers — south hangar entrance (inset for floor snap). */
-export const HANGAR_ATTACKER_SPAWN = new THREE.Vector3(0.0, 0.2, -14.0);
+/** Attacker spawn — Y = measured walkable floor at (0,-14) after FLOOR_Y_LIFT. */
+export const HANGAR_ATTACKER_SPAWN = new THREE.Vector3(0.0, 0.6, -14.0);
 export const HANGAR_SPAWN_YAW = 0;
 /** Blackthorn defenders — north interior near office/room. */
 export const HANGAR_DEFENDER_SPAWN = new THREE.Vector3(0.0, 0.2, 10.0);

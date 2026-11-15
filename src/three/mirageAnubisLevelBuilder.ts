@@ -17,11 +17,14 @@ const DRACO_DECODER_PATH =
  */
 export const MIRAGE_ANUBIS_FLOOR_Y_LIFT = 1.2;
 
-/** Vanguard attackers — south approach (inset from far AABB edge). */
-export const MIRAGE_ANUBIS_ATTACKER_SPAWN = new THREE.Vector3(-33.0, 0.35, -58.0);
+/**
+ * Attacker spawn — (-33,-58) sits under mid/sky (11.5 / sky-lid 45.88).
+ * (-33,-40) has groundBand ≈ 5.16 after FLOOR_Y_LIFT (excludes sky lid).
+ */
+export const MIRAGE_ANUBIS_ATTACKER_SPAWN = new THREE.Vector3(-33.0, 5.16, -40.0);
 export const MIRAGE_ANUBIS_SPAWN_YAW = 0;
 /** Blackthorn defenders — north / east edge near Z+. */
-export const MIRAGE_ANUBIS_DEFENDER_SPAWN = new THREE.Vector3(-20.0, 0.35, 8.0);
+export const MIRAGE_ANUBIS_DEFENDER_SPAWN = new THREE.Vector3(-20.0, 7.59, 0.0);
 /** Bomb A — west building cluster. */
 export const MIRAGE_ANUBIS_BOMB_SITE_A = new THREE.Vector3(-60.0, 0.2, -40.0);
 /** Bomb B — central-east courtyard. */

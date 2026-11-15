@@ -19,7 +19,8 @@ const DRACO_DECODER_PATH =
 export const INDUSTRIA_FLOOR_Y_LIFT = 13.18;
 
 /** Vanguard attackers — south road apron, facing north into the yard. */
-export const INDUSTRIA_ATTACKER_SPAWN = new THREE.Vector3(8.0, 1.85, -28.0);
+/** Attacker spawn — Y = measured walkable floor at (8,-28) after FLOOR_Y_LIFT. */
+export const INDUSTRIA_ATTACKER_SPAWN = new THREE.Vector3(8.0, 2.28, -28.0);
 export const INDUSTRIA_SPAWN_YAW = 0;
 /** Blackthorn defenders — north hangar apron. */
 export const INDUSTRIA_DEFENDER_SPAWN = new THREE.Vector3(-5.0, 2.0, 40.0);

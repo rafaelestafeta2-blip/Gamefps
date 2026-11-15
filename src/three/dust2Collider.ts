@@ -304,9 +304,12 @@ export class Dust2TriangleCollider {
   }
 
   /**
-   * Snap a spawn/bot onto the highest walkable floor at (x,z).
-   * Probes from above the map AABB so we never start under FrontSide floors
-   * (white void / floating silhouettes).
+   * Snap spawn/bot onto the correct walkable floor at (x,z).
+   *
+   * IMPORTANT: probing via getGroundHeight(from AABB max) picks the *highest*
+   * triangle (roofs / Mirage sky-lid ≈ max.y) — that left players on lids or,
+   * when collider wasn't ready yet, at authored Y under FrontSide floors
+   * (white void). Collect upward floors, drop sky-lid band, pick closest to hint.
    */
   public snapToWalkableFloor(
     x: number,
@@ -314,14 +317,71 @@ export class Dust2TriangleCollider {
     hintY = 0.2
   ): number {
     if (!this.ready) return hintY;
-    const probeY = !this.worldBounds.isEmpty()
-      ? this.worldBounds.max.y + 4
-      : Math.max(hintY, 0) + 48;
-    const snapped = this.getGroundHeight(x, probeY, z);
-    if (!Number.isFinite(snapped)) return hintY;
-    // If probe found nothing useful, keep hint rather than dropping into void.
-    if (Math.abs(snapped - probeY) < 0.01) return hintY;
-    return snapped;
+
+    const skyCut = !this.worldBounds.isEmpty()
+      ? this.worldBounds.max.y - 1.5
+      : 1e9;
+    const minY = !this.worldBounds.isEmpty()
+      ? this.worldBounds.min.y - 0.25
+      : -5;
+
+    const cx = Math.floor(x / this.cellSize);
+    const cz = Math.floor(z / this.cellSize);
+    const candidates: number[] = [];
+
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const bucket = this.floorGrid.get(this.cellKey(cx + dx, cz + dz));
+        if (!bucket) continue;
+        for (let i = 0; i < bucket.length; i++) {
+          const t = bucket[i];
+          // Upward walkables only (skip ceilings / lid undersides).
+          if (t.normal.y < 0.45) continue;
+          if (
+            x < t.minX - 0.08 ||
+            x > t.maxX + 0.08 ||
+            z < t.minZ - 0.08 ||
+            z > t.maxZ + 0.08
+          ) {
+            continue;
+          }
+          const yOnTri = this.sampleTriangleY(t, x, z);
+          if (yOnTri === null) continue;
+          if (yOnTri < minY || yOnTri > skyCut) continue;
+          candidates.push(yOnTri);
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      // Fallback: old high-probe path but still clamp out sky lid.
+      const probeY = !this.worldBounds.isEmpty()
+        ? this.worldBounds.max.y + 4
+        : Math.max(hintY, 0) + 48;
+      let snapped = this.getGroundHeight(x, probeY, z);
+      if (!Number.isFinite(snapped) || Math.abs(snapped - probeY) < 0.01) {
+        return hintY;
+      }
+      if (snapped > skyCut) snapped = hintY;
+      return snapped;
+    }
+
+    candidates.sort((a, b) => a - b);
+    // Prefer the candidate closest to the authored spawn/bot hint Y.
+    let best = candidates[0];
+    let bestDist = Math.abs(best - hintY);
+    for (let i = 1; i < candidates.length; i++) {
+      const d = Math.abs(candidates[i] - hintY);
+      if (d < bestDist) {
+        best = candidates[i];
+        bestDist = d;
+      }
+    }
+    // If hint is clearly below every floor, take the lowest (don't jump to a roof).
+    if (hintY < candidates[0] - 0.75) {
+      return candidates[0];
+    }
+    return best;
   }
 
 

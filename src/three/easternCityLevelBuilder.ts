@@ -18,11 +18,14 @@ const DRACO_DECODER_PATH =
  */
 export const EASTERN_CITY_FLOOR_Y_LIFT = 3.5;
 
-/** Vanguard attackers — south street approach (inset onto paved road). */
-export const EASTERN_CITY_ATTACKER_SPAWN = new THREE.Vector3(0.0, 0.35, -36.0);
+/**
+ * Vanguard attackers — south street (not z=-36: that XZ only has mid/roof floors
+ * ~15.6/18.8). (0,-20) has street groundBand ≈ 3.25 after FLOOR_Y_LIFT.
+ */
+export const EASTERN_CITY_ATTACKER_SPAWN = new THREE.Vector3(0.0, 3.25, -20.0);
 export const EASTERN_CITY_SPAWN_YAW = 0;
-/** Blackthorn defenders — north plaza. */
-export const EASTERN_CITY_DEFENDER_SPAWN = new THREE.Vector3(-6.0, 0.35, 36.0);
+/** Blackthorn defenders — north plaza (Y = lowest walkable at that XZ). */
+export const EASTERN_CITY_DEFENDER_SPAWN = new THREE.Vector3(-6.0, 7.46, 36.0);
 /** Bomb A — west ruin / market block. */
 export const EASTERN_CITY_BOMB_SITE_A = new THREE.Vector3(-36.0, 0.2, -4.0);
 /** Bomb B — east courtyard / tower block. */
