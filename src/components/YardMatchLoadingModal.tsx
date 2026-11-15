@@ -11,6 +11,7 @@ import { OnlineRoomState } from '../multiplayer/onlineTypes';
 import { TACTICAL_ACHIEVEMENTS } from '../progression/achievementsData';
 import { getPlayerInventoryState } from '../progression/loadoutSystem';
 import { DrillMode } from '../types/game';
+import { isMapSpawnHarness } from '../three/mapModeUtils';
 import {
   BlackthornTeamEmblem,
   OperatorTacticalAvatar,
@@ -154,11 +155,13 @@ const BRIEFING_DURATION_MS = 40000;
 const ONLINE_BARRIER_TIMEOUT_MS = 25000;
 /**
  * Soft wait for prepare. After this we settle: if prepare finishes soon, enter;
- * if still hung (legacy compile hang), abort to menu — never spin at 92% for 10min.
+ * if still hung, abort (or force-enter TESTE MAPA) — never spin at 99% forever.
  */
 const PREPARE_TIMEOUT_MS = 90000;
+/** TESTE MAPA must finish in seconds–low minutes; shorter hard deadline. */
+const HARNESS_PREPARE_TIMEOUT_MS = 45000;
 /** Extra grace after soft timeout before aborting. */
-const PREPARE_GRACE_MS = 12000;
+const PREPARE_GRACE_MS = 8000;
 
 export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   mode = 'YARD_BOMB_5V5',
@@ -179,6 +182,8 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   const lastProgressSentRef = useRef(-1);
   const onPrepareMapRef = useRef(onPrepareMap);
   onPrepareMapRef.current = onPrepareMap;
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
 
   const mapCodeLabel =
     mode === 'DUST2_BOMB_5V5'
@@ -268,6 +273,29 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       publishLocalLoadProgress(5, false);
     }
 
+    const harness = isMapSpawnHarness(mode);
+    const prepareLimitMs = harness
+      ? HARNESS_PREPARE_TIMEOUT_MS
+      : PREPARE_TIMEOUT_MS;
+    let lastRealPct = 0;
+
+    const abortToMenu = (msg: string) => {
+      if (cancelled || completedRef.current) return;
+      setStatusText(msg);
+      setProgress((p) => Math.max(p, 99));
+      localMapReadyRef.current = false;
+      setIsArenaReady(false);
+      // Never leave VS at 99% forever — clear after a beat if CANCELAR wired.
+      window.setTimeout(() => {
+        if (cancelled || completedRef.current) return;
+        const cancelFn = onCancelRef.current;
+        if (cancelFn) {
+          completedRef.current = true;
+          cancelFn();
+        }
+      }, 2500);
+    };
+
     const runRealPreparation = async () => {
       const prepareFn = onPrepareMapRef.current;
       try {
@@ -275,6 +303,7 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
           const preparePromise = prepareFn(mode, (pct, label) => {
             if (cancelled) return;
             const clamped = Math.min(100, Math.max(0, Math.round(pct)));
+            lastRealPct = Math.max(lastRealPct, clamped);
             setProgress((prev) => Math.max(prev, clamped));
             setStatusText(label);
             if (isOnline && clamped - lastProgressSentRef.current >= 20 && clamped < 100) {
@@ -285,13 +314,15 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
           const timed = await Promise.race([
             preparePromise.then(() => 'ok' as const),
             new Promise<'timeout'>((resolve) => {
-              window.setTimeout(() => resolve('timeout'), PREPARE_TIMEOUT_MS);
+              window.setTimeout(() => resolve('timeout'), prepareLimitMs);
             }),
           ]);
           if (timed === 'timeout') {
-            console.warn('Arena prepare soft-timeout — grace then abort:', mode);
+            console.warn('Arena prepare soft-timeout — grace then settle:', mode);
             setStatusText(
-              'MAPA PESADO / WARMUP LENTO — AGUARDANDO MAIS 12s (DEPOIS VOLTA AO MENU)...'
+              harness
+                ? 'TESTE MAPA LENTO — AGUARDANDO GRACE CURTO...'
+                : 'MAPA PESADO / WARMUP LENTO — AGUARDANDO GRACE (DEPOIS SAI DO 99%)...'
             );
             const settled = await Promise.race([
               preparePromise.then(() => 'ok' as const),
@@ -300,14 +331,25 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
               }),
             ]);
             if (settled === 'timeout') {
-              if (!cancelled) {
+              if (cancelled) return;
+              // Floor was proven in prepare (≥70) — force enter rather than void at 99%.
+              if (harness && lastRealPct >= 70) {
                 setStatusText(
-                  'TIMEOUT NO LOADING (~92% era compile/granada) — VOLTE E TENTE DE NOVO'
+                  'TIMEOUT APÓS FLOOR — FORÇANDO ENTRADA NO TESTE MAPA...'
                 );
-                setProgress((p) => Math.max(p, 92));
-                localMapReadyRef.current = false;
-                setIsArenaReady(false);
+                localMapReadyRef.current = true;
+                setProgress(100);
+                setIsArenaReady(true);
+                window.setTimeout(() => {
+                  if (!cancelled) finishLoading();
+                }, 300);
+                return;
               }
+              abortToMenu(
+                harness
+                  ? 'TIMEOUT TESTE MAPA — VOLTANDO AO MENU (TOQUE CANCELAR SE TRAVAR)'
+                  : 'TIMEOUT NO LOADING (99% soft) — VOLTANDO AO MENU'
+              );
               return;
             }
           }
@@ -328,12 +370,9 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       } catch (err) {
         console.error('Erro ao preparar arena 3D:', err);
         if (!cancelled) {
-          setStatusText(
-            'FALHA NO GLB/COLISOR — TOQUE CANCELAR E TENTE DE NOVO (NÃO INICIAR NO VOID)'
+          abortToMenu(
+            'FALHA NO GLB/COLISOR — VOLTANDO AO MENU (NÃO INICIAR NO VOID)'
           );
-          setProgress((p) => Math.max(p, 8));
-          localMapReadyRef.current = false;
-          setIsArenaReady(false);
         }
       }
     };

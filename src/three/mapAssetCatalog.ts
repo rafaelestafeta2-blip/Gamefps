@@ -37,6 +37,8 @@ export function getMapGlbUrlForMode(mode: DrillMode): string | null {
   return MAP_GLB_BY_MODE[mode] ?? null;
 }
 
+const PREFETCH_FILE_TIMEOUT_MS = 10000;
+
 function loadArrayBuffer(url: string, onProgress?: (ratio0to1: number) => void): Promise<void> {
   if (THREE.Cache.get(url)) {
     onProgress?.(1);
@@ -46,11 +48,22 @@ function loadArrayBuffer(url: string, onProgress?: (ratio0to1: number) => void):
   if (existing) return existing;
 
   const promise = new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      inflight.delete(url);
+      reject(new Error(`Prefetch timeout: ${url}`));
+    }, PREFETCH_FILE_TIMEOUT_MS);
+
     const loader = new THREE.FileLoader();
     loader.setResponseType('arraybuffer');
     loader.load(
       url,
       () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
         inflight.delete(url);
         onProgress?.(1);
         resolve();
@@ -61,6 +74,9 @@ function loadArrayBuffer(url: string, onProgress?: (ratio0to1: number) => void):
         }
       },
       (err) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
         inflight.delete(url);
         reject(err);
       }

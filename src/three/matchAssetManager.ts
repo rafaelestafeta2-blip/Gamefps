@@ -125,9 +125,22 @@ export async function prepareMatchArena(
 
   enableMapAssetCache();
   onProgress(3, 'INICIALIZANDO CACHE DE ARENA + DECODER DRACO...');
-  await prefetchMapAssetsForMode(assetMode, (ratio, label) => {
-    onProgress(3 + ratio * 12, label);
-  });
+  // CDN Draco warm can hang forever on Android egress — never block prepare.
+  {
+    let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        prefetchMapAssetsForMode(assetMode, (ratio, label) => {
+          onProgress(3 + ratio * 12, label);
+        }),
+        new Promise<'timeout'>((resolve) => {
+          prefetchTimer = setTimeout(() => resolve('timeout'), 12000);
+        }),
+      ]);
+    } finally {
+      if (prefetchTimer) clearTimeout(prefetchTimer);
+    }
+  }
 
   onProgress(16, 'INICIALIZANDO THREE.LOADINGMANAGER & DRACOLOADER...');
 
@@ -345,6 +358,18 @@ export async function prepareMatchArena(
         );
       }
     }
+  }
+
+  // TESTE MAPA: floor+collider already proven — skip VRAM upload / grenade / compile
+  // (those were leaving VS soft-bar stuck at 99% while Promise never settled).
+  if (skipBots) {
+    reportProgress(85, 'TESTE MAPA — SKY RÁPIDO (SEM WARMUP GPU/GRANADA)...');
+    skySystem.configureForMode(mode, scene.fog !== null);
+    reportProgress(
+      100,
+      'TESTE MAPA PRONTO — FLOOR/COLISOR OK, ENTRANDO NA ARENA!'
+    );
+    return;
   }
 
   // Etapa 2: Setup do Sky Shader físico + Upload real das texturas PBR para a VRAM (initTexture)
