@@ -43,6 +43,33 @@ export interface Dust2LevelBundle extends TacticalLevelData {
   collider: Dust2TriangleCollider;
   mapGeometryGroup: THREE.Group | null;
   isLoaded: boolean;
+  /** In-flight GLB load — prevents startGame from dispose()+reloading mid-prepare. */
+  loadingPromise?: Promise<void> | null;
+}
+
+/** Serialize GLB loads so prepare + startGame never dispose each other. */
+export async function runExclusiveGlbLoad(
+  bundle: Dust2LevelBundle,
+  work: () => Promise<void>,
+  onByteProgress?: (ratio0to1: number) => void
+): Promise<void> {
+  if (bundle.isLoaded && bundle.mapGeometryGroup && bundle.collider.ready) {
+    onByteProgress?.(1.0);
+    return;
+  }
+  if (bundle.loadingPromise) {
+    await bundle.loadingPromise;
+    onByteProgress?.(1.0);
+    return;
+  }
+  bundle.loadingPromise = (async () => {
+    try {
+      await work();
+    } finally {
+      bundle.loadingPromise = null;
+    }
+  })();
+  await bundle.loadingPromise;
 }
 
 /**

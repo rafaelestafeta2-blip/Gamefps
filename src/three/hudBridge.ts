@@ -113,6 +113,10 @@ export function buildHudFingerprint(state: HudState, yaw: number): string {
     state.focusedWallWeapon || '-',
     Math.round(state.playerPos.x * 4),
     Math.round(state.playerPos.z * 4),
+    state.playerPos.y != null ? Math.round(state.playerPos.y * 4) : 0,
+    state.spawnDebug
+      ? `${state.spawnDebug.ready ? 1 : 0}:${state.spawnDebug.tris}:${Math.round(state.spawnDebug.groundY * 4)}`
+      : '-',
     Math.round(yaw * 8),
     bomb?.bombStatus || '-',
     bomb ? bomb.roundTimerSec | 0 : -1,
@@ -160,6 +164,9 @@ export function emitHudIfChanged(
       y: ctx.state.playerPos.y,
       z: ctx.state.playerPos.z,
     },
+    spawnDebug: ctx.state.spawnDebug
+      ? { ...ctx.state.spawnDebug }
+      : undefined,
     playerYaw: ctx.yaw,
     radarTargets: ctx.cachedRadarTargets,
   });

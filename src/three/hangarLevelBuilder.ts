@@ -3,7 +3,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WeaponId } from '../types/game';
 import { Dust2TriangleCollider } from './dust2Collider';
-import { Dust2LevelBundle } from './dust2LevelBuilder';
+import { Dust2LevelBundle, runExclusiveGlbLoad } from './dust2LevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
 
@@ -92,11 +92,7 @@ export async function loadHangarMapGeometry(
   loadingManager: THREE.LoadingManager,
   onByteProgress?: (ratio0to1: number) => void
 ): Promise<void> {
-  if (bundle.isLoaded && bundle.mapGeometryGroup && bundle.collider.ready) {
-    onByteProgress?.(1.0);
-    return;
-  }
-
+  await runExclusiveGlbLoad(bundle, async () => {
   disposeHangarMapGeometry(bundle);
 
   const dracoLoader = new DRACOLoader(loadingManager);
@@ -180,6 +176,7 @@ export async function loadHangarMapGeometry(
   } finally {
     dracoLoader.dispose();
   }
+  }, onByteProgress);
 }
 
 export function disposeHangarMapGeometry(bundle: Dust2LevelBundle): void {

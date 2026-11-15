@@ -177,8 +177,15 @@ export class Dust2TriangleCollider {
     });
 
     this.triangleCount = totalTris;
-    this.generateTopDownRadarDataUrl(allFloors, allWalls);
+    // Mark ready BEFORE radar bake. Radar can take tens of seconds on Eastern
+    // (~1.3M floors) and used to leave ready=false while Loading 2 timed out and
+    // startGame disposed the in-flight GLB → empty arena / white void.
     this.ready = true;
+    try {
+      this.generateTopDownRadarDataUrl(allFloors, allWalls);
+    } catch {
+      this.radarDataUrl = '';
+    }
   }
 
   private isBoxInLadderZone(
@@ -726,7 +733,9 @@ export class Dust2TriangleCollider {
     const toPx = (wx: number) => ((wx - minX) / spanX) * 256;
     const toPz = (wz: number) => ((wz - minZ) / spanZ) * 256;
 
-    for (let i = 0; i < floors.length; i++) {
+    // Subsample huge maps (Eastern) — full 1M+ fills freeze Android WebView.
+    const floorStep = floors.length > 80000 ? Math.ceil(floors.length / 40000) : 1;
+    for (let i = 0; i < floors.length; i += floorStep) {
       const f = floors[i];
       if (f.maxY > 9.6) continue;
       ctx.beginPath();
@@ -740,7 +749,8 @@ export class Dust2TriangleCollider {
 
     ctx.strokeStyle = '#64748b';
     ctx.lineWidth = 1.1;
-    for (let i = 0; i < walls.length; i++) {
+    const wallStep = walls.length > 40000 ? Math.ceil(walls.length / 20000) : 1;
+    for (let i = 0; i < walls.length; i += wallStep) {
       const w = walls[i];
       if (w.minY > 8.5 || w.maxY < 1.0) continue;
       ctx.beginPath();

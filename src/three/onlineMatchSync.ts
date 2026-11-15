@@ -61,7 +61,13 @@ function syncShootableHitboxes(
 export function applyOnlineTeamSpawnToLocalPlayer(
   mode: DrillMode,
   playerPos: THREE.Vector3,
-  getGroundHeight: (x: number, y: number, z: number) => number
+  getGroundHeight: (x: number, y: number, z: number) => number,
+  /** Prefer Dust2-parity playable snap (XZ inside footprint + street Y). */
+  findPlayableSpawn?: (
+    hintX: number,
+    hintZ: number,
+    hintY: number
+  ) => { x: number; y: number; z: number } | null
 ): { yaw: number } | null {
   const room = getActiveOnlineRoom();
   const localPlayer = getLocalOnlinePlayerState();
@@ -76,6 +82,13 @@ export function applyOnlineTeamSpawnToLocalPlayer(
   );
 
   const spawn = getTeamSpawnForArena(mode, localPlayer.team, slotIndex);
+  if (findPlayableSpawn) {
+    const playable = findPlayableSpawn(spawn.x, spawn.z, spawn.y);
+    if (playable) {
+      playerPos.set(playable.x, playable.y, playable.z);
+      return { yaw: spawn.yaw };
+    }
+  }
   const groundY = getGroundHeight(spawn.x, spawn.y, spawn.z);
   playerPos.set(spawn.x, groundY, spawn.z);
   return { yaw: spawn.yaw };

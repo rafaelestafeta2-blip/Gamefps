@@ -2,7 +2,7 @@ name: Build Native Android APK (Capacitor + WebGL GPU)
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'cursor/**' ]
   workflow_dispatch:
 
 jobs:

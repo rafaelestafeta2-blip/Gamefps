@@ -48,6 +48,19 @@ import {
 } from './standerTiroBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
 
+/** Block match start when GLB bake produced an empty / unready floor (→ white void). */
+function assertGlbFloorReady(label: string, bundle: Dust2LevelBundle): void {
+  const col = bundle.collider;
+  if (!bundle.isLoaded || !bundle.mapGeometryGroup) {
+    throw new Error(`[${label}] GLB not in scene after load — refusing match start`);
+  }
+  if (!col.ready || col.triangleCount < 1 || col.worldBounds.isEmpty()) {
+    throw new Error(
+      `[${label}] collider not proven (ready=${col.ready} tris=${col.triangleCount}) — refusing void spawn`
+    );
+  }
+}
+
 export interface MatchArenaPrepareParams {
   mode: DrillMode;
   renderer: THREE.WebGLRenderer;
@@ -217,6 +230,7 @@ export async function prepareMatchArena(
     );
 
     industriaLevelData.levelGroup.visible = true;
+    assertGlbFloorReady('INDUSTRIA', industriaLevelData);
     reportProgress(
       70,
       `COLISORES BOX3 (${industriaLevelData.collider.boundingBoxes.length}) E ${industriaLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
@@ -238,6 +252,7 @@ export async function prepareMatchArena(
     );
 
     hangarLevelData.levelGroup.visible = true;
+    assertGlbFloorReady('HANGAR', hangarLevelData);
     reportProgress(
       70,
       `COLISORES BOX3 (${hangarLevelData.collider.boundingBoxes.length}) E ${hangarLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
@@ -258,6 +273,7 @@ export async function prepareMatchArena(
     );
 
     easternCityLevelData.levelGroup.visible = true;
+    assertGlbFloorReady('EASTERN_CITY', easternCityLevelData);
     reportProgress(
       70,
       `COLISORES BOX3 (${easternCityLevelData.collider.boundingBoxes.length}) E ${easternCityLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`
@@ -278,6 +294,7 @@ export async function prepareMatchArena(
     );
 
     mirageAnubisLevelData.levelGroup.visible = true;
+    assertGlbFloorReady('MIRAGE_ANUBIS', mirageAnubisLevelData);
     reportProgress(
       70,
       `COLISORES BOX3 (${mirageAnubisLevelData.collider.boundingBoxes.length}) E ${mirageAnubisLevelData.collider.triangleCount} TRIÂNGULOS PRONTOS!`

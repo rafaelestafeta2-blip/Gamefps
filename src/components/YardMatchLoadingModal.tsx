@@ -148,9 +148,11 @@ const YARD_RADAR_IMAGE = '/assets/aistudio/Yard_Map_Radar_7754e5f9.webp';
 
 const TUTORIAL_STORAGE_KEY = 'kinetic_plant_bomb_tutorial_played';
 const BRIEFING_DURATION_MS = 40000;
+/** Soft UI countdown only — must NOT force-start match before GLB+collider ready. */
 const ONLINE_BARRIER_TIMEOUT_MS = 25000;
 /** Hard cap so Hangar/Eastern/etc never freeze forever on VS with 0% progress. */
-const PREPARE_TIMEOUT_MS = 90000;
+/** Hard cap for prepare race; on timeout we KEEP WAITING if still loading (no void fallback). */
+const PREPARE_TIMEOUT_MS = 180000;
 
 export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
   mode = 'YARD_BOMB_5V5',
@@ -262,8 +264,10 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
             }),
           ]);
           if (timed === 'timeout') {
-            console.warn('Arena prepare timed out — recovering into match:', mode);
-            setStatusText('TIMEOUT NO CARREGAMENTO — INICIANDO COM FALLBACK...');
+            // Do NOT start match into empty arena (white void). Await real prepare.
+            console.warn('Arena prepare still running past soft timeout — waiting:', mode);
+            setStatusText('MAPA PESADO — AINDA CARREGANDO COLISORES (NÃO INICIAR NO VOID)...');
+            await preparePromise;
           }
         }
         if (cancelled) return;
@@ -282,12 +286,11 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       } catch (err) {
         console.error('Erro ao preparar arena 3D:', err);
         if (!cancelled) {
-          setStatusText('FALHA NO GLB — RECUPERANDO PARTIDA...');
-          localMapReadyRef.current = true;
-          setProgress(100);
-          setIsArenaReady(true);
-          if (isOnline) publishLocalLoadProgress(100, true);
-          else finishLoading();
+          // Stay on loading screen — starting without GLB = FrontSide white void.
+          setStatusText('FALHA NO GLB — TOQUE VOLTAR E TENTE DE NOVO (NÃO INICIAR NO VOID)');
+          setProgress((p) => Math.max(p, 8));
+          localMapReadyRef.current = false;
+          setIsArenaReady(false);
         }
       }
     };
@@ -309,14 +312,8 @@ export const YardMatchLoadingModal: React.FC<YardMatchLoadingModalProps> = ({
       }
 
       if (!localMapReadyRef.current && elapsed >= PREPARE_TIMEOUT_MS && !completedRef.current) {
-        window.clearInterval(tick);
-        localMapReadyRef.current = true;
-        setProgress(100);
-        setIsArenaReady(true);
-        setStatusText('TIMEOUT — LIBERANDO PARTIDA...');
-        if (isOnline) publishLocalLoadProgress(100, true);
-        else finishLoading();
-        return;
+        // Soft notice only — never finishLoading() without a ready collider.
+        setStatusText('AINDA PREPARANDO ARENA 3D… AGUARDE (EVITA VOID BRANCO)');
       }
 
       if (isOnline && localMapReadyRef.current && elapsed >= ONLINE_BARRIER_TIMEOUT_MS && !completedRef.current) {

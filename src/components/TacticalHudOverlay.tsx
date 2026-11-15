@@ -78,6 +78,22 @@ export const TacticalHudOverlay: React.FC<TacticalHudOverlayProps> = ({
 
   return (
     <>
+      {hud.spawnDebug && (
+        <div
+          className="fixed top-2 left-2 z-[60] pointer-events-none font-mono text-[10px] leading-tight text-lime-300/95 bg-black/70 px-2 py-1.5 rounded border border-lime-500/40 max-w-[92vw]"
+          style={{ textShadow: '0 1px 2px #000' }}
+        >
+          <div>SPAWNDBG {hud.spawnDebug.mode}</div>
+          <div>
+            xz={hud.spawnDebug.xz} feetY={hud.spawnDebug.feetY} ground=
+            {hud.spawnDebug.groundY}
+          </div>
+          <div>
+            ready={String(hud.spawnDebug.ready)} tris={hud.spawnDebug.tris} aabb=
+            {hud.spawnDebug.aabb}
+          </div>
+        </div>
+      )}
       {/* Damage Vignette Flash & Critical Low Health Pulsing Blood Fringe */}
       {!isSpectating && (hud.damageFlashAlpha > 0.01 || (hud.health > 0 && hud.health < 35)) && (
         <div

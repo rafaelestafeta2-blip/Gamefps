@@ -198,6 +198,16 @@ export interface HudState {
   stance: 'STAND' | 'CROUCH' | 'PRONE' | 'SPRINT' | 'SLIDE';
   leanDirection: -1 | 0 | 1; // -1 Left (Q), 0 Center, 1 Right (E)
   playerPos: { x: number; y?: number; z: number };
+  /** Temporary Android void-debug (new GLB maps only). */
+  spawnDebug?: {
+    mode: string;
+    xz: string;
+    feetY: number;
+    groundY: number;
+    ready: boolean;
+    tris: number;
+    aabb: string;
+  };
   playerYaw: number;
   radarTargets: Array<{
     id: string;

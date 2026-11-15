@@ -91,32 +91,34 @@ export function getTeamSpawnForArena(
     return { x: -2.3 + offsetX, y: 0.5, z: 6.9 - offsetZ, yaw: Math.PI };
   }
 
+  // MUST match level-builder authored spawns (INDUSTRIA_* / HANGAR_* / …).
+  // Stale far-field coords put feet outside the GLB AABB → FrontSide white void.
   if (mode === 'INDUSTRIA_BOMB_5V5') {
     if (team === 'VANGUARD') {
-      return { x: 12.0 + offsetX, y: 1.85, z: -40.0 + offsetZ, yaw: 0 };
+      return { x: 8.0 + offsetX, y: 2.28, z: -28.0 + offsetZ, yaw: 0 };
     }
-    return { x: -5.0 + offsetX, y: 2.0, z: 48.0 - offsetZ, yaw: Math.PI };
+    return { x: -5.0 + offsetX, y: 2.0, z: 40.0 - offsetZ, yaw: Math.PI };
   }
 
   if (mode === 'HANGAR_BOMB_5V5') {
     if (team === 'VANGUARD') {
-      return { x: 0.0 + offsetX, y: 0.15, z: -18.0 + offsetZ, yaw: 0 };
+      return { x: 0.0 + offsetX, y: 0.6, z: -14.0 + offsetZ, yaw: 0 };
     }
-    return { x: 0.0 + offsetX, y: 0.15, z: 12.0 - offsetZ, yaw: Math.PI };
+    return { x: 0.0 + offsetX, y: 0.2, z: 10.0 - offsetZ, yaw: Math.PI };
   }
 
   if (mode === 'EASTERN_CITY_BOMB_5V5') {
     if (team === 'VANGUARD') {
-      return { x: 0.0 + offsetX, y: 0.2, z: -48.0 + offsetZ, yaw: 0 };
+      return { x: 0.0 + offsetX, y: 3.25, z: -20.0 + offsetZ, yaw: 0 };
     }
-    return { x: -6.0 + offsetX, y: 0.2, z: 48.0 - offsetZ, yaw: Math.PI };
+    return { x: -6.0 + offsetX, y: 7.46, z: 36.0 - offsetZ, yaw: Math.PI };
   }
 
   if (mode === 'MIRAGE_ANUBIS_BOMB_5V5') {
     if (team === 'VANGUARD') {
-      return { x: -33.0 + offsetX, y: 0.2, z: -72.0 + offsetZ, yaw: 0 };
+      return { x: -33.0 + offsetX, y: 5.16, z: -40.0 + offsetZ, yaw: 0 };
     }
-    return { x: -20.0 + offsetX, y: 0.2, z: 12.0 - offsetZ, yaw: Math.PI };
+    return { x: -20.0 + offsetX, y: 7.59, z: 0.0 - offsetZ, yaw: Math.PI };
   }
 
   // YARD_BOMB_5V5 default

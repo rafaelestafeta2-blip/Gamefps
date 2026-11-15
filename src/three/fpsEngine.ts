@@ -438,6 +438,7 @@ export class TacticalFPSEngine {
     stance: 'STAND',
     leanDirection: 0,
     playerPos: { x: -6.8, z: 3.2 },
+    spawnDebug: undefined,
     playerYaw: 0,
     radarTargets: [],
 
@@ -1004,6 +1005,31 @@ export class TacticalFPSEngine {
     this.playerVel.y = 0;
     this.isGrounded = true;
     this.syncYawObjectToPlayerFeet();
+  }
+
+  /**
+   * Dust2-parity place for new GLB maps: join in-flight prepare load (never dispose
+   * mid-bake), place only when collider.ready, otherwise wait — no Yard fallback Y.
+   */
+  private ensureGlbMapThenPlace(
+    bundle: Dust2LevelBundle,
+    startLoad: () => Promise<void>,
+    expectedMode: DrillMode,
+    hint: THREE.Vector3
+  ): void {
+    const placeNow = () => {
+      if (this.state.drillMode !== expectedMode) return;
+      this.placePlayerOnPlayableSpawn(bundle.collider, hint, false);
+      this.syncYawObjectToPlayerFeet();
+    };
+    if (bundle.isLoaded && bundle.collider.ready) {
+      placeNow();
+      return;
+    }
+    void (bundle.loadingPromise ?? startLoad()).then(() => {
+      placeNow();
+      this.scheduleFloorResnap(hint.y);
+    });
   }
 
   /** Snap feet onto walkable floor; returns true when collider applied a snap. */
@@ -2326,22 +2352,16 @@ export class TacticalFPSEngine {
       this.yardBombSystem.resetRound('ASSAULT_BOMB_5V5', keepMatchScore);
       this.state.yardBomb = { ...this.yardBombSystem.info };
     } else if (isIndustria) {
-      if (!this.industriaLevelData.isLoaded) {
-        void loadIndustriaMapGeometry(
-          this.industriaLevelData,
-          this.isSoftwareGl,
-          new THREE.LoadingManager()
-        ).then(() => {
-          if (this.state.drillMode === 'INDUSTRIA_BOMB_5V5') {
-            this.placePlayerOnPlayableSpawn(
-              this.industriaLevelData.collider,
-              INDUSTRIA_ATTACKER_SPAWN
-            );
-          }
-        });
-      }
-      this.placePlayerOnPlayableSpawn(
-        this.industriaLevelData.collider,
+      // Dust2 parity: only place when collider.ready; never invent Yard Y into empty mesh.
+      this.ensureGlbMapThenPlace(
+        this.industriaLevelData,
+        () =>
+          loadIndustriaMapGeometry(
+            this.industriaLevelData,
+            this.isSoftwareGl,
+            new THREE.LoadingManager()
+          ),
+        'INDUSTRIA_BOMB_5V5',
         INDUSTRIA_ATTACKER_SPAWN
       );
       this.yaw = INDUSTRIA_SPAWN_YAW;
@@ -2350,22 +2370,15 @@ export class TacticalFPSEngine {
       this.yardBombSystem.resetRound('INDUSTRIA_BOMB_5V5', keepMatchScore);
       this.state.yardBomb = { ...this.yardBombSystem.info };
     } else if (isHangar) {
-      if (!this.hangarLevelData.isLoaded) {
-        void loadHangarMapGeometry(
-          this.hangarLevelData,
-          this.isSoftwareGl,
-          new THREE.LoadingManager()
-        ).then(() => {
-          if (this.state.drillMode === 'HANGAR_BOMB_5V5') {
-            this.placePlayerOnPlayableSpawn(
-              this.hangarLevelData.collider,
-              HANGAR_ATTACKER_SPAWN
-            );
-          }
-        });
-      }
-      this.placePlayerOnPlayableSpawn(
-        this.hangarLevelData.collider,
+      this.ensureGlbMapThenPlace(
+        this.hangarLevelData,
+        () =>
+          loadHangarMapGeometry(
+            this.hangarLevelData,
+            this.isSoftwareGl,
+            new THREE.LoadingManager()
+          ),
+        'HANGAR_BOMB_5V5',
         HANGAR_ATTACKER_SPAWN
       );
       this.yaw = HANGAR_SPAWN_YAW;
@@ -2374,22 +2387,15 @@ export class TacticalFPSEngine {
       this.yardBombSystem.resetRound('HANGAR_BOMB_5V5', keepMatchScore);
       this.state.yardBomb = { ...this.yardBombSystem.info };
     } else if (isEasternCity) {
-      if (!this.easternCityLevelData.isLoaded) {
-        void loadEasternCityMapGeometry(
-          this.easternCityLevelData,
-          this.isSoftwareGl,
-          new THREE.LoadingManager()
-        ).then(() => {
-          if (this.state.drillMode === 'EASTERN_CITY_BOMB_5V5') {
-            this.placePlayerOnPlayableSpawn(
-              this.easternCityLevelData.collider,
-              EASTERN_CITY_ATTACKER_SPAWN
-            );
-          }
-        });
-      }
-      this.placePlayerOnPlayableSpawn(
-        this.easternCityLevelData.collider,
+      this.ensureGlbMapThenPlace(
+        this.easternCityLevelData,
+        () =>
+          loadEasternCityMapGeometry(
+            this.easternCityLevelData,
+            this.isSoftwareGl,
+            new THREE.LoadingManager()
+          ),
+        'EASTERN_CITY_BOMB_5V5',
         EASTERN_CITY_ATTACKER_SPAWN
       );
       this.yaw = EASTERN_CITY_SPAWN_YAW;
@@ -2398,22 +2404,15 @@ export class TacticalFPSEngine {
       this.yardBombSystem.resetRound('EASTERN_CITY_BOMB_5V5', keepMatchScore);
       this.state.yardBomb = { ...this.yardBombSystem.info };
     } else if (isMirageAnubis) {
-      if (!this.mirageAnubisLevelData.isLoaded) {
-        void loadMirageAnubisMapGeometry(
-          this.mirageAnubisLevelData,
-          this.isSoftwareGl,
-          new THREE.LoadingManager()
-        ).then(() => {
-          if (this.state.drillMode === 'MIRAGE_ANUBIS_BOMB_5V5') {
-            this.placePlayerOnPlayableSpawn(
-              this.mirageAnubisLevelData.collider,
-              MIRAGE_ANUBIS_ATTACKER_SPAWN
-            );
-          }
-        });
-      }
-      this.placePlayerOnPlayableSpawn(
-        this.mirageAnubisLevelData.collider,
+      this.ensureGlbMapThenPlace(
+        this.mirageAnubisLevelData,
+        () =>
+          loadMirageAnubisMapGeometry(
+            this.mirageAnubisLevelData,
+            this.isSoftwareGl,
+            new THREE.LoadingManager()
+          ),
+        'MIRAGE_ANUBIS_BOMB_5V5',
         MIRAGE_ANUBIS_ATTACKER_SPAWN
       );
       this.yaw = MIRAGE_ANUBIS_SPAWN_YAW;
@@ -2484,13 +2483,22 @@ export class TacticalFPSEngine {
     });
 
     if (isBombMode && isOnlineMatchActive()) {
+      // Online used to overwrite Dust2-parity place with stale far-field coords
+      // (Eastern z±48, Mirage z=-72) → outside GLB AABB → white void.
+      const activeCol = this.getActiveGlbCollider();
       const onlineSpawn = applyOnlineTeamSpawnToLocalPlayer(
         mode,
         this.playerPos,
-        (x, y, z) => this.getCurrentGroundHeight(x, y, z)
+        (x, y, z) => this.getCurrentGroundHeight(x, y, z),
+        activeCol?.ready
+          ? (hx, hz, hy) => activeCol.findPlayableSpawn(hx, hz, hy)
+          : undefined
       );
       if (onlineSpawn) {
         this.yaw = onlineSpawn.yaw;
+        if (activeCol?.ready) {
+          this.scheduleFloorResnap(this.playerPos.y);
+        }
       }
       hideAllBotsForOnlineMatch(
         this.targets as YardBotEntity[],
@@ -3560,6 +3568,39 @@ export class TacticalFPSEngine {
   }
 
   private emitHud(force = false): void {
+    const mode = this.state.drillMode;
+    const debugModes =
+      mode === 'INDUSTRIA_BOMB_5V5' ||
+      mode === 'HANGAR_BOMB_5V5' ||
+      mode === 'EASTERN_CITY_BOMB_5V5' ||
+      mode === 'MIRAGE_ANUBIS_BOMB_5V5';
+    if (debugModes) {
+      const col = this.getActiveGlbCollider();
+      const wb = col?.worldBounds;
+      this.state.spawnDebug = {
+        mode,
+        xz: `${this.playerPos.x.toFixed(2)}, ${this.playerPos.z.toFixed(2)}`,
+        feetY: Number(this.playerPos.y.toFixed(3)),
+        groundY: col?.ready
+          ? Number(
+              col
+                .getGroundHeight(
+                  this.playerPos.x,
+                  this.playerPos.y + 0.1,
+                  this.playerPos.z
+                )
+                .toFixed(3)
+            )
+          : -999,
+        ready: Boolean(col?.ready),
+        tris: col?.triangleCount ?? 0,
+        aabb: wb && !wb.isEmpty()
+          ? `${wb.min.x.toFixed(0)}..${wb.max.x.toFixed(0)} x ${wb.min.y.toFixed(0)}..${wb.max.y.toFixed(0)} x ${wb.min.z.toFixed(0)}..${wb.max.z.toFixed(0)}`
+          : 'EMPTY',
+      };
+    } else {
+      this.state.spawnDebug = undefined;
+    }
     if (force) this.hudForceEmit.value = true;
     emitHudIfChanged(
       {

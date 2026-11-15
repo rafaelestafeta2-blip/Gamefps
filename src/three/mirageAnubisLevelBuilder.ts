@@ -3,7 +3,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WeaponId } from '../types/game';
 import { Dust2TriangleCollider } from './dust2Collider';
-import { Dust2LevelBundle } from './dust2LevelBuilder';
+import { Dust2LevelBundle, runExclusiveGlbLoad } from './dust2LevelBuilder';
 import { TacticalTargetEntity } from './levelBuilder';
 import { YardBotEntity } from './yardPropsBuilder';
 
@@ -95,11 +95,7 @@ export async function loadMirageAnubisMapGeometry(
   loadingManager: THREE.LoadingManager,
   onByteProgress?: (ratio0to1: number) => void
 ): Promise<void> {
-  if (bundle.isLoaded && bundle.mapGeometryGroup && bundle.collider.ready) {
-    onByteProgress?.(1.0);
-    return;
-  }
-
+  await runExclusiveGlbLoad(bundle, async () => {
   disposeMirageAnubisMapGeometry(bundle);
 
   const dracoLoader = new DRACOLoader(loadingManager);
@@ -198,6 +194,7 @@ export async function loadMirageAnubisMapGeometry(
   } finally {
     dracoLoader.dispose();
   }
+  }, onByteProgress);
 }
 
 export function disposeMirageAnubisMapGeometry(bundle: Dust2LevelBundle): void {
